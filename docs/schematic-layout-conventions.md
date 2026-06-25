@@ -1,6 +1,6 @@
 # 原理图布局约定 (Schematic Layout Conventions)
 
-When an AI agent (via `easyeda-agent`) generates or modifies a schematic, it must follow these conventions. They are derived from EE best practices plus empirical study of real LCEDA / EasyEDA Pro reference designs (see §7).
+When an AI agent (via `easyeda-agent`) generates or modifies a schematic, it must follow these conventions. They are derived from EE best practices plus empirical study of real LCEDA / EasyEDA Pro reference designs (see §7、§8).
 
 ## 0. 坐标系与单位
 
@@ -11,7 +11,7 @@ When an AI agent (via `easyeda-agent`) generates or modifies a schematic, it mus
 
 ## 1. 分区 (Zone Map)
 
-A3 / 类 A3 图纸划成 **3×3 九宫格**。模块按功能落到指定区：
+A3 / 类 A3 图纸划成 **3×3 九宫格**——这是**理想布局**，不是硬规则。模块按功能落到指定区：
 
 ```
 +-----------------------+-----------------------+-----------------------+
@@ -28,13 +28,20 @@ A3 / 类 A3 图纸划成 **3×3 九宫格**。模块按功能落到指定区：
 +-----------------------+-----------------------+-----------------------+
 ```
 
-**Rules of placement**：
+**Rules of placement**（理想 / 软约束）：
 
 - **电源向左**（TL/ML/BL 列）—— 电流从左向右流，符合阅读习惯
 - **MCU 居中**（MC）—— 它是信号的"枢纽"，所有外设朝它收敛
 - **射频/传感器/I/O 向右**（TR/MR/BR 列）—— 时序/数据从 MCU 发散
 - **大模块（pin > 50 或 bbox 一边 > 200）放在角落**（BL/BR/TR）—— 给中部留布线空间
-- **同一功能簇相邻**：晶振紧贴 MCU；去耦电容紧贴 IC 电源 pin（≤ 30 units）；上拉电阻紧贴拉的那个 pin
+- **同一功能簇相邻**：晶振紧贴 MCU；去耦电容紧贴 IC 电源 pin（见 §6）；上拉电阻紧贴拉的那个 pin
+
+**现实偏移 (real-world overrides)**——下面几种情况优先于 3×3 理想：
+
+- **MCU 内集成 RF（ESP32 / nRF / CC 系列）时，MCU 迁移到角落（BL / BR / TL），把 RF pi-network + 天线引到板边**；此时 MC 区只剩 strap 网络（EN / IO0 上拉、RST / BOOT 按键、PSRAM 占位等）。参见 §8 ESP32S3R8N8 案例。
+- **电源链可走横向或纵向**——纵向（沿 TL → ML → BL 左列下行，如 §7 motobox）适合 portrait sheet；横向（沿 TL → TC → TR 顶行右行，如 §8 ESP32 开发板）适合 MCU 占据图纸下半的 landscape sheet。**单一轴向**即可，不要两者混排。
+- **支配性功能簇优先**——先按 bbox 总面积评估每个功能簇，最大簇先占用它最需要的边（如 RF 簇要板边、4G 模块要角落），再把 3×3 套到剩余空间。
+- **自动复位 BJT 对**（CH340 DTR/RTS → Q1/Q2 → EN/IO0）固定坐落于 USB-UART 与 MCU strap pin 之间的过渡带，常跨 MR/BC 边界，不归类为 sensor 也不归类为外设 IC。
 
 ## 2. 模块间距
 
@@ -58,8 +65,10 @@ buffer:
 | 小 IC 之间 (8–16 pin) | 200–280 | 留出 designator 标签空间 |
 | 中 IC 之间 (16–48 pin) | 280–400 | |
 | MCU 邻射频/sensor | 400–600 | 大模块需要旁路空间 |
-| 主 MCU 邻晶振 | 60–120 | **紧贴**，提高时钟完整性 |
-| IC 邻去耦电容 | 20–40 | **极近**，1 个 grid step 内 |
+| 主 MCU 邻晶振 | 60–120 (SHOULD) | **理想紧贴**；MCU 含 RF 时可放宽到 ≤ 500 |
+| IC 邻去耦电容 | 见 §6 分级阈值 | 高速 ≤ 30；一般 ≤ 60 |
+
+> 实测：motobox X1 距 U1 ≈ 384，ESP32S3R8N8 开发板 X1 距 U3 ≈ 437——两份参考都已超出 120 这条线。把 60–120 视为「理想紧贴」，把 ≤ 500 当作「集成 RF 时的退让上限」。
 
 **行间距**（top row → middle row → bottom row）：
 - 短模块（h ≤ 80）间距 200–300
@@ -72,29 +81,38 @@ buffer:
 
 每个 pin **必须有非零长度 wire** 引出（EasyEDA DRC 不认重叠点为连接，见 [skills/easyeda-schematic/SKILL.md](../skills/easyeda-schematic/SKILL.md#easyeda-electrical-rules)）。
 
+> **重要**：自动生成时严禁产出**零长度 wire 占位记录**（如 `{line:[620,60,620,60]}`）——实测 ESP32 reference 中 204 个 wire 里 149 个是这种零长占位，DRC 会逐个报错。Agent 在 emit wire 前必须 assert `(x1,y1) != (x2,y2)`。
+
+下面的「推荐长度」是**经验区间** (median–p90)，不是硬范围。唯一硬规则只有「非零」。
+
 | 用途 | 推荐长度 (units) | 方向 |
 |---|---|---|
-| pin → netflag (Power / GND / NetPort) | 20–40 | 顺着 pin 朝外 |
-| pin → 邻 pin（同行 IC） | ≥ 60 | 直线，y 共线 |
-| pin → 共享网络 net label | 20–60 | 朝标签方向 |
-| pin → 去耦电容 | 20 | 极短，越紧越好 |
+| pin → Power netflag (`+3V3` / `+5V` / `VBAT` …) | 20–40 (median 30) | 顺着 pin 朝**上** |
+| pin → GND netflag | 10–40 (median 20) | 顺着 pin 朝**下** |
+| pin → NetPort (IN/OUT/BI) | 20–60 | 朝外侧 |
+| pin → 共享网络 net label（信号） | 10–90 (median 30, p90 85) | 朝标签方向 |
+| pin → 同行邻 pin（IC pin-to-pin 直连） | 80–100 | 直线，y 共线 |
+| pin → 去耦电容 | 10–20 | 极短，越紧越好 |
+| 任意 wire 段 > 100 | **软警告**——优先改用 net label（见 §3.2） | |
+
+> 实测分布 (ESP32 reference，151 个非零 segment)：median 30、p90 90、p95 100、p99 195、max 215。信号段在 10 (短跳) 和 85 (IC pin → 邻 label) 两处出现明显聚类——这些都是结构性长度，不要强压到 20–60。
 
 ### 3.2 直角约定 (right-angle routing)
 
 - **所有 wire 走水平或竖直**，不出现斜线（45°、任意角度均不允许）
 - 拐弯用**一段水平 + 一段竖直**两段 wire（或单 wire 多 endpoint：`[x1,y1, x2,y1, x2,y2]`）
 - 不允许"T 形" 三线交点未显式标 junction
-- 长 wire 拐两次以上 → 考虑用 net label 代替（同名 label 表示同一网络，避免视觉缠绕）
+- 长 wire 拐两次以上 **或** 单段 > 100 units → 改用 net label 代替（同名 label 表示同一网络，避免视觉缠绕）
 
 ### 3.3 电源/接地特殊约定
 
 | | 方向 | 推荐长度 | netflag kind |
 |---|---|---|---|
-| `+3V3` / `+5V` / `VBAT` | netflag 朝**上** (rotation 0 或 90) | pin → netflag 20–40 | `power` |
-| `GND` / `AGND` | netflag 朝**下** (rotation 180 或 270) | pin → netflag 20–40 | `ground` |
+| `+3V3` / `3V3` / `+5V` / `VBAT` / `VDD_*` | netflag 朝**上** (rotation 0 或 90) | pin → netflag 20–40 | `power` |
+| `GND` / `AGND` | netflag 朝**下** (rotation 180 或 270) | pin → netflag 10–40 | `ground` |
 | `IN/OUT` 端口 | 朝外侧 (rotation 0/180) | pin → netflag 20–60 | `net_port_in/out/bi` |
 
-电源/地的 netflag **绝不**与 pin 同坐标——必须用 wire 引出一段。
+电源/地的 netflag **绝不**与 pin 同坐标——必须用 wire 引出一段（即使只有 10 units 也行）。
 
 ### 3.4 线宽
 
@@ -109,11 +127,22 @@ EasyEDA 默认 lineWidth = 1。约定：
 
 | 类型 | 风格 | 例 |
 |---|---|---|
-| 电源 net | `+大写带正负号` | `+3V3`, `+5V`, `+12V`, `-5V` |
-| 模拟地 / 数字地 | 大写 | `GND`, `AGND`, `DGND`, `PGND` |
-| 数字信号 | `MODULE_FUNC` 大写下划线 | `UART_TX`, `SPI_MOSI`, `I2C_SDA`, `LED_R` |
+| 电源 net（带极性 / 多电压） | `+大写带正负号` | `+5V`, `+12V`, `-5V` |
+| 主数字 3.3 V 轨 | 可省 `+` | `+3V3` **或** `3V3`（见下） |
+| 外设域电源 | `VDD_<peripheral>` | `VDD_SPI`, `VDDA`, `VDD3P3_RTC` |
+| 模拟地 / 数字地 | 大写 | `GND`（默认单一地），仅在确有需要时拆 `AGND`/`DGND`/`PGND` |
+| 数字信号（功能命名） | `MODULE_FUNC` 大写下划线 | `UART_TX`, `SPI_MOSI`, `I2C_SDA`, `LED_R` |
+| 数字信号（直出芯片 pin） | 沿用 datasheet pin name | `SPIHD`, `SPIWP`, `SPICLK`, `SPICS0`, `CHIP_PU`, `XTAL_P`, `XTAL_N` |
+| MCU GPIO 头排引出 | `GPIO<N>` | `GPIO0`, `GPIO48` |
+| USB 差分对 | 后缀 `+/-` | `USB_D+`, `USB_D-`；Hub 下游口 `D3+`, `D3-`, `D4+`, `D4-` |
 | 总线 | `BASE[N..0]` | `DATA[7..0]`, `ADDR[15..0]` |
-| 复位 / 中断 | `nRESET`, `nINT`，前缀小 n 表示低有效 | `nRESET`, `nINT_IMU` |
+| 复位 / 中断（低有效） | `n` 前缀 | `nRESET`, `nINT_IMU`（注：ESP32 的 `CHIP_PU` 是高有效，**不**加 `n`） |
+
+**电源命名细则**：
+- `+5V` / `+12V` / `-5V` **保留 `+`/`-`**（极性 / 区分必需）。
+- `+3V3` 与 `3V3` 在 Espressif 参考设计里混用——主数字 3.3 V 轨可任选其一。**新设计推荐 `+3V3` 保持一致**；从 Espressif block 导入时保留原 `3V3` 即可，不强制改名。
+- 单板优先使用单一 `GND`；只有真有模拟前端 / 开关电源回流时才拆 `AGND`/`PGND`。不要仅为「命名整洁」引入 `DGND`。
+- 直接把芯片 pin 引出到 header / 测试点而**无功能重命名**时，net 名沿用 datasheet pin name（`SPIHD`、`GPIO0` 等），**优先于**再造一个 `SPI_HOLD` 别名。
 
 ## 5. Designator 前缀
 
@@ -133,18 +162,30 @@ EasyEDA 默认 lineWidth = 1。约定：
 
 LED 也可用 `LED1` 这种语义化命名（兼容 `D1`），EasyEDA 不强制 `D` 前缀。
 
+**对参考设计中的语义化 designator 宽容处理**：EasyEDA / Espressif 的 reference 经常出现 `PWR`（电源指示 LED）、`BOOT` / `RST`（用户按键）这种「一眼能看出用途」的命名。**导入时容忍保留**；但 **agent 自动生成新元件时仍按 §5 前缀**（按键 → `SW1` / `K1`、LED → `LED1` / `D1`）。
+
 ## 6. 去耦电容 (decoupling) 规则
 
-每个数字 IC、模拟 IC、模块的 **VCC pin** 都应有：
-- **0.1 μF (100 nF) 陶瓷电容** ≤ 30 units 处旁路到 GND（高频）
-- 若模块电流大（> 50 mA），并联 **10 μF 钽/陶电容**（低频/储能）
-- 多个 VCC pin 的大芯片（如 ESP32-S3 有 3 个 VDDA/VDD3P3）：**每个 pin 都要一个 0.1 μF**
+每个数字 IC、模拟 IC、模块的 **VCC pin** 都应有去耦电容旁路到 GND。距离按**分级阈值**给出（pin XY → cap 中心 manhattan 距离）：
 
-由 Skill 自动布线时，去耦电容应在元件 `place` 后立刻 place 在其 VCC pin 旁。
+| 电源 pin 类别 | SHOULD ≤ | MUST ≤ |
+|---|---|---|
+| 高速 / RF / ADC 电源（`VDD_SPI`, `VDDA`, RF 模块 `VDD3P3`） | **30 units** | 60 units |
+| 一般数字电源（`VCC`, `VDD3P3_CPU`, 普通 `VDD`） | **60 units** | 120 units |
+| 储能 / bulk（10 μF 钽 / 陶） | 200 units | — |
 
-## 7. 真实参考：motobox2026 (motorcycle tracker)
+**电容选型**：
+- 高频去耦 = **0.1 μF (100 nF) 陶瓷**，**每个 VCC pin 一个**。
+- 模块电流 > 50 mA 时并联 **10 μF 钽 / 陶**（低频 / 储能），按 IC 而非按 pin 配置即可。
+- 多 VCC pin 的大芯片（ESP32-S3 有 VDDA×2 + VDD3P3_CPU + VDD_SPI + VDD3P3_RTC + VDD3P3×2 = 7 路）：**每路一只 0.1 μF**——实测 §8 reference 只配齐了 2 个，属于**已知欠去耦**。
 
-15 个 part，2400 × 1600 grid 范围（采集自 connector 实测）：
+由 Skill 自动布线时，去耦电容应在元件 `place` 后立刻 place 在其 VCC pin 旁，按上表分级选择目标距离。
+
+> 阈值依据：ESP32 reference 9 个 big-IC VCC pin 的最近 cap 距离排序为 `[30, 50, 95, 105, 105, 165, 200, 215, 225]`，median 105。旧规则「≤30 units」对应 11% 达成率，明显不合实际；新分级让一般数字电源 SHOULD（≤60）达成率提升到 22%，MUST（≤120）覆盖 56%，同时保留高速 pin 的严格要求。
+
+## 7. 真实参考 A：motobox2026 (motorcycle tracker)
+
+15 个 part，2400 × 1600 grid 范围（采集自 connector 实测）。**这是「贴近 3×3 理想」的代表**：MCU 在 MC 区附近、电源链纵向、4G 大模块占 BR 角。
 
 | Designator | 元件 | 类别 | 坐标 (x, y) | bbox (W × H) | pin |
 |---|---|---|---|---|---|
@@ -165,27 +206,53 @@ LED 也可用 `LED1` 这种语义化命名（兼容 `D1`），EasyEDA 不强制 
 | LED1 | 0603 White | 状态指示 (TR/MR) | (1320, 485) | 40 × ? | 2 |
 
 **观察结论**：
-- **电源链 (TPS54360 → BQ24074 → JW5033 → SY8089)** 从左到右排在上排 y=110-175。符合"电源向左+电流向右流"。
+- **电源链 (TPS54360 → BQ24074 → JW5033 → SY8089)** 从左到右排在上排 y=110–175。符合"电源向左+电流向右流"。
 - **主 MCU U1 在中右** (1385, 210)，靠近右排射频/sensor（U6 GNSS, U7 IMU）。
 - **大模块 U9 Air780EG (180×540, 109 pin)** 占 BR 角，独立成块。
 - **USB-C 接口 J2 + USB Hub U10 + USB-UART U11** 形成 USB 子系统集中在 BC/BL 中下区。
 - **晶振 X1 (1110, 490) 距 U1 中心 ≈ 384 units**——稍远，可优化到 200 内。
-- 行间距 = top 行 (y~115-175) → 下行 (y~485-540) ≈ 320-360 units。
+- 行间距 = top 行 (y~115–175) → 下行 (y~485–540) ≈ 320–360 units。
 
-## 8. 自动化布局的执行步骤
+## 8. 真实参考 B：ESP32S3R8N8 开发板
+
+53 个 part，~1400 × 1100 grid 范围。**这是「3×3 让位给 RF 与开发板形态」的代表**：MCU 在 BL 角而非 MC、电源链横向而非纵向、TR 区完全空缺、MR 区被 2×20 pin header + auto-reset BJT 占据。
+
+| 区 | 矩形 (x..x × y..y) | 主要模块 | 与 §1 对比 |
+|---|---|---|---|
+| **TL** | 60..435 × 60..255 | U2 USB-C + R18/R19 CC 5.1k + C46/C52 + TP1/TP2 | 符合「输入电源」 |
+| **TC** | 435..910 × 60..465 | U6 ME6217 3V3 LDO + U5 BY25Q64 SPI flash + BOOT 键 + PWR LED + C51/C53 | LDO 上移到 TC，§1 期望在 ML |
+| **TR** | x>957, y<397 | **空** | §1 期望状态 LED / debug header；此处状态 LED 跑到了 ML |
+| **MC** | 850..985 × 340..480 | U4 PSRAM 占位 + RST 按键 + R14/R15 EN/IO0 上拉 + 启动 strap | **不含 MCU**——只有 strap 网络 |
+| **ML** | 60..260 × 415..640 | X1 40 MHz 主晶振 + LED1 状态灯 + C33/C34 10 pF 负载 | §1 期望 LDO；这里成了「晶振 + 状态灯」拼区 |
+| **MR** | 930..1405 × 420..760 | J1, J2 (1×20 pin header) + Q1, Q2 (MMBT3904 自动复位) | §1 期望 RF/sensor；开发板用 header + auto-reset 替代 |
+| **BL** | 60..655 × 705..1070 | **U3 ESP32-S3 (170×290, 57 pin)** + U25 天线 + L4/L6/L7/L8 RF pi-network + C19~C23/C47/C50 去耦 | **MCU + RF 占据整个 BL，并外溢到 BC**——§1 期望 MCU 在 MC |
+| **BC** | (与 BL 接壤) | RF pi-network 与天线延伸 | — |
+| **BR** | 930..1405 × 770..1070 | U24 CH340K USB-UART + U16 CH334F USB Hub + X2 24 MHz | 符合「I/O 连接器 / 大模块」 |
+
+**关键观察**：
+
+1. **MCU 不在 MC**：U3 ESP32-S3 (170×290 bbox，最大 IC) 与 RF pi-network + 天线一起占据 BL 角，把天线 pad 推到板边。MC 区只剩 strap 网络（EN/IO0 上拉、RST/BOOT 键、PSRAM 占位）——印证 §1「MCU 含 RF 时迁移到角落」。
+2. **电源链横向而非纵向**：USB-C 在 TL → 3.3 V LDO 在 TC → 调压输出沿顶行 (y=60–465) 横向扩散，**完全不走左列**。配合 MCU 占用整个板下半，这是 landscape sheet 的典型选择。
+3. **晶振远离 MCU**：X1 (185, 445) 距 U3 (365, 855) 中心距 ≈ 437 units，**违反 §2 「60–120」理想紧贴**——但在工作的 reference 上稳定存在，因此 §2 已把 60–120 标为 SHOULD，并允许集成 RF 时放宽到 ≤ 500。
+4. **TR 区完全空（0 part）**：本应放的状态 LED 跑到 ML，调试用的 BOOT/RST 键塞在 TC/MC 边界。开发板形态下 TR 容易整片闲置，不要硬填。
+5. **MR 不是 RF 也不是 sensor**：2×20 pin 排针 (J1/J2) + 自动复位 BJT 对 (Q1/Q2 + R16/R17 base 限流) 占据 MR。CH340 DTR/RTS → Q1/Q2 → EN/IO0 的过渡电路天然横跨 USB-UART (BR) 与 MCU strap (MC)，不归 sensor 也不归外设 IC。
+6. **去耦欠配**：U3 有 7 个 VCC pin，但只有 C23 (距 VDD_SPI 30) 与 C54 在「local」范围内，其余 5 路 VCC 距最近 cap ≥ 95 units。这是 reference 自身的设计弱点，**不要把它当 baseline 抄**——按 §6 分级阈值生成时仍应给每个 VCC pin 配 0.1 μF。
+
+## 9. 自动化布局的执行步骤
 
 当 Skill / Agent 自动放元件时：
 
-1. **分类**：每个待放元件按 `symbolName` / `Manufacturer Part` 模糊匹配到分类 → 落到 §1 九宫格的某区
-2. **排序**：同区内按"上游 → 下游"信号流向排（电源链：输入 → 转换 → 输出；信号链：sensor → MCU → 外设）
-3. **下笔**：从区中心格点开始，按 §2 间距规则放邻居。优先填 x 方向，超过区宽就换 y
-4. **布线**：每个 pin 用 §3 短桩规则引出。电源 pin → netflag (power, 朝上)，地 pin → netflag (ground, 朝下)
-5. **去耦**：每个 IC 的 VCC pin 30 units 内 place 0.1μF
-6. **验证**：跑 `schematic.drc.check`，违规返回参考区/间距规则定位修复
+1. **分类 + 簇面积评估**：每个待放元件按 `symbolName` / `Manufacturer Part` 模糊匹配到分类 → 落到 §1 九宫格的某区。**同时累加每个功能簇的 bbox 总面积**——最大簇（如 ESP32+RF+decap+天线）**优先分配它需要的板边**（RF → 板边角落），再把 3×3 套到剩余空间。MCU 是否含 RF 决定它走 MC 还是走角落。
+2. **排序**：同区内按"上游 → 下游"信号流向排（电源链：输入 → 转换 → 输出；信号链：sensor → MCU → 外设）。电源链选定**一根轴**（纵向 TL→ML→BL 或横向 TL→TC→TR），不要两者混排。
+3. **下笔**：从区中心格点开始，按 §2 间距规则放邻居。优先填 x 方向，超过区宽就换 y。
+4. **布线**：每个 pin 用 §3 短桩规则引出。电源 pin → netflag (power, 朝上)，地 pin → netflag (ground, 朝下)。**禁止 emit 零长 wire**。
+5. **去耦**：每个 IC 的 VCC pin 按 §6 分级阈值 place 0.1 μF——高速 / RF / ADC 走 SHOULD ≤30，一般数字电源走 SHOULD ≤60 / MUST ≤120。
+6. **验证**：跑 `schematic.drc.check`，违规返回参考区/间距规则定位修复。
 
-## 9. 边界与开放问题
+## 10. 边界与开放问题
 
 - 这是 **schematic** 约定，不是 PCB 约定。PCB layout 另有独立约定（trace 宽度、layer 用途、impedance）。
 - 对超大模块（pin > 100），九宫格容纳能力有限，可能要分多页（用 `schematic.pages.list` + `schematic.page.open`）。
 - 多页之间通过 `net_port` (`createNetPort('IN/OUT/BI')`) 在页间建立电气连接，net 名称相同视为同网。
 - `getCurrentRenderedAreaImage` 返回的是当前 viewport 的截图，不是全图——大图需要 `dmt_EditorControl.openDocument` + `sch_Document.navigateToRegion` 控制视野后再 snapshot。
+- 目前两份 reference（§7 motobox、§8 ESP32S3R8N8）覆盖了「贴近 3×3 理想」与「RF MCU 占角 + 横向电源链」两种典型。若再采集到第三种（例如纯模拟前端、或多电源域工控板），应继续补充以避免 agent 过拟合到单一案例。
