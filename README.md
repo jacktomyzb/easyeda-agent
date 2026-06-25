@@ -1,6 +1,14 @@
-# easyeda-agent
+<p align="center">
+  <img src="docs/assets/easyeda-agent-logo.png" width="96" alt="easyeda-agent logo" />
+</p>
 
-AI-native automation layer for EasyEDA.
+<h1 align="center">easyeda-agent</h1>
+
+<p align="center">
+  AI-native automation layer for EasyEDA.
+</p>
+
+![easyeda-agent architecture](docs/assets/easyeda-agent-hero.png)
 
 `easyeda-agent` turns the official EasyEDA extension API into a typed, observable, Skill-friendly system. The EasyEDA plugin stays thin: it connects to the local agent and executes approved actions. The Go CLI/daemon owns protocol, state, artifacts, validation, and user-facing workflows.
 

@@ -16,8 +16,11 @@ import (
 )
 
 // dispatchTimeout bounds how long the daemon waits for a connector to answer a
-// forwarded action.
-const dispatchTimeout = 15 * time.Second
+// forwarded action. Heavy reads on real schematics (full netlist extraction,
+// BOM generation, multi-page snapshot) routinely take 20-40s, so the cap is
+// generous; the connector still keeps its own ping/pong liveness, and HTTP
+// callers can layer their own shorter timeouts on top.
+const dispatchTimeout = 60 * time.Second
 
 // knownActions is the set of Phase 1 action names the daemon will accept.
 var knownActions = func() map[string]bool {

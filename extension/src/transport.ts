@@ -34,8 +34,11 @@ const PORT_START = 49620;
 const PORT_END = 49629;
 const RETRY_DELAY_MS = 3000;
 const MAX_RETRIES = 5;
-const HEARTBEAT_INTERVAL_MS = 15000;
-const HEARTBEAT_TIMEOUT_MS = 5000;
+// EasyEDA's eda.sys_WebSocket closes idle connections after ~5s of silence.
+// Ping more often than that to keep the socket alive between actions, which
+// otherwise causes a register -> 5s silence -> close -> reconnect storm.
+const HEARTBEAT_INTERVAL_MS = 3000;
+const HEARTBEAT_TIMEOUT_MS = 2000;
 const CONNECTION_TIMEOUT_MS = 1500;
 const STORAGE_KEY_AUTO_CONNECT = 'autoConnectEnabled';
 
