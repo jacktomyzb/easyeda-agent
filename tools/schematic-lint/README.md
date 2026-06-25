@@ -66,11 +66,15 @@ a bug. Two guards keep verdicts honest (run `make lint-test` or
    facts in [actions.ts](../../extension/src/actions.ts) (`ROTATION_CYCLE` +
    `BODY_ANCHOR_AT_ROT0`) must equal the spec — so the Python check and the TS
    writer can't silently diverge (a drift = connect_pin writes a rotation the
-   linter then flags wrong). To re-validate the anchors against *live* ground
-   truth, run [`calibrate.js`](calibrate.js) via `debug.exec_js` against a
-   connected window — it creates a flag at each rotation, reads the body
-   direction from the bbox-center offset, and compares
-   to `orientation.json` (do this after importing a new `.eext`).
+   linter then flags wrong). To re-validate against *live* ground truth, run
+   [`calibrate.js`](calibrate.js) (READ-ONLY) via `debug.exec_js` against a
+   connected window: for every real placed flag it checks the body points
+   opposite its wire (顺着导线) and that `(family, body) → rotation` matches
+   `orientation.json`. A real, correctly-oriented flag whose rotation disagrees
+   is a rule-bug signal. (Do NOT validate by *creating* a flag and reading its
+   bbox immediately — a freshly-created isolated flag's bbox flips horizontally
+   vs a settled on-canvas one; only real, wired, rendered flags are ground truth.
+   Verified on the ceshi board: all 10 power/ground flags agree with the table.)
 2. **Fixture goldens** — every layout under `tests/fixtures/` is linted and
    diffed against `tests/golden/`. `clean_board.json` MUST stay clean (the
    false-positive net); each bad fixture MUST still fire its rule. After an
