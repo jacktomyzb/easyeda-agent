@@ -1,0 +1,51 @@
+package protocol
+
+import "time"
+
+type Envelope struct {
+	ID        string    `json:"id"`
+	Type      string    `json:"type"`
+	Version   string    `json:"version"`
+	WindowID  string    `json:"windowId,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type Request struct {
+	Envelope
+	Action  string         `json:"action"`
+	Payload map[string]any `json:"payload,omitempty"`
+}
+
+type Response struct {
+	Envelope
+	OK        bool           `json:"ok"`
+	Result    map[string]any `json:"result,omitempty"`
+	Context   *Context       `json:"context,omitempty"`
+	Artifacts []Artifact     `json:"artifacts,omitempty"`
+	Warnings  []string       `json:"warnings,omitempty"`
+	Error     *ErrorInfo     `json:"error,omitempty"`
+}
+
+type Context struct {
+	ProjectUUID  string `json:"projectUuid,omitempty"`
+	ProjectName  string `json:"projectName,omitempty"`
+	DocumentUUID string `json:"documentUuid,omitempty"`
+	DocumentType string `json:"documentType,omitempty"`
+	TabID        string `json:"tabId,omitempty"`
+	Unit         string `json:"unit,omitempty"`
+}
+
+type Artifact struct {
+	ID       string `json:"id"`
+	Kind     string `json:"kind"`
+	Path     string `json:"path,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	Size     int64  `json:"size,omitempty"`
+	SHA256   string `json:"sha256,omitempty"`
+}
+
+type ErrorInfo struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Detail  string `json:"detail,omitempty"`
+}
