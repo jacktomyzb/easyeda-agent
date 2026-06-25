@@ -27,6 +27,10 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		s.logf("connector accept failed from %s: %v", r.RemoteAddr, err)
 		return
 	}
+	// Snapshots and netlist/BOM artifacts are inlined as base64 in response
+	// frames and routinely exceed coder/websocket's 32 KiB default read limit.
+	// 32 MiB comfortably covers schematic PNGs and large BOM/netlist files.
+	ws.SetReadLimit(32 << 20)
 	s.logf("connector connected from %s", r.RemoteAddr)
 
 	// Reads use the daemon's connection context so shutdown unblocks the loop.
