@@ -62,29 +62,36 @@ npm run build          # compile + package → build/dist/easyeda-agent-connecto
 
 Node >= 20.17.0 is required.
 
-### Versioning — required to re-import
+### Re-importing new connector code
 
-Bump the version before handing over a new `.eext` (a same-version re-import may
-be a no-op). The **reliable** path is: **uninstall the old version in EasyEDA's
-Extension manager, then import the new `.eext`** — that always works regardless
-of patch/minor.
+EasyEDA local `.eext` import is **install-only per UUID**. Once a UUID is
+installed you cannot re-import a newer build with the same UUID, and a stuck one
+can fail to uninstall ("无法卸载 + 装不上"). **Most code changes don't need a
+re-import at all — use the `debug.exec_js` escape hatch.** Only manifest /
+typed-handler changes require a rebuild; for those:
+
+1. Stop the connector (kill the daemon so it disconnects), then **uninstall** the
+   old version and import the new `.eext` — the clean path, when uninstall works.
+2. If it won't uninstall, ship a **fresh UUID** (installs as a brand-new
+   extension, bypassing the conflict), then fully restart EasyEDA to clear the
+   old stuck one:
+   ```bash
+   node -e "console.log(crypto.randomUUID().replaceAll('-',''))"   # → extension.json "uuid"
+   npm run release   # bump + typecheck + build
+   ```
 
 ```bash
-# from the repo root — bump patch + typecheck + build a fresh importable .eext:
-make eext
-
-# or, from extension/, with explicit level:
-npm run release         # bump patch + typecheck + build  (use this to ship)
-npm run bump minor      # 0.4.x -> 0.5.0
-npm run bump            # 0.4.0 -> 0.4.1
+make eext            # bump patch + typecheck + build a fresh .eext
+npm run bump minor   # 0.4.x -> 0.5.0
 ```
 
 `scripts/bump.mjs` keeps `extension.json` and `package.json` in lock-step.
 
-> An earlier note here claimed "patch bumps don't trigger an update, use minor."
-> That was a misdiagnosis: `0.3.0` failing to install was a **packaging** defect
-> (logo shipped as PNG; the proven upstream uses `images/logo.jpg`), not the
-> version scheme. Keep the package clean (see `.edaignore`) and the logo as JPG.
+> Proven root cause (2026-06): `0.4.0` (old uuid) wouldn't install; `0.4.1`,
+> byte-identical except a **fresh UUID**, installed instantly. Earlier theories —
+> "patch vs minor version", "PNG vs JPG logo", "scripts/ in the zip" — were all
+> **wrong**; the only blocker was the same-UUID conflict. (JPG logo + clean
+> package via `.edaignore` are still good hygiene, just not the cause.)
 
 ---
 

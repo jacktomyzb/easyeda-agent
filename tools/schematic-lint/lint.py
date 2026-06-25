@@ -4,7 +4,9 @@ import json, sys
 from collections import defaultdict, Counter
 import orient
 
-data = json.load(open(sys.argv[1]))
+_args = [a for a in sys.argv[1:] if not a.startswith('--')]
+JSON_OUT = '--json' in sys.argv[1:]   # structured findings for diff.py; text otherwise
+data = json.load(open(_args[0]))
 parts  = [p for p in data['parts'] if p.get('type') == 'part']
 sheets = [p for p in data['parts'] if p.get('type') == 'sheet']
 flags  = data['flags']
@@ -170,7 +172,6 @@ for root, m in net_members.items():
     if len(pins) >= 2 and not fset:
         problems['unnamed_net'].append(f"网络 {{{', '.join(sorted(pins))}}} 多引脚但无命名标识（建议加 net label / 电源地）")
 
-print(f"== 概览 ==  parts={len(parts)} flags={len(flags)} wires={len(wires)} sheets={len(sheets)} nets≈{len([m for m in net_members.values() if m['pins'] or m['flags']])}")
 order = ['flag_on_pin','zero_wire','dangling_wire','floating_pin','single_pin_net',
          'flag_no_wire','orientation','bbox_overlap','dup_designator','netport_hop',
          'collinear_flags','unnamed_net','off_grid']
@@ -183,11 +184,21 @@ labels = {
   'collinear_flags':'🟡 异网标识共线穿元件','unnamed_net':'🔵 多引脚网络未命名',
   'off_grid':'🔵 不在 5 网格',
 }
-total = sum(len(problems[k]) for k in order)
-if total == 0:
-    print("\n✅ 无问题")
-for k in order:
-    if problems[k]:
-        print(f"\n{labels[k]} ({len(problems[k])}):")
-        for line in problems[k]:
-            print(f"  - {line}")
+# Structured findings — (rule, msg) is a stable identity for diff.py: the same
+# problem yields the same deterministic msg across runs.
+findings = [{'rule': k, 'label': labels[k], 'msg': m} for k in order for m in problems[k]]
+summary = {'parts': len(parts), 'flags': len(flags), 'wires': len(wires), 'sheets': len(sheets),
+           'nets': len([m for m in net_members.values() if m['pins'] or m['flags']]),
+           'problems': len(findings)}
+
+if JSON_OUT:
+    print(json.dumps({'summary': summary, 'findings': findings}, ensure_ascii=False))
+else:
+    print(f"== 概览 ==  parts={summary['parts']} flags={summary['flags']} wires={summary['wires']} sheets={summary['sheets']} nets≈{summary['nets']}")
+    if not findings:
+        print("\n✅ 无问题")
+    for k in order:
+        if problems[k]:
+            print(f"\n{labels[k]} ({len(problems[k])}):")
+            for line in problems[k]:
+                print(f"  - {line}")

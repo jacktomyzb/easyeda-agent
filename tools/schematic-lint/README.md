@@ -6,9 +6,13 @@ layout (≈600ms even for a 53-part board); everything else is local analysis.
 
 ```bash
 make build
-bin/easyeda daemon &                 # connector must be connected
-tools/schematic-lint/lint.sh ceshi   # project name (default: ceshi)
+bin/easyeda daemon &                  # connector must be connected
+tools/schematic-lint/lint.sh ceshi          # full lint (or DIFF if a baseline exists)
+tools/schematic-lint/lint.sh ceshi --save   # full lint + record current as baseline
+tools/schematic-lint/lint.sh ceshi --all    # force a full global report
 ```
+
+After `--save`, later runs show only what changed (see **Diff-aware lint** below).
 
 ## Why data, not screenshots
 
@@ -58,11 +62,14 @@ a bug. Two guards keep verdicts honest (run `make lint-test` or
 `python3 tools/schematic-lint/tests/run.py`):
 
 1. **Orientation consistency** — `orientation.json` must derive back to its own
-   `frozenTable`, and the +90° cycle law must hold. This is what stops the
-   Python check and the TS writer from silently diverging. To re-validate the
-   anchors against *live* ground truth, run [`calibrate.js`](calibrate.js) via
-   `debug.exec_js` against a connected window — it creates a flag at each
-   rotation, reads the body direction from the bbox-center offset, and compares
+   `frozenTable`, the +90° cycle law must hold, AND the connector's hand-written
+   facts in [actions.ts](../../extension/src/actions.ts) (`ROTATION_CYCLE` +
+   `BODY_ANCHOR_AT_ROT0`) must equal the spec — so the Python check and the TS
+   writer can't silently diverge (a drift = connect_pin writes a rotation the
+   linter then flags wrong). To re-validate the anchors against *live* ground
+   truth, run [`calibrate.js`](calibrate.js) via `debug.exec_js` against a
+   connected window — it creates a flag at each rotation, reads the body
+   direction from the bbox-center offset, and compares
    to `orientation.json` (do this after importing a new `.eext`).
 2. **Fixture goldens** — every layout under `tests/fixtures/` is linted and
    diffed against `tests/golden/`. `clean_board.json` MUST stay clean (the
@@ -75,11 +82,40 @@ a bug. Two guards keep verdicts honest (run `make lint-test` or
 > a flag's body direction with `sch_Primitive.getPrimitivesBBox([pid])` — the bbox
 > center's offset from the placement point is the body direction (pure data).
 
+## Diff-aware lint (只看变更)
+
+After `--save` records a baseline, the next `lint.sh` run diffs the fresh layout
+against it and buckets every finding:
+
+- **🔴 NEW** — problems this edit introduced. The only thing you must look at.
+- **✅ FIXED** — problems this edit removed. Confirmation your change worked.
+- **🔵 PRE-EXISTING** — untouched problems that were already there. Folded by
+  default (`--all` to list them) — this is the "没动过的地方不用看" part.
+
+It also lists the **changed primitives** (added / removed / moved / rotated /
+rewired, by `PrimitiveId`) so you know which regions to eyeball. `diff.py` exits
+non-zero when the edit introduced a NEW problem (handy in scripts).
+
+**Why we don't skip rules by region.** Connectivity is global — a wire added in
+one corner can merge two nets across the page, so "this primitive didn't change"
+≠ "its verdict didn't change". We therefore always run *all* rules on the *full*
+board (lint.py is ~milliseconds even on 53 parts) and diff the **output**. The
+speed-up is for your attention, not the linter's CPU. `--all` forces the full
+ungrouped report any time.
+
+**Baseline store + git.** Snapshots live in
+`${EASYEDA_LINT_DIR:-~/.easyeda-agent/lint}/<project>/` (next to the daemon's
+audit log). The schematic lives in EasyEDA's webview, not on disk, so we version
+the *layout snapshot*: every `--save` writes `snapshot.json` plus a timestamped
+`history/` copy, and — if you ran `lint.sh <project> --init-git` once — commits
+it, giving you `git log` / `git blame` over the schematic's state over time.
+
 ## Files
 
 - `probe.js` — the one-shot data pull (runs via `debug.exec_js`)
-- `lint.py` — the analyzer (`lint.py <layout.json>`)
-- `lint.sh` — resolves the live window, pulls, and lints
+- `diff.py` — baseline-vs-current diff (NEW / FIXED / PRE-EXISTING + changed primitives)
+- `lint.py` — the analyzer (`lint.py <layout.json> [--json]`)
+- `lint.sh` — resolves the live window, pulls, and lints/diffs/saves the baseline
 - `orientation.json` — canonical orientation facts (single source of truth)
 - `orient.py` — derives the body-rotation table from the spec
 - `calibrate.js` — live bbox ground-truth check for the orientation anchors
