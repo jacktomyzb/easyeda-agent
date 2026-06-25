@@ -26,6 +26,10 @@ type Options struct {
 	// ArtifactDir is where inline artifact bytes from the connector are written.
 	// Defaults to "artifacts" (relative to the working directory) when empty.
 	ArtifactDir string
+
+	// AuditDir is where per-day JSONL action logs are appended. Defaults to
+	// ~/.easyeda-agent/audit/ when empty.
+	AuditDir string
 }
 
 // Server is the long-running local HTTP server. It serves /health, accepts
@@ -36,6 +40,7 @@ type Server struct {
 	hub    *hub
 	reqSeq atomic.Uint64
 	log    io.Writer
+	audit  *auditWriter
 
 	// connCtx is cancelled on shutdown so connector read loops unblock.
 	connCtx    context.Context
@@ -52,8 +57,9 @@ func (s *Server) logf(format string, args ...any) {
 // New builds a Server. It does not bind a port until Run is called.
 func New(opts Options) *Server {
 	return &Server{
-		opts: opts,
-		hub:  newHub(),
+		opts:  opts,
+		hub:   newHub(),
+		audit: newAuditWriter(opts.AuditDir),
 	}
 }
 

@@ -62,17 +62,23 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 
 	// system.health is answered by the daemon itself; it needs no connector.
 	if req.Action == "system.health" {
-		writeJSON(w, http.StatusOK, s.systemHealthResponse(req.ID))
+		started := time.Now().UTC()
+		resp := s.systemHealthResponse(req.ID)
+		s.audit.Append(fromResponse(started, &req, &resp))
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
 	target, ok := s.hub.target(req.WindowID)
 	if !ok {
+		started := time.Now().UTC()
 		detail := "start EasyEDA with the connector extension, then retry"
 		if req.WindowID != "" {
 			detail = fmt.Sprintf("no connector registered for window %q", req.WindowID)
 		}
-		writeJSON(w, http.StatusServiceUnavailable, errorResponse(req.ID, "NO_CONNECTOR", "no EasyEDA connector is available", detail))
+		errResp := errorResponse(req.ID, "NO_CONNECTOR", "no EasyEDA connector is available", detail)
+		s.audit.Append(fromResponse(started, &req, &errResp))
+		writeJSON(w, http.StatusServiceUnavailable, errResp)
 		return
 	}
 
@@ -86,9 +92,12 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), dispatchTimeout)
 	defer cancel()
 
+	started := time.Now().UTC()
 	resp, err := target.dispatch(ctx, req)
 	if err != nil {
-		writeJSON(w, http.StatusGatewayTimeout, errorResponse(req.ID, "DISPATCH_FAILED", "connector did not respond", err.Error()))
+		errResp := errorResponse(req.ID, "DISPATCH_FAILED", "connector did not respond", err.Error())
+		s.audit.Append(fromResponse(started, &req, &errResp))
+		writeJSON(w, http.StatusGatewayTimeout, errResp)
 		return
 	}
 	// The connector echoes id/version/ok/result/context/artifacts but does not
@@ -100,6 +109,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		resp.Type = protocol.TypeResponse
 	}
 	s.persistArtifacts(resp)
+	s.audit.Append(fromResponse(started, &req, resp))
 	writeJSON(w, http.StatusOK, resp)
 }
 

@@ -49,6 +49,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runDaemon(args[1:], stdout, stderr)
 	case "call":
 		return runCall(args[1:], stdout, stderr)
+	case "audit":
+		return runAudit(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
 		printUsage(stderr)
@@ -66,6 +68,7 @@ Usage:
   easyeda health [--host 127.0.0.1] [--ports 49620-49629]
   easyeda daemon [--host 127.0.0.1] [--ports 49620-49629]
   easyeda call <action> [--window id] [--payload '{...}'] [--host 127.0.0.1] [--ports 49620-49629]
+  easyeda audit tail [-n N] [--dir <dir>]   show recent dispatches from the JSONL log
 
 `, version.Name)
 }
