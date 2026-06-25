@@ -133,6 +133,17 @@ func Phase1Actions() []ActionSpec {
 			VerifyWith:  []string{"schematic.snapshot"},
 		},
 		{
+			Name:        "schematic.power.connect_pin",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Composite: draw a short wire out of a pin and place a netflag / netport at its far end in one call. Prevents the 'netflag overlaps pin' DRC fatal by structurally requiring the wire offset. Default direction is inferred from kind (power=up, ground=down, net_port_in=left, net_port_out/bi=right); default offset is 30 units.",
+			Inputs:      []string{"pinX", "pinY", "kind", "net", "direction optional", "offset optional"},
+			Outputs:     []string{"wire primitiveId", "flag primitiveId", "end point"},
+			VerifyWith:  []string{"schematic.snapshot", "schematic.drc.check"},
+		},
+		{
 			Name:        "schematic.select",
 			Domain:      DomainSchematic,
 			Phase:       1,

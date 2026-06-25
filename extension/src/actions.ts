@@ -579,6 +579,97 @@ const schematicExportBom: Handler = async (payload) => {
 	return { result: { artifactId: artifact.id, fileType }, artifacts: [artifact] };
 };
 
+// ─── Composite: pin → wire → netflag/netport in one call ────────────
+
+/**
+ * Default direction by kind. Power flows up to a + rail, ground falls down
+ * to a 0V rail, an IN port comes from the left (the producer), an OUT/BI
+ * port goes to the right (the consumer / shared bus). These match the §3.3
+ * conventions in docs/schematic-layout-conventions.md.
+ */
+function defaultDirection(kind: string): 'up' | 'down' | 'left' | 'right' {
+	if (['ground', 'analog_ground', 'protective_ground', 'protect_ground'].includes(kind)) return 'down';
+	if (kind === 'power') return 'up';
+	if (kind === 'net_port_in') return 'left';
+	return 'right'; // net_port_out, net_port_bi default
+}
+
+const schematicPowerConnectPin: Handler = async (payload) => {
+	const pinX = requireNumber(payload, 'pinX');
+	const pinY = requireNumber(payload, 'pinY');
+	const kind = requireString(payload, 'kind');
+	const net = requireString(payload, 'net');
+	const offset = optionalNumber(payload, 'offset') ?? 30;
+	const direction = (optionalString(payload, 'direction') ?? defaultDirection(kind)) as 'up' | 'down' | 'left' | 'right';
+
+	let endX = pinX;
+	let endY = pinY;
+	switch (direction) {
+		case 'up': endY = pinY - offset; break;
+		case 'down': endY = pinY + offset; break;
+		case 'left': endX = pinX - offset; break;
+		case 'right': endX = pinX + offset; break;
+		default:
+			throw new ActionError(
+				ErrorCodes.MISSING_PAYLOAD_FIELD,
+				`Unknown direction "${direction}"; expected up/down/left/right.`,
+			);
+	}
+
+	if (endX === pinX && endY === pinY) {
+		throw new ActionError(
+			ErrorCodes.MISSING_PAYLOAD_FIELD,
+			`offset must be non-zero (got ${offset}); pin and netflag would overlap.`,
+		);
+	}
+
+	// Stub wire pin → endpoint.
+	let wire;
+	try {
+		wire = await eda.sch_PrimitiveWire.create([pinX, pinY, endX, endY]);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to create pin-stub wire.');
+	}
+	if (!wire) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Wire creation returned no primitive.');
+	}
+
+	// Netflag/netport at the far end (NOT at the pin — that would be the bug we are preventing).
+	let flag;
+	try {
+		if (kind in NET_FLAG_KINDS) {
+			flag = await eda.sch_PrimitiveComponent.createNetFlag(NET_FLAG_KINDS[kind], net, endX, endY);
+		}
+		else if (kind in NET_PORT_KINDS) {
+			flag = await eda.sch_PrimitiveComponent.createNetPort(NET_PORT_KINDS[kind], net, endX, endY);
+		}
+		else {
+			throw new ActionError(
+				ErrorCodes.MISSING_PAYLOAD_FIELD,
+				`Unknown kind "${kind}"; expected one of: ${[...Object.keys(NET_FLAG_KINDS), 'ground', ...Object.keys(NET_PORT_KINDS)].join(', ')}.`,
+			);
+		}
+	}
+	catch (err) {
+		if (err instanceof ActionError) throw err;
+		throw edaError(err, 'Failed to create netflag/netport at wire end.');
+	}
+	if (!flag) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Failed to create ${kind}.`);
+	}
+
+	return {
+		result: {
+			wirePrimitiveId: wire.getState_PrimitiveId(),
+			flagPrimitiveId: flag.getState_PrimitiveId(),
+			endPoint: { x: endX, y: endY },
+			direction,
+			offset,
+		},
+	};
+};
+
 // ─── Debug escape hatch ──────────────────────────────────────────────
 
 /**
@@ -623,6 +714,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.save': schematicSave,
 	'schematic.export.netlist': schematicExportNetlist,
 	'schematic.export.bom': schematicExportBom,
+	'schematic.power.connect_pin': schematicPowerConnectPin,
 	'debug.exec_js': debugExecJs,
 };
 
