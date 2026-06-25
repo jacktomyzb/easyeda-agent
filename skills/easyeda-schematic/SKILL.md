@@ -49,6 +49,14 @@ Core schematic operations:
 - Treat `File` and `Blob` outputs as artifacts.
 - If DRC fails, report violations and propose the smallest repair step.
 
+## Layout Conventions
+
+When placing components, follow [docs/schematic-layout-conventions.md](../../docs/schematic-layout-conventions.md):
+- Zone map (power left, MCU center, RF/sensors right, big modules in corners)
+- Module spacing rules (80–500 units depending on size + pin count)
+- Wire stub lengths (20–40 units for power, 20–60 for signals)
+- Right-angle-only routing, decoupling caps within 30 units of VCC pins
+
 ## EasyEDA Electrical Rules (load-bearing — DRC will fatal if ignored)
 
 EasyEDA's DRC does **not** treat two primitives sharing the same coordinate as electrically connected. Every connection needs a real `schematic.wire.create` between them. Two concrete consequences:
