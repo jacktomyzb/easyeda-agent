@@ -638,20 +638,37 @@ function defaultDirection(kind: string): Direction {
  * (顺着导线方向), so the wire enters the flag from the circuit side and the
  * symbol never overlaps the wire/circuit.
  *
- * EasyEDA's createNetFlag/createNetPort rotation cycles the body through
- * up → left → down → right per +90°, anchored on two clean samples mined from
- * the ESP32S3R8N8 reference (PWR rot=90 → body left; GND rot=270 → body left).
- * Default body at rot 0: power=up, ground=down, net_port=right.
- *
- * Vertical power/ground cases (the 95% common ones) are well-grounded; the
- * horizontal / net-port rotations are best-effort and overridable via
- * payload.rotation — see docs/schematic-layout-conventions.md §3.5.
+ * The whole table is DERIVED from four facts — the +90° body cycle and the body
+ * direction at rotation 0 for each family. These are the SINGLE SOURCE OF TRUTH
+ * mirrored in tools/schematic-lint/orientation.json; the lint harness
+ * (tools/schematic-lint/tests/run.py) asserts that file derives the identical
+ * table, so this writer and the linter's check can never drift. Re-validate the
+ * anchors against live getPrimitivesBBox via tools/schematic-lint/calibrate.js
+ * after importing a new .eext. See docs/schematic-layout-conventions.md §3.5.
  */
-const BODY_ROTATION: Record<'power' | 'ground' | 'port', Record<Direction, number>> = {
-	power: { up: 0, left: 90, down: 180, right: 270 },
-	ground: { down: 0, right: 90, up: 180, left: 270 },
-	port: { right: 0, up: 90, left: 180, down: 270 },
+const ROTATION_CYCLE: Direction[] = ['up', 'left', 'down', 'right'];
+const BODY_ANCHOR_AT_ROT0: Record<'power' | 'ground' | 'port', Direction> = {
+	power: 'up',
+	ground: 'down',
+	port: 'right',
 };
+
+// rotation that makes the body point `direction` = (idx(direction) - idx(anchor))
+// mod 4, times 90 — keep this byte-equivalent to orient.py:derive().
+function deriveBodyRotation(): Record<'power' | 'ground' | 'port', Record<Direction, number>> {
+	const out = {} as Record<'power' | 'ground' | 'port', Record<Direction, number>>;
+	for (const family of ['power', 'ground', 'port'] as const) {
+		const anchorIdx = ROTATION_CYCLE.indexOf(BODY_ANCHOR_AT_ROT0[family]);
+		const table = {} as Record<Direction, number>;
+		for (const dir of ROTATION_CYCLE) {
+			table[dir] = (((ROTATION_CYCLE.indexOf(dir) - anchorIdx) % 4) + 4) % 4 * 90;
+		}
+		out[family] = table;
+	}
+	return out;
+}
+
+const BODY_ROTATION = deriveBodyRotation();
 
 function flagFamily(kind: string): 'power' | 'ground' | 'port' {
 	if (['ground', 'analog_ground', 'protective_ground', 'protect_ground'].includes(kind)) return 'ground';

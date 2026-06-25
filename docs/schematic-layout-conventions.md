@@ -131,6 +131,8 @@ EasyEDA 默认 lineWidth = 1。约定：
 
 引脚先用一小段 wire 引出到某个方向 `direction`，flag 放在 wire 末端，body 朝 `direction` 继续朝外。EasyEDA 的 `createNetFlag` / `createNetPort` 的 rotation 把 body 按 **up → left → down → right** 每 +90° 循环（实测自 ESP32 reference：PWR rot=90 → body left；GND rot=270 → body left）。各类型 rot=0 时的 body 朝向：power=上、ground=下、net_port=右。
 
+> **整张表只由 4 个事实决定，单一真源不会漂移**：上面的循环顺序 + 三个 rot=0 锚点（power=上 / ground=下 / port=右）。这 4 个事实存放在 [`tools/schematic-lint/orientation.json`](../tools/schematic-lint/orientation.json)，由它**推导**出 12 项表——`connect_pin`（`extension/src/actions.ts` 的 `deriveBodyRotation()`）与 linter（`orient.py`）**推导同一张表**，二者不可能各写各的。校验由 `make lint-test`（`tests/run.py`）保证：① 结构上 `orientation.json` 必须推回自己的 `frozenTable`、循环律成立；② 锚点的活体 ground truth 由 [`calibrate.js`](../tools/schematic-lint/calibrate.js) 对 `getPrimitivesBBox` 中心偏移实测复核（导入新 .eext 后跑一次）。**永远不要手改那 12 个数字**——改锚点 / 循环后重跑 `tests/run.py --update`。
+
 > ✅ **rotation 是恒等映射**：`createNetFlag(...,R)` / `createNetPort(...,R)` 后 `getState_Rotation() === R`，直接传下表的值即可（经 bbox 校准实测：传 90 读回 90，传 270 读回 270）。
 >
 > ⚠️ **坐标是 y-UP**：+y 在屏幕上是**向上**（实测：R2@y=250 显示在图纸底部、C1/C2@y=600 在顶部，且 bbox 校准 ground rot0 的 body 偏移 dy=-14.5=向下）。所以判断"导线朝哪/flag 放哪一侧"时，`dy>0` 是**向上**不是向下。`schematic.power.connect_pin` 的 `direction='up'` 用 `endY = pinY + offset`。
@@ -143,7 +145,7 @@ EasyEDA 默认 lineWidth = 1。约定：
 | ground (`GND`/`AGND`) | 180° | 270° | **0°** | 90° |
 | net_port (`IN`/`OUT`/`BI`) | 90° | 180° | 270° | **0°** |
 
-> 加粗的是各类型的**默认/最常见**朝向（power 朝上、ground 朝下、port 朝右），已充分验证。横向 power/ground 与 net_port 的竖向用法是经验推导，导入新 .eext 后应 live 复核，必要时用 `schematic.power.connect_pin` 的 `rotation` 参数显式覆盖。
+> 加粗的是各类型的**默认/最常见**朝向（power 朝上、ground 朝下、port 朝右），由 `calibrate.js` 对活体 bbox 实测验证。其余方向**不是另外猜的**——它们由同一条循环律从已验证的锚点推导（`orient.py:derive` / `deriveBodyRotation`），所以与锚点同样可信、构造上一致；导入新 .eext 后跑 `calibrate.js` 复核锚点即可，必要时用 `schematic.power.connect_pin` 的 `rotation` 参数显式覆盖。
 
 **普通元件的朝向**（信号流原则）：
 - 元件按信号流向摆——**输入 pin 朝信号来的方向，输出 pin 朝信号去的方向**。一个串在 A→B 横向链路上的元件（电阻、电感、磁珠）应水平摆放，pin1 朝 A、pin2 朝 B，不要竖着插在横向链路里。

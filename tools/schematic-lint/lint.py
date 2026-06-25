@@ -2,6 +2,7 @@
 """Data-only schematic linter: read full layout JSON, report problem points."""
 import json, sys
 from collections import defaultdict, Counter
+import orient
 
 data = json.load(open(sys.argv[1]))
 parts  = [p for p in data['parts'] if p.get('type') == 'part']
@@ -37,12 +38,11 @@ def direction(frm, to):
     # EasyEDA is y-UP: +y renders upward on screen (verified via bbox calibration).
     return ('right' if dx>0 else 'left') if abs(dx) >= abs(dy) else ('up' if dy>0 else 'down')
 
-# orientation table (matches connect_pin BODY_ROTATION; body points along stub dir)
-BODY_ROT = {
-  'power':  {'up':0,  'left':90, 'down':180,'right':270},
-  'ground': {'down':0,'right':90,'up':180,  'left':270},
-  'port':   {'right':0,'up':90, 'left':180, 'down':270},
-}
+# Orientation table — DERIVED from the canonical spec (orientation.json), never
+# hand-edited here. Body points outward along the stub. The connector's
+# connect_pin (extension/src/actions.ts deriveBodyRotation) derives the same
+# table from the same four facts; tests/run.py asserts they agree. §3.5.
+BODY_ROT = orient.load_body_rotation()
 def family(f):
     if f['type'] == 'netport': return 'port'
     n = (f.get('net') or '').lower()

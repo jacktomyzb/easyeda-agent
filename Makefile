@@ -1,7 +1,13 @@
-.PHONY: test fmt actions build daemon eext connector
+.PHONY: test fmt actions build daemon eext connector lint-test
 
 test:
 	go test ./...
+
+# Rule-trust harness for the schematic linter: orientation-table consistency
+# (orientation.json derives to its frozenTable; matches the connector) +
+# fixture goldens (known-good board stays clean, known-bad cases still fire).
+lint-test:
+	python3 tools/schematic-lint/tests/run.py
 
 fmt:
 	gofmt -w cmd internal

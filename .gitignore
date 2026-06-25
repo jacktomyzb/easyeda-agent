@@ -12,3 +12,7 @@
 # Editor
 .idea/
 .vscode/
+
+# Python
+__pycache__/
+*.pyc
