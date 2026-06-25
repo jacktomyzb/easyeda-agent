@@ -131,6 +131,8 @@ EasyEDA 默认 lineWidth = 1。约定：
 
 引脚先用一小段 wire 引出到某个方向 `direction`，flag 放在 wire 末端，body 朝 `direction` 继续朝外。EasyEDA 的 `createNetFlag` / `createNetPort` 的 rotation 把 body 按 **up → left → down → right** 每 +90° 循环（实测自 ESP32 reference：PWR rot=90 → body left；GND rot=270 → body left）。各类型 rot=0 时的 body 朝向：power=上、ground=下、net_port=右。
 
+> ⚠️ **rotation 取反坑**：`getState_Rotation()` 读回的是 STORED 角度，但 `createNetFlag` / `createNetPort` 的**输入 rotation 会被取反** —— `stored = (360 - input) % 360`（实测 `createNetFlag(...,90)` → 读回 270）。下表是 STORED 角度（= linter 检查的 / getState 读到的）；写入时 `schematic.power.connect_pin` 内部转换成 `(360-stored)%360` 再调 API。手写 `createNetFlag` 时务必自己取反。
+
 | kind | body 朝 `up` | `left` | `down` | `right` |
 |---|---|---|---|---|
 | power (`+3V3`/`+5V`/`VDD_*`) | **0°** | 90° | 180° | 270° |
