@@ -147,9 +147,9 @@ func Phase1Actions() []ActionSpec {
 			Phase:       1,
 			Mutates:     true,
 			NeedsWindow: true,
-			Description: "Composite: draw a short wire out of a pin and place a netflag / netport at its far end in one call. Prevents the 'netflag overlaps pin' DRC fatal by structurally requiring the wire offset. Default direction is inferred from kind (power=up, ground=down, net_port_in=left, net_port_out/bi=right); default offset is 30 units.",
-			Inputs:      []string{"pinX", "pinY", "kind", "net", "direction optional", "offset optional"},
-			Outputs:     []string{"wire primitiveId", "flag primitiveId", "end point"},
+			Description: "Composite: draw a short wire out of a pin and place a netflag / netport at its far end in one call. Prevents the 'netflag overlaps pin' DRC fatal by structurally requiring the wire offset, and orients the flag so its body points outward along the stub (顺着导线方向). Default direction is inferred from kind (power=up, ground=down, net_port_in=left, net_port_out/bi=right); default offset is 30 units; rotation is derived from direction but can be overridden.",
+			Inputs:      []string{"pinX", "pinY", "kind", "net", "direction optional", "offset optional", "rotation optional"},
+			Outputs:     []string{"wire primitiveId", "flag primitiveId", "end point", "rotation"},
 			VerifyWith:  []string{"schematic.snapshot", "schematic.drc.check"},
 		},
 		{

@@ -123,6 +123,29 @@ EasyEDA 默认 lineWidth = 1。约定：
 
 通过 `schematic.wire.create` 的 `lineWidth` 参数指定。
 
+### 3.5 朝向约定 (orientation — 顺着导线方向)
+
+> **一句话**：netflag / netport / 元件的本体必须**顺着导线引出的方向朝外**，连接 pin 朝向电路（导线来的那侧）。朝向错了会让符号本体压在导线/电路上，布局立刻显乱。
+
+**netflag / netport 的 rotation 规则**（已编码进 `schematic.power.connect_pin`）：
+
+引脚先用一小段 wire 引出到某个方向 `direction`，flag 放在 wire 末端，body 朝 `direction` 继续朝外。EasyEDA 的 `createNetFlag` / `createNetPort` 的 rotation 把 body 按 **up → left → down → right** 每 +90° 循环（实测自 ESP32 reference：PWR rot=90 → body left；GND rot=270 → body left）。各类型 rot=0 时的 body 朝向：power=上、ground=下、net_port=右。
+
+| kind | body 朝 `up` | `left` | `down` | `right` |
+|---|---|---|---|---|
+| power (`+3V3`/`+5V`/`VDD_*`) | **0°** | 90° | 180° | 270° |
+| ground (`GND`/`AGND`) | 180° | 270° | **0°** | 90° |
+| net_port (`IN`/`OUT`/`BI`) | 90° | 180° | 270° | **0°** |
+
+> 加粗的是各类型的**默认/最常见**朝向（power 朝上、ground 朝下、port 朝右），已充分验证。横向 power/ground 与 net_port 的竖向用法是经验推导，导入新 .eext 后应 live 复核，必要时用 `schematic.power.connect_pin` 的 `rotation` 参数显式覆盖。
+
+**普通元件的朝向**（信号流原则）：
+- 元件按信号流向摆——**输入 pin 朝信号来的方向，输出 pin 朝信号去的方向**。一个串在 A→B 横向链路上的元件（电阻、电感、磁珠）应水平摆放，pin1 朝 A、pin2 朝 B，不要竖着插在横向链路里。
+- 极性元件（LED、二极管、电解电容、稳压管）：阳极/正极朝电流来的方向（通常朝电源/左/上），阴极/负极朝电流去的方向（通常朝地/右/下）。
+- 多 pin IC：让**电源 pin 朝上/下、输入信号在左、输出信号在右**（配合 §1 的「信号从 MCU 向右发散」），减少导线交叉。
+
+> 实现提示：自动布局时，先决定该 pin 的导线走向（依据它要连到的目标在左还是右、上还是下），再据此设元件/flag 的 rotation——**永远是导线方向决定朝向，不是先定朝向再硬拉线**。
+
 ## 4. 命名约定
 
 | 类型 | 风格 | 例 |

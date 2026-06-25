@@ -29,7 +29,7 @@ extension/
   src/
     index.ts        # Entry point. Exports activate/deactivate + menu fns.
     transport.ts    # eda.sys_WebSocket port-scan, handshake, register, heartbeat, dispatch loop.
-    actions.ts      # 16 typed action handlers → eda.* calls + JSON serialization + artifacts.
+    actions.ts      # typed action handlers → eda.* calls + JSON serialization + artifacts.
     eda-context.ts  # Reads project/document context; document-type label mapping; editor version.
     protocol.ts     # Wire-frame types, error codes, ActionError/ActionResult.
     util.ts         # Uint8Array→base64 (no Node Buffer), Blob→base64, payload field helpers.
@@ -57,10 +57,32 @@ cd extension
 npm install            # esbuild, typescript, @jlceda/pro-api-types, fs-extra, jszip, ignore, ts-node, ...
 npm run typecheck      # tsc --noEmit against @jlceda/pro-api-types (proves eda.* call shapes)
 npm run compile        # esbuild → dist/index.js (IIFE)
-npm run build          # compile + package → build/dist/easyeda-agent-connector_v0.1.0.eext
+npm run build          # compile + package → build/dist/easyeda-agent-connector_v<version>.eext
 ```
 
 Node >= 20.17.0 is required.
+
+### Versioning — required to re-import
+
+EasyEDA dedups installed extensions by **(uuid, version)**: importing an `.eext`
+whose version equals the installed one is a **no-op** (the import dialog accepts
+nothing). So every time the connector code changes and the user needs to test
+it, the version **must** be bumped to a higher value, producing a new `.eext`
+filename.
+
+```bash
+# from the repo root — bump patch + typecheck + build a fresh importable .eext:
+make eext
+
+# or, from extension/, with explicit level:
+npm run bump            # 0.2.0 -> 0.2.1
+npm run bump minor      # 0.2.1 -> 0.3.0
+npm run release         # bump patch + typecheck + build
+```
+
+`scripts/bump.mjs` keeps `extension.json` and `package.json` in lock-step. After
+building, **uninstall the old version in EasyEDA's Extension manager, then import
+the new `.eext`** (or use the manager's update flow if offered).
 
 ---
 

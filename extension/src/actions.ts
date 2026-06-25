@@ -618,17 +618,49 @@ const schematicLibrarySearch: Handler = async (payload) => {
 
 // ─── Composite: pin → wire → netflag/netport in one call ────────────
 
+type Direction = 'up' | 'down' | 'left' | 'right';
+
 /**
  * Default direction by kind. Power flows up to a + rail, ground falls down
  * to a 0V rail, an IN port comes from the left (the producer), an OUT/BI
  * port goes to the right (the consumer / shared bus). These match the §3.3
  * conventions in docs/schematic-layout-conventions.md.
  */
-function defaultDirection(kind: string): 'up' | 'down' | 'left' | 'right' {
+function defaultDirection(kind: string): Direction {
 	if (['ground', 'analog_ground', 'protective_ground', 'protect_ground'].includes(kind)) return 'down';
 	if (kind === 'power') return 'up';
 	if (kind === 'net_port_in') return 'left';
 	return 'right'; // net_port_out, net_port_bi default
+}
+
+/**
+ * Orientation rule: the flag body must point OUTWARD along the stub direction
+ * (顺着导线方向), so the wire enters the flag from the circuit side and the
+ * symbol never overlaps the wire/circuit.
+ *
+ * EasyEDA's createNetFlag/createNetPort rotation cycles the body through
+ * up → left → down → right per +90°, anchored on two clean samples mined from
+ * the ESP32S3R8N8 reference (PWR rot=90 → body left; GND rot=270 → body left).
+ * Default body at rot 0: power=up, ground=down, net_port=right.
+ *
+ * Vertical power/ground cases (the 95% common ones) are well-grounded; the
+ * horizontal / net-port rotations are best-effort and overridable via
+ * payload.rotation — see docs/schematic-layout-conventions.md §3.5.
+ */
+const BODY_ROTATION: Record<'power' | 'ground' | 'port', Record<Direction, number>> = {
+	power: { up: 0, left: 90, down: 180, right: 270 },
+	ground: { down: 0, right: 90, up: 180, left: 270 },
+	port: { right: 0, up: 90, left: 180, down: 270 },
+};
+
+function flagFamily(kind: string): 'power' | 'ground' | 'port' {
+	if (['ground', 'analog_ground', 'protective_ground', 'protect_ground'].includes(kind)) return 'ground';
+	if (kind.startsWith('net_port')) return 'port';
+	return 'power';
+}
+
+function rotationFor(kind: string, direction: Direction): number {
+	return BODY_ROTATION[flagFamily(kind)][direction];
 }
 
 const schematicPowerConnectPin: Handler = async (payload) => {
@@ -637,7 +669,9 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 	const kind = requireString(payload, 'kind');
 	const net = requireString(payload, 'net');
 	const offset = optionalNumber(payload, 'offset') ?? 30;
-	const direction = (optionalString(payload, 'direction') ?? defaultDirection(kind)) as 'up' | 'down' | 'left' | 'right';
+	const direction = (optionalString(payload, 'direction') ?? defaultDirection(kind)) as Direction;
+	// Orientation follows the stub direction; an explicit rotation overrides it.
+	const rotation = optionalNumber(payload, 'rotation') ?? rotationFor(kind, direction);
 
 	let endX = pinX;
 	let endY = pinY;
@@ -676,10 +710,10 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 	let flag;
 	try {
 		if (kind in NET_FLAG_KINDS) {
-			flag = await eda.sch_PrimitiveComponent.createNetFlag(NET_FLAG_KINDS[kind], net, endX, endY);
+			flag = await eda.sch_PrimitiveComponent.createNetFlag(NET_FLAG_KINDS[kind], net, endX, endY, rotation);
 		}
 		else if (kind in NET_PORT_KINDS) {
-			flag = await eda.sch_PrimitiveComponent.createNetPort(NET_PORT_KINDS[kind], net, endX, endY);
+			flag = await eda.sch_PrimitiveComponent.createNetPort(NET_PORT_KINDS[kind], net, endX, endY, rotation);
 		}
 		else {
 			throw new ActionError(
@@ -703,6 +737,7 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 			endPoint: { x: endX, y: endY },
 			direction,
 			offset,
+			rotation,
 		},
 	};
 };
