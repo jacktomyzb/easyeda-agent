@@ -131,7 +131,11 @@ EasyEDA 默认 lineWidth = 1。约定：
 
 引脚先用一小段 wire 引出到某个方向 `direction`，flag 放在 wire 末端，body 朝 `direction` 继续朝外。EasyEDA 的 `createNetFlag` / `createNetPort` 的 rotation 把 body 按 **up → left → down → right** 每 +90° 循环（实测自 ESP32 reference：PWR rot=90 → body left；GND rot=270 → body left）。各类型 rot=0 时的 body 朝向：power=上、ground=下、net_port=右。
 
-> ⚠️ **rotation 取反坑**：`getState_Rotation()` 读回的是 STORED 角度，但 `createNetFlag` / `createNetPort` 的**输入 rotation 会被取反** —— `stored = (360 - input) % 360`（实测 `createNetFlag(...,90)` → 读回 270）。下表是 STORED 角度（= linter 检查的 / getState 读到的）；写入时 `schematic.power.connect_pin` 内部转换成 `(360-stored)%360` 再调 API。手写 `createNetFlag` 时务必自己取反。
+> ✅ **rotation 是恒等映射**：`createNetFlag(...,R)` / `createNetPort(...,R)` 后 `getState_Rotation() === R`，直接传下表的值即可（经 bbox 校准实测：传 90 读回 90，传 270 读回 270）。
+>
+> ⚠️ **坐标是 y-UP**：+y 在屏幕上是**向上**（实测：R2@y=250 显示在图纸底部、C1/C2@y=600 在顶部，且 bbox 校准 ground rot0 的 body 偏移 dy=-14.5=向下）。所以判断"导线朝哪/flag 放哪一侧"时，`dy>0` 是**向上**不是向下。`schematic.power.connect_pin` 的 `direction='up'` 用 `endY = pinY + offset`。
+>
+> ⛔ **走过的弯路（勿重蹈）**：曾误判 createNetFlag 会取反（`stored=(360-input)`）并据此"修"了 connect_pin，反而把横向朝向搞反——根因其实是 linter 的 `direction()` 用了 y-down 假设。校准方法：对 flag 调 `sch_Primitive.getPrimitivesBBox([pid])`，bbox 中心相对放置点 (x,y) 的偏移方向 = body 真实朝向（纯数据，不靠截图）。
 
 | kind | body 朝 `up` | `left` | `down` | `right` |
 |---|---|---|---|---|

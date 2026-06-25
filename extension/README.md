@@ -64,20 +64,19 @@ Node >= 20.17.0 is required.
 
 ### Versioning — required to re-import
 
-EasyEDA dedups installed extensions by **(uuid, version)**: importing an `.eext`
-whose version equals the installed one is a **no-op** (the import dialog accepts
-nothing). So every time the connector code changes and the user needs to test
-it, the version **must** be bumped to a higher value, producing a new `.eext`
-filename.
+EasyEDA dedups installed extensions by version. **A patch bump is NOT enough** —
+observed live: `0.2.0 → 0.2.1` did **not** trigger an update in the Extension
+manager. **Bump the MINOR version** (`0.2.x → 0.3.0`) to get a re-importable
+build. So `make eext` / `npm run release` bump minor by default.
 
 ```bash
-# from the repo root — bump patch + typecheck + build a fresh importable .eext:
+# from the repo root — bump MINOR + typecheck + build a fresh importable .eext:
 make eext
 
 # or, from extension/, with explicit level:
-npm run bump            # 0.2.0 -> 0.2.1
+npm run release         # bump minor + typecheck + build  (use this to ship)
 npm run bump minor      # 0.2.1 -> 0.3.0
-npm run release         # bump patch + typecheck + build
+npm run bump            # 0.3.0 -> 0.3.1 (patch — may NOT re-import; dev only)
 ```
 
 `scripts/bump.mjs` keeps `extension.json` and `package.json` in lock-step. After

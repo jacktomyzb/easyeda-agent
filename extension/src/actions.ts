@@ -663,17 +663,6 @@ function rotationFor(kind: string, direction: Direction): number {
 	return BODY_ROTATION[flagFamily(kind)][direction];
 }
 
-/**
- * createNetFlag/createNetPort NEGATE the rotation argument: the value you read
- * back via getState_Rotation() is `(360 - input) % 360`. BODY_ROTATION and the
- * payload.rotation override are in STORED-rotation space (what getState reports
- * and what the linter checks), so convert before calling the create APIs.
- * Verified live: createNetFlag(..., 90) → getState_Rotation() === 270.
- */
-function toCreateInputRotation(storedRotation: number): number {
-	return (360 - (storedRotation % 360)) % 360;
-}
-
 const schematicPowerConnectPin: Handler = async (payload) => {
 	const pinX = requireNumber(payload, 'pinX');
 	const pinY = requireNumber(payload, 'pinY');
@@ -681,16 +670,17 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 	const net = requireString(payload, 'net');
 	const offset = optionalNumber(payload, 'offset') ?? 30;
 	const direction = (optionalString(payload, 'direction') ?? defaultDirection(kind)) as Direction;
-	// Orientation follows the stub direction; an explicit rotation (stored-space)
-	// overrides it. createNetFlag/createNetPort negate the arg, so convert.
+	// Orientation follows the stub direction; an explicit rotation overrides it.
+	// createNetFlag/createNetPort rotation is IDENTITY (getState_Rotation() ===
+	// the value passed), verified via bbox calibration — pass it straight.
 	const rotation = optionalNumber(payload, 'rotation') ?? rotationFor(kind, direction);
-	const inputRotation = toCreateInputRotation(rotation);
 
+	// EasyEDA is y-UP: +y renders upward. 'up' must increase y, 'down' decrease.
 	let endX = pinX;
 	let endY = pinY;
 	switch (direction) {
-		case 'up': endY = pinY - offset; break;
-		case 'down': endY = pinY + offset; break;
+		case 'up': endY = pinY + offset; break;
+		case 'down': endY = pinY - offset; break;
 		case 'left': endX = pinX - offset; break;
 		case 'right': endX = pinX + offset; break;
 		default:
@@ -723,10 +713,10 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 	let flag;
 	try {
 		if (kind in NET_FLAG_KINDS) {
-			flag = await eda.sch_PrimitiveComponent.createNetFlag(NET_FLAG_KINDS[kind], net, endX, endY, inputRotation);
+			flag = await eda.sch_PrimitiveComponent.createNetFlag(NET_FLAG_KINDS[kind], net, endX, endY, rotation);
 		}
 		else if (kind in NET_PORT_KINDS) {
-			flag = await eda.sch_PrimitiveComponent.createNetPort(NET_PORT_KINDS[kind], net, endX, endY, inputRotation);
+			flag = await eda.sch_PrimitiveComponent.createNetPort(NET_PORT_KINDS[kind], net, endX, endY, rotation);
 		}
 		else {
 			throw new ActionError(

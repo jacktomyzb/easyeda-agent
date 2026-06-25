@@ -34,7 +34,8 @@ flag_pts = {(f['x'], f['y']): f for f in flags}
 def direction(frm, to):
     dx, dy = to[0]-frm[0], to[1]-frm[1]
     if dx == 0 and dy == 0: return None
-    return ('right' if dx>0 else 'left') if abs(dx) >= abs(dy) else ('down' if dy>0 else 'up')
+    # EasyEDA is y-UP: +y renders upward on screen (verified via bbox calibration).
+    return ('right' if dx>0 else 'left') if abs(dx) >= abs(dy) else ('up' if dy>0 else 'down')
 
 # orientation table (matches connect_pin BODY_ROTATION; body points along stub dir)
 BODY_ROT = {

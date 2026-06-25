@@ -47,9 +47,11 @@ PWR stored-rot=90 → body left; GND stored-rot=270 → body left). Body at rot 
 power=up, ground=down, net_port=right. See
 [docs/schematic-layout-conventions.md §3.5](../../docs/schematic-layout-conventions.md).
 
-> Note: `getState_Rotation()` reports the STORED rotation; `createNetFlag`/
-> `createNetPort` NEGATE their input (`stored = (360 - input) % 360`). The linter
-> works in stored space; `schematic.power.connect_pin` converts on write.
+> Notes: `createNetFlag`/`createNetPort` rotation is **identity** (read back ===
+> written; no negation — an earlier "negation" finding was wrong). EasyEDA is
+> **y-up** (+y renders upward), so `direction()` treats `dy>0` as up. Ground-truth
+> a flag's body direction with `sch_Primitive.getPrimitivesBBox([pid])` — the bbox
+> center's offset from the placement point is the body direction (pure data).
 
 ## Files
 
