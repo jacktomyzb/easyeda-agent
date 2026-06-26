@@ -288,6 +288,53 @@ func TestPingGetsPong(t *testing.T) {
 	}
 }
 
+func TestLogFrameIsHandledGracefully(t *testing.T) {
+	base, cleanup := startDaemon(t)
+	defer cleanup()
+
+	c := dialConnector(t, base, "win-1")
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	ctx := t.Context()
+
+	// A connector diagnostic log frame must be accepted without dropping the
+	// connection. Send one, then prove the socket still serves ping/pong — i.e.
+	// the read loop survived the log frame.
+	logFrame := struct {
+		Type string `json:"type"`
+		Msg  string `json:"msg"`
+	}{Type: protocol.TypeLog, Msg: "liveness lost: 3 pings unanswered"}
+	if err := wsjson.Write(ctx, c, logFrame); err != nil {
+		t.Fatalf("send log frame: %v", err)
+	}
+
+	if err := wsjson.Write(ctx, c, protocol.Ping{Type: protocol.TypePing, ID: "hb-after-log"}); err != nil {
+		t.Fatalf("send ping: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("no pong after log frame — log handling broke the connection")
+		}
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		var typed protocol.Typed
+		if json.Unmarshal(data, &typed) != nil || typed.Type != protocol.TypePong {
+			continue
+		}
+		var pong protocol.Pong
+		if err := json.Unmarshal(data, &pong); err != nil {
+			t.Fatalf("decode pong: %v", err)
+		}
+		if pong.ID == "hb-after-log" {
+			return
+		}
+	}
+}
+
 func TestActionArtifactPersisted(t *testing.T) {
 	base, cleanup := startDaemon(t)
 	defer cleanup()

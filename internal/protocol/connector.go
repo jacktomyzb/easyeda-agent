@@ -16,6 +16,7 @@ const (
 	TypePong      = "pong"
 	TypeRequest   = "request"
 	TypeResponse  = "response"
+	TypeLog       = "log"
 )
 
 // Handshake is sent by the daemon immediately after a connector connects, so the

@@ -116,6 +116,18 @@ func (s *Server) handleFrame(ctx context.Context, c *conn, data []byte) {
 		}
 		c.touch(now)
 		c.deliver(&resp)
+
+	case protocol.TypeLog:
+		// Diagnostic line emitted by the connector; surface it in the daemon log
+		// so connector-internal events (heartbeat/reconnect) are visible here.
+		var msg struct {
+			Msg string `json:"msg"`
+		}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return
+		}
+		c.touch(now)
+		s.logf("connector LOG: %s", msg.Msg)
 	}
 }
 
