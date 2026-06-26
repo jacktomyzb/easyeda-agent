@@ -87,11 +87,15 @@ _LDFLAGS = -s -w -X 'github.com/zhoushoujianwork/easyeda-agent/internal/version.
 
 release: ## cross-compile + package + GitHub Release  (VERSION=vX.Y.Z required)
 ifndef VERSION
-	$(error VERSION is required — usage: make release VERSION=v0.2.0)
+	$(error VERSION is required — usage: make release VERSION=v0.5.1)
 endif
 	@echo "── Building release $(VERSION) ──"
 	rm -rf $(DIST) && mkdir -p $(DIST)
-	@echo "  compiling..."
+	@echo "  syncing connector version to $(VERSION)..."
+	node extension/scripts/bump.mjs $(VERSION:v%=%)
+	npm --prefix extension run typecheck
+	npm --prefix extension run build
+	@echo "  compiling CLI..."
 	GOOS=darwin  GOARCH=amd64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_darwin_amd64      ./cmd/easyeda
 	GOOS=darwin  GOARCH=arm64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_darwin_arm64      ./cmd/easyeda
 	GOOS=linux   GOARCH=amd64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_linux_amd64       ./cmd/easyeda
@@ -99,8 +103,8 @@ endif
 	GOOS=windows GOARCH=amd64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_windows_amd64.exe ./cmd/easyeda
 	@echo "  packaging connector..."
 	@EEXT=$$(ls extension/build/dist/*.eext 2>/dev/null | sort -V | tail -1); \
-	 [ -n "$$EEXT" ] || { echo "no .eext found — run 'make eext' first"; exit 1; }; \
-	 cp "$$EEXT" $(DIST)/easyeda-agent-connector.eext && echo "  copied $$EEXT"
+	 [ -n "$$EEXT" ] || { echo "connector build failed"; exit 1; }; \
+	 cp "$$EEXT" $(DIST)/easyeda-agent-connector.eext && echo "  $$EEXT → connector.eext"
 	@echo "  packaging skills..."
 	tar -czf $(DIST)/skills.tar.gz -C skills easyeda-conventions easyeda-schematic easyeda-pcb
 	cp install.sh $(DIST)/install.sh

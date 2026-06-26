@@ -73,17 +73,15 @@ skills/easyeda-schematic/scripts/lint.sh <project> --save   # full lint + record
 ## Release workflow
 
 ```bash
-# 1. 如果 connector 有变更，先构建新 .eext（否则跳过）
-make eext
-
-# 2. 发版（自动：交叉编译 5 平台 + 打包 connector/.eext + skills.tar.gz + 创建 GitHub Release）
+# 一条命令发版：自动把 connector + CLI 统一到同一版本，交叉编译 5 平台，
+# 打包 skills.tar.gz，创建 GitHub Release 并上传所有 assets。
 make release VERSION=v0.5.1
 
 # 用户一行安装
 curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh
 ```
 
-**版本号约定**：与 connector 版本保持同一量级（connector 当前 v0.4.x → CLI 发 v0.5.x）。`make release` 会自动打 git tag、push、上传所有 assets 到 GitHub Release。详见 [`docs/cli-design.md`](docs/cli-design.md)。
+**版本号约定**：CLI 和 connector 始终用同一版本号（`make release` 负责把 `extension.json` 同步到 VERSION，不需要提前跑 `make eext`）。`make release` 会自动打 git tag、push 并创建 GitHub Release。
 
 ## Skill scripts usage
 
