@@ -33,6 +33,12 @@ const WS_ID = 'easyeda-agent';
 const PORT_START = 49620;
 const PORT_END = 49629;
 const RETRY_DELAY_MS = 3000;
+// After MAX_RETRIES fast attempts we DON'T give up — we fall back to this slow
+// background poll so a daemon started/restarted later auto-reconnects with no
+// manual Reconnect. The daemon is almost always launched AFTER the editor (and
+// `make build` compiles first), so a terminal give-up would strand every fresh
+// `bin/easyeda daemon`.
+const SLOW_RETRY_DELAY_MS = 10000;
 const MAX_RETRIES = 5;
 // EasyEDA's eda.sys_WebSocket closes idle connections after ~5s of silence.
 // Ping more often than that to keep the socket alive between actions, which
@@ -160,11 +166,6 @@ async function scanAndConnect(): Promise<void> {
 	clearRetryTimer();
 
 	try {
-		if (retryCount >= MAX_RETRIES) {
-			eda.sys_Message.showToastMessage(eda.sys_I18n.text('Max retries reached'), ESYS_ToastMessageType.ERROR);
-			return;
-		}
-
 		for (let port = PORT_START; port <= PORT_END; port++) {
 			if (!isConnectionSessionActive(sessionId)) {
 				return;
@@ -184,10 +185,23 @@ async function scanAndConnect(): Promise<void> {
 		}
 
 		retryCount++;
-		eda.sys_Message.showToastMessage(
-			`${eda.sys_I18n.text('Daemon not found, retrying...')} (${retryCount}/${MAX_RETRIES})`,
-		);
-		scheduleRetry(sessionId);
+		if (retryCount <= MAX_RETRIES) {
+			eda.sys_Message.showToastMessage(
+				`${eda.sys_I18n.text('Daemon not found, retrying...')} (${retryCount}/${MAX_RETRIES})`,
+			);
+			scheduleRetry(sessionId, RETRY_DELAY_MS);
+		}
+		else {
+			// Don't strand the user: keep scanning forever on a quiet slow poll so a
+			// daemon started later auto-connects. Announce the switch once, then go
+			// silent (no toast spam every 10s).
+			if (retryCount === MAX_RETRIES + 1) {
+				eda.sys_Message.showToastMessage(
+					eda.sys_I18n.text('Daemon not found — will keep retrying in the background; just start the daemon.'),
+				);
+			}
+			scheduleRetry(sessionId, SLOW_RETRY_DELAY_MS);
+		}
 	}
 	finally {
 		if (isConnectionSessionActive(sessionId)) {
@@ -369,14 +383,14 @@ function stopHeartbeat(): void {
 
 // ─── Retry ────────────────────────────────────────────────────────────
 
-function scheduleRetry(sessionId: number): void {
+function scheduleRetry(sessionId: number, delayMs: number): void {
 	clearRetryTimer();
 	retryTimer = setTimeout(() => {
 		if (!isConnectionSessionActive(sessionId) || isConnecting) {
 			return;
 		}
 		void scanAndConnect();
-	}, RETRY_DELAY_MS);
+	}, delayMs);
 }
 
 function clearRetryTimer(): void {
