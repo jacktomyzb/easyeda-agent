@@ -1,4 +1,4 @@
-.PHONY: test fmt actions build daemon dev eext connector lint-test
+.PHONY: test fmt actions build daemon dev eext eext-fresh connector lint-test
 
 test:
 	go test ./...
@@ -32,12 +32,22 @@ dev:
 connector:
 	npm --prefix extension run build
 
-# Cut a fresh, importable connector .eext: bump the PATCH version AND mint a new
-# uuid (scripts/bump.mjs), typecheck, build. EasyEDA dedups installed extensions
-# by UUID — a version bump alone will NOT re-import (it silently fails); the fresh
-# uuid is what unblocks it. Prints the .eext path to import in EasyEDA.
+# Cut an importable connector .eext (default: STABLE uuid). Bump PATCH + typecheck
+# + build. EasyEDA dedups installed extensions by uuid, so to load this you update
+# in place: uninstall the old one in EasyEDA's 已安装 tab, then import the printed
+# .eext. Keeps ONE extension entry. Use `make eext-fresh` only if the installed
+# one won't uninstall.
 eext:
 	node extension/scripts/bump.mjs patch
 	npm --prefix extension run typecheck
 	npm --prefix extension run build
-	@printf '\n✅ import in EasyEDA → extension/build/dist/easyeda-agent-connector_v%s.eext\n' "$$(node -p "require('./extension/extension.json').version")"
+	@printf '\n✅ uninstall old in 已安装, then import → extension/build/dist/easyeda-agent-connector_v%s.eext\n' "$$(node -p "require('./extension/extension.json').version")"
+
+# Fallback only: mint a FRESH uuid so it imports as a NEW extension with no
+# uninstall — but it leaves a duplicate "EasyEDA Agent" entry you must delete
+# afterward (else multiple connectors fight over the daemon).
+eext-fresh:
+	node extension/scripts/bump.mjs patch --uuid
+	npm --prefix extension run typecheck
+	npm --prefix extension run build
+	@printf '\n✅ fresh-uuid build → import extension/build/dist/easyeda-agent-connector_v%s.eext, then DELETE the old entry\n' "$$(node -p "require('./extension/extension.json').version")"

@@ -40,7 +40,8 @@ make daemon       # one-shot daemon (no reload) — prefer `make dev`
 make test         # go test ./...
 make lint-test    # linter rule-trust harness (orientation consistency + fixtures)
 make actions      # print the typed action catalog
-make eext         # bump PATCH + mint a FRESH UUID + build importable .eext (prints import path)
+make eext         # bump PATCH + build importable .eext, STABLE uuid (update in place: uninstall old → import)
+make eext-fresh   # fallback: bump PATCH + FRESH uuid (imports as a new entry; delete the old one) — for when the installed one won't uninstall
 make connector    # build .eext at the current version/uuid (no bump — same-version dev only)
 
 tools/schematic-lint/lint.sh <project>          # live lint (DIFF if a baseline exists)
@@ -53,14 +54,18 @@ reaches the daemon.
 
 ## Load-bearing gotchas
 
-- **Re-importing the connector is install-only per UUID.** EasyEDA dedups by
-  UUID: re-importing a build whose uuid is already installed **silently fails** (a
-  version bump alone is NOT enough — this bit us on v0.4.2). **`make eext` now
-  mints a fresh uuid every build** (`scripts/bump.mjs`), so the printed `.eext`
-  always imports as a clean install — just import it, then remove the older
-  "EasyEDA Agent" entry (each fresh uuid is a separate extension). **Most changes
-  don't even need a re-import — use the `debug.exec_js` escape hatch** for
-  behavior you can script; only manifest/handler changes require `make eext`.
+- **Re-importing the connector: EasyEDA dedups installed extensions by UUID.**
+  Importing a build whose uuid is already installed **silently fails** unless you
+  first **uninstall the old one** in the 已安装 tab — a version bump alone is NOT
+  enough (this bit us on v0.4.2). Two paths: **`make eext`** keeps the uuid stable
+  → the normal update-in-place (uninstall old → import the printed `.eext`, one
+  entry). **`make eext-fresh`** mints a new uuid → imports as a *separate* entry
+  with no uninstall, but you must delete the stale one (two connectors fight over
+  the daemon otherwise) — it's the fallback when the installed one won't
+  uninstall. Our manifest is complete; there is no in-place auto-update for
+  sideloaded `.eext` (that's a marketplace-only feature). **Most changes don't
+  even need a re-import — use the `debug.exec_js` escape hatch** for scriptable
+  behavior; only manifest/handler changes require a rebuild.
 - **EasyEDA schematic coords are y-UP** (+y renders upward); `createNetFlag` /
   `createNetPort` rotation is **identity** (no negation). Orientation table lives
   in `tools/schematic-lint/orientation.json` (single source of truth, derived by
