@@ -359,6 +359,15 @@ func AllActions() []ActionSpec {
 			VerifyWith:  []string{"pcb.components.list"},
 		},
 		{
+			Name:        "pcb.drc.check",
+			Domain:      DomainPcb,
+			Phase:       2,
+			NeedsWindow: true,
+			Description: "Run PCB DRC, normalized to {passed, violations}; violations are grouped by error type then net. Requires the PCB to be the active/foreground document.",
+			Inputs:      []string{"strict optional"},
+			Outputs:     []string{"passed", "violations"},
+		},
+		{
 			Name:         "debug.exec_js",
 			Domain:       DomainDebug,
 			Phase:        1,

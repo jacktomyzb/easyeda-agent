@@ -1480,6 +1480,25 @@ const pcbComponentsArrange: Handler = async (payload) => {
 	return { result: { mode, groups: groups.length, moved, count: moved.length } };
 };
 
+// ─── PCB DRC ─────────────────────────────────────────────────────────
+
+const pcbDrcCheck: Handler = async (payload) => {
+	const strict = optionalBoolean(payload, 'strict') !== false;
+	let violations: Array<unknown>;
+	try {
+		// Mirrors sch_Drc.check: the 3rd arg (includeVerboseError) selects the
+		// overload that returns the violations array — a no-arg call returns a
+		// bare boolean instead. Violations are grouped: [{name, list:[{name(net),
+		// list:[{errorType, errorObjType, obj1, …}]}]}]. Requires the PCB document
+		// to be the ACTIVE/foreground tab (else 'no subscription' on the canvas).
+		violations = (await eda.pcb_Drc.check(strict, false, true)) as Array<unknown>;
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to run PCB DRC (ensure the PCB document is the active/foreground tab).');
+	}
+	return { result: { passed: violations.length === 0, violations } };
+};
+
 // ─── Debug escape hatch ──────────────────────────────────────────────
 
 /**
@@ -1540,6 +1559,7 @@ const HANDLERS: Record<string, Handler> = {
 	'pcb.grid_snap': pcbGridSnap,
 	'pcb.components.move': pcbComponentsMove,
 	'pcb.components.arrange': pcbComponentsArrange,
+	'pcb.drc.check': pcbDrcCheck,
 	'debug.exec_js': debugExecJs,
 };
 
