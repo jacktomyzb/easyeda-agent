@@ -1,4 +1,4 @@
-.PHONY: help test fmt actions build daemon dev eext eext-fresh connector lint-test release
+.PHONY: help test fmt actions build install daemon dev eext eext-fresh connector lint-test release
 
 DIST := dist
 
@@ -30,8 +30,25 @@ fmt: ## gofmt cmd + internal
 actions: ## print the typed action catalog
 	go run ./cmd/easyeda actions
 
-build: ## build bin/easyeda
-	go build -o bin/easyeda ./cmd/easyeda
+# Dev version stamp: `git describe` (e.g. v0.5.1-3-g1d7b7c8[-dirty]) so a locally
+# built binary reports a meaningful version via `easyeda -v` instead of "dev".
+DEV_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+DEV_LDFLAGS := -X 'github.com/zhoushoujianwork/easyeda-agent/internal/version.Version=$(DEV_VERSION)'
+# Where `make install` drops the binary (matches install.sh's default).
+PREFIX ?= /usr/local
+
+build: ## build bin/easyeda (version-stamped via git describe)
+	go build -ldflags "$(DEV_LDFLAGS)" -o bin/easyeda ./cmd/easyeda
+
+install: build ## build + install to $(PREFIX)/bin (default /usr/local/bin; may need sudo)
+	@mkdir -p "$(PREFIX)/bin" 2>/dev/null || true
+	@if install -m 0755 bin/easyeda "$(PREFIX)/bin/easyeda" 2>/dev/null; then \
+		printf '✅ installed → %s/bin/easyeda  (%s)\n' "$(PREFIX)" "$(DEV_VERSION)"; \
+	else \
+		echo "  $(PREFIX)/bin not writable — retrying with sudo…"; \
+		sudo install -m 0755 bin/easyeda "$(PREFIX)/bin/easyeda" && \
+		printf '✅ installed → %s/bin/easyeda  (%s)\n' "$(PREFIX)" "$(DEV_VERSION)"; \
+	fi
 
 daemon: ## one-shot daemon (no reload) — prefer `make dev`
 	go run ./cmd/easyeda daemon

@@ -57,7 +57,8 @@ Config is `.air.toml` (builds to `./tmp/easyeda`, runs `daemon`, watches `cmd/`+
 Other targets:
 
 ```bash
-make build        # bin/easyeda
+make build        # bin/easyeda (version-stamped via git describe)
+make install      # build + install to /usr/local/bin (PREFIX overridable; sudo only if needed)
 make daemon       # one-shot daemon (no reload) — prefer `make dev`
 make test         # go test ./...
 make lint-test    # linter rule-trust harness (orientation consistency + fixtures)
