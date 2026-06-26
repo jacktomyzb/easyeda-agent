@@ -4,6 +4,11 @@ All notable changes to the **EasyEDA Agent Connector** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); versions
 follow [SemVer](https://semver.org/).
 
+## [0.4.10] - 2026-06-26
+### Added
+- `homepage` pointing at the GitHub repository (open-source link for the listing),
+  as a plain URL (no `#readme` fragment).
+
 ## [0.4.9] - 2026-06-26
 ### Fixed
 - Marketplace manifest finalized: `repository.type` is `github` (per the official
