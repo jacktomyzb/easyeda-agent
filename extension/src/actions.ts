@@ -35,6 +35,12 @@ type SchComponent = NonNullable<Awaited<ReturnType<typeof eda.sch_PrimitiveCompo
 /** The schematic component pin primitive type, derived from the API. */
 type SchPin = NonNullable<Awaited<ReturnType<typeof eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId>>>[number];
 
+/** The PCB component primitive type, derived from the API. */
+type PcbComponent = NonNullable<Awaited<ReturnType<typeof eda.pcb_PrimitiveComponent.getAll>>>[number];
+
+/** The PCB component pad primitive type, derived from the API. */
+type PcbPad = NonNullable<Awaited<ReturnType<typeof eda.pcb_PrimitiveComponent.getAllPinsByPrimitiveId>>>[number];
+
 /**
  * Wrap an unknown error thrown by an `eda.*` call into a structured ActionError.
  *
@@ -97,6 +103,50 @@ function serializePin(pin: SchPin): Record<string, unknown> {
 		y: pin.getState_Y(),
 		rotation: pin.getState_Rotation(),
 		noConnected: pin.getState_NoConnected(),
+	};
+}
+
+/**
+ * Serialize a PCB component primitive to plain JSON via its public getState_*
+ * accessors. Unlike a schematic component, a PCB component is layer-bound
+ * (TOP/BOTTOM) and carries no net flags — connectivity lives on its pads.
+ *
+ * @param component - the PCB component primitive object
+ * @returns a plain JSON record
+ */
+function serializePcbComponent(component: PcbComponent): Record<string, unknown> {
+	return {
+		primitiveId: component.getState_PrimitiveId(),
+		designator: component.getState_Designator(),
+		name: component.getState_Name(),
+		layer: component.getState_Layer(),
+		x: component.getState_X(),
+		y: component.getState_Y(),
+		rotation: component.getState_Rotation(),
+		locked: component.getState_PrimitiveLock(),
+		addIntoBom: component.getState_AddIntoBom(),
+		manufacturerId: component.getState_ManufacturerId(),
+		supplierId: component.getState_SupplierId(),
+	};
+}
+
+/**
+ * Serialize a single PCB component pad to plain JSON. Pads carry the
+ * net-by-name connectivity model that replaces schematic net flags.
+ *
+ * @param pad - the PCB component pad primitive object
+ * @returns a plain JSON record
+ */
+function serializePcbPad(pad: PcbPad): Record<string, unknown> {
+	return {
+		primitiveId: pad.getState_PrimitiveId(),
+		padNumber: pad.getState_PadNumber(),
+		net: pad.getState_Net(),
+		layer: pad.getState_Layer(),
+		x: pad.getState_X(),
+		y: pad.getState_Y(),
+		rotation: pad.getState_Rotation(),
+		padType: pad.getState_PadType(),
 	};
 }
 
@@ -834,6 +884,83 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 	};
 };
 
+// ─── PCB (Phase 2 — read-only skeleton) ──────────────────────────────
+
+/**
+ * List placed components on the active PCB. Optionally filter by layer and
+ * include each component's pads (the net-by-name connectivity surface).
+ */
+const pcbComponentsList: Handler = async (payload) => {
+	const layer = payload.layer as TPCB_LayersOfComponent | undefined;
+	const includePads = optionalBoolean(payload, 'includePads') === true;
+	let components;
+	try {
+		components = await eda.pcb_PrimitiveComponent.getAll(layer);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to list PCB components.');
+	}
+
+	const serialized: Array<Record<string, unknown>> = [];
+	for (const component of components) {
+		const record = serializePcbComponent(component);
+		if (includePads) {
+			try {
+				const pads = await eda.pcb_PrimitiveComponent.getAllPinsByPrimitiveId(
+					component.getState_PrimitiveId(),
+				);
+				record.pads = (pads ?? []).map(serializePcbPad);
+			}
+			catch { /* pads are optional */ }
+		}
+		serialized.push(record);
+	}
+
+	return { result: { components: serialized, count: serialized.length } };
+};
+
+/**
+ * List all layers of the active PCB, plus the current layer and copper count.
+ * `IPCB_LayerItem` is a plain data object, so it serializes directly.
+ */
+const pcbLayersList: Handler = async () => {
+	let layers;
+	try {
+		layers = await eda.pcb_Layer.getAllLayers();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to list PCB layers.');
+	}
+	// getCurrentLayer is synchronous; copper count is best-effort.
+	let currentLayer: unknown = null;
+	try {
+		currentLayer = eda.pcb_Layer.getCurrentLayer() ?? null;
+	}
+	catch { /* best-effort */ }
+	let copperLayerCount: unknown = null;
+	try {
+		copperLayerCount = await eda.pcb_Layer.getTheNumberOfCopperLayers();
+	}
+	catch { /* best-effort */ }
+
+	return { result: { layers, currentLayer, copperLayerCount, count: layers.length } };
+};
+
+/**
+ * List all nets on the active PCB. `IPCB_NetInfo` ({ net, color, length }) is a
+ * plain data object and serializes directly.
+ */
+const pcbNetsList: Handler = async () => {
+	let nets;
+	try {
+		nets = await eda.pcb_Net.getAllNets();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to list PCB nets.');
+	}
+	return { result: { nets, count: nets.length } };
+};
+
 // ─── Debug escape hatch ──────────────────────────────────────────────
 
 /**
@@ -880,6 +1007,9 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.export.bom': schematicExportBom,
 	'schematic.power.connect_pin': schematicPowerConnectPin,
 	'schematic.library.search': schematicLibrarySearch,
+	'pcb.components.list': pcbComponentsList,
+	'pcb.layers.list': pcbLayersList,
+	'pcb.nets.list': pcbNetsList,
 	'debug.exec_js': debugExecJs,
 };
 

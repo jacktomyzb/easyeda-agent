@@ -93,6 +93,7 @@ Raw JavaScript execution remains useful for debugging, but not as the primary AI
 See:
 
 - [Phase 1 schematic scope](docs/phase-1-schematic.md)
+- [Phase 2 PCB layout/routing feasibility](docs/phase-2-pcb.md)
 - [Architecture](docs/architecture.md)
 - [Protocol](docs/protocol.md)
 - [Skill design](docs/skill-design.md)

@@ -7,7 +7,7 @@
 export const CONNECTOR_VERSION = '0.1.0';
 export const PROTOCOL_VERSION = 'v1';
 export const SERVICE_ID = 'easyeda-agent';
-export const CAPABILITIES = ['schematic.v1'];
+export const CAPABILITIES = ['schematic.v1', 'pcb.v1'];
 
 // ─── Daemon → connector frames ───────────────────────────────────────
 

@@ -6,6 +6,7 @@ const (
 	DomainProject   Domain = "project"
 	DomainDocument  Domain = "document"
 	DomainSchematic Domain = "schematic"
+	DomainPcb       Domain = "pcb"
 	DomainArtifact  Domain = "artifact"
 	DomainSystem    Domain = "system"
 	DomainDebug     Domain = "debug"
@@ -204,6 +205,35 @@ func Phase1Actions() []ActionSpec {
 			Description: "Export schematic BOM as csv or xlsx artifact.",
 			Inputs:      []string{"fileType", "template optional", "columns optional"},
 			Outputs:     []string{"artifact id", "file path", "file type"},
+		},
+		// ─── PCB (Phase 2 — read-only skeleton) ──────────────────────────
+		// Connectivity probe + inspection surface for the upcoming PCB
+		// layout/routing feature. All read-only; mirrors the schematic read
+		// actions against the eda.pcb_* namespaces. See docs/phase-2-pcb.md.
+		{
+			Name:        "pcb.components.list",
+			Domain:      DomainPcb,
+			Phase:       2,
+			NeedsWindow: true,
+			Description: "List placed footprints/components on the active PCB, with layer, coordinates, rotation, lock, and optional pads.",
+			Inputs:      []string{"layer optional", "includePads optional"},
+			Outputs:     []string{"components[].primitiveId", "components[].designator", "components[].layer", "components[].x", "components[].y", "components[].rotation", "components[].pads", "count"},
+		},
+		{
+			Name:        "pcb.layers.list",
+			Domain:      DomainPcb,
+			Phase:       2,
+			NeedsWindow: true,
+			Description: "List all layers of the active PCB (id, name, type, color, visibility, lock), plus the current layer and copper-layer count.",
+			Outputs:     []string{"layers", "currentLayer", "copperLayerCount", "count"},
+		},
+		{
+			Name:        "pcb.nets.list",
+			Domain:      DomainPcb,
+			Phase:       2,
+			NeedsWindow: true,
+			Description: "List all nets on the active PCB with name, length, and color.",
+			Outputs:     []string{"nets[].net", "nets[].length", "nets[].color", "count"},
 		},
 		{
 			Name:         "debug.exec_js",
