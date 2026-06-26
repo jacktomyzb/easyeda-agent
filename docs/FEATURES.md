@@ -124,14 +124,21 @@ These are planned and **not implemented** today.
 - **立创商城比对选型 / LCSC mall comparison selection** — compare candidate parts by
   price / stock / specs to pick the optimal one. Not built.
 
-### Known gap — LCSC C-number is lost on placed parts
+### LCSC C-number lost on placed parts → fixed by BOM enrichment
 
 A placed component's `getState_SupplierId()` returns `MPN.1` (e.g.
-`GRM21BR61H106KE43L.1`) rather than the LCSC C-number (e.g. `C440198`). So
-`schematic.library.search` can surface a C-number from search results, but once a
-part is on the canvas the linkage back to a direct LCSC order is incomplete. A
-robust fix (carry the C-number through placement, or resolve MPN → C-number) is
-pending.
+`GRM21BR61H106KE43L.1`), not the LCSC C-number (`C440198`) — confirmed by reading
+the exported BOM, whose "Supplier Part" column is the MPN.1. The component can't be
+fixed at the source: `setState_SupplierId('C440198')` does **not** persist (the
+field is device-bound and reverts on re-pull). So the fix is post-export:
+**`tools/bom-enrich.py`** joins the C-number in by matching each row's Manufacturer
+Part against `standard-parts.json` (MPN → LCSC) and rewriting "Supplier Part" to the
+real C-number (and filling an empty Value). Verified: 5/5 rows of the ESP32-S3 BOM
+enriched to orderable C-numbers; unmatched MPNs are reported as candidates to add to
+`standard-parts.json`. Follow-ups: (1) wire the enrichment into the daemon's
+`schematic.export.bom` so exports are orderable by default; (2) for non-standard
+parts, resolve MPN → C-number via `lib_Device.search` instead of only the curated
+list.
 
 ---
 
