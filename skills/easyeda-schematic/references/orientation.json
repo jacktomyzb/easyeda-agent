@@ -1,1 +1,22 @@
-../../tools/schematic-lint/orientation.json
+{
+  "_doc": [
+    "Canonical netflag/netport body-orientation spec. The flag BODY must point",
+    "OUTWARD along the stub direction (顺着导线朝外); the wire enters from the",
+    "circuit side. This file is the SINGLE SOURCE OF TRUTH — never hand-edit the",
+    "12 numbers in frozenTable; they are DERIVED from rotationCycle + bodyAnchor.",
+    "Both consumers derive the same table:",
+    "  - tools/schematic-lint/orient.py  (the linter's check)",
+    "  - extension/src/actions.ts deriveBodyRotation()  (what connect_pin writes)",
+    "tests/run.py asserts derive(cycle, anchors) == frozenTable, so the two",
+    "language copies can never drift. calibrate.js re-validates the 3 anchors +",
+    "cycle against live getPrimitivesBBox ground truth (run after importing a new",
+    ".eext). See docs/schematic-layout-conventions.md §3.5."
+  ],
+  "rotationCycle": ["up", "left", "down", "right"],
+  "bodyAnchorAtRot0": { "power": "up", "ground": "down", "port": "right" },
+  "frozenTable": {
+    "power":  { "up": 0,    "left": 90,  "down": 180, "right": 270 },
+    "ground": { "down": 0,  "right": 90, "up": 180,   "left": 270 },
+    "port":   { "right": 0, "up": 90,    "left": 180, "down": 270 }
+  }
+}
