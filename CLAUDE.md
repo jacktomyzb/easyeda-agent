@@ -8,6 +8,25 @@ running inside EasyEDA, which calls the official `eda.*` API.
 skill ──▶ Go CLI/daemon ──WebSocket──▶ connector .eext ──▶ eda.* API
           (typed actions)   49620-49629   (in EasyEDA Pro)
 ```
+## 首要准则 — Skill 优先
+
+> **本项目是「边开发、边更新 Agent Skill」的联合开发模式。**
+>
+> - **开发和测试的主要对象是 Skill**（操作技能 `skills/easyeda-schematic/`、`skills/easyeda-pcb/`，参考技能 `skills/easyeda-conventions/`）。
+> - Go CLI/daemon（`cmd/easyeda` + `internal/`）和连接器插件（`extension/`）是**为 Skill 服务的基础设施**，而非最终目的。
+> - 每次改动首先问：「Skill 里的工作流、知识、或 guardrail 需要同步更新吗？」——如果需要，先改 Skill，再改底层实现。
+> - 修改底层 action / daemon / 插件后，必须同步更新 Skill 里对应的工具描述、示例、或注意事项。
+
+## 首要准则 — CLI 子命令设计
+
+> **所有明确的功能模块必须以 Cobra 子命令方式暴露**，方便 AI 快速理解和调用。
+>
+> - 每个功能领域（原理图、PCB、BOM、连接器……）对应一个顶级子命令（`easyeda sch`、`easyeda pcb`、`easyeda bom` 等）。
+> - 子命令下再细分动作（`easyeda sch place`、`easyeda sch wire`、`easyeda pcb layout` …）。
+> - `--help` 输出必须清晰描述参数含义和示例，AI 读 `--help` 即可知道怎么调用。
+> - 新增功能**必须先设计子命令接口**（命令名 + flags），再实现逻辑；Skill 里的工具描述与子命令签名保持一致。
+> - 不允许把功能藏进全局 flag 或隐式行为里——每一个明确的操作都是一条显式子命令。
+
 ## Notes
 
 reply as chiense! reply as chiense! reply as chiense!
@@ -22,7 +41,8 @@ on `main` by default (user preference). Don't `git checkout -b`; just commit to
 |---|---|
 | `cmd/easyeda` + `internal/{app,daemon,protocol}` | Go CLI + daemon. `internal/protocol/actions.go` = the 20 typed actions. Daemon: `/health`, `/eda` (connector WS), `/action`. |
 | `extension/` | TypeScript connector → esbuild → `.eext`. `src/transport.ts` (port-scan + auto-reconnect), `src/actions.ts` (eda.* handlers + `connect_pin`). |
-| `skills/easyeda-schematic/` | Operational skill — typed-action workflow, `scripts/` (lint suite + BOM/parts tools), guardrails. Links to the conventions skill for design rules. |
+| `skills/easyeda-schematic/` | Operational skill (schematic) — typed-action workflow, `scripts/` (lint suite + BOM/parts tools), guardrails. Links to the conventions skill for design rules. |
+| `skills/easyeda-pcb/` | Operational skill (PCB) — switch to a PCB, read components/layers/nets/board, `import_changes` from the schematic, lay out (move/rotate/align/distribute/grid-snap/cluster-arrange). Links to the conventions skill. |
 | `skills/easyeda-conventions/` | Reference skill (no actions) — the EE design truth + canonical data in `references/`: orientation.json, standard-parts.json, schematic/pcb layout conventions, part-selection. See `skills/README.md`. |
 | `docs/FEATURES.md` | Feature-status inventory (20 actions grouped by capability) + roadmap. |
 | `skills/easyeda-schematic/SKILL.md` | The user-facing skill. |
