@@ -38,3 +38,18 @@ JSON is read across the skill boundary by the operational scripts
 (`easyeda-schematic/scripts/{orient,bom-enrich}.py` →
 `../../easyeda-conventions/references/…`), and `make lint-test` asserts the connector
 and linter still derive the same orientation table.
+
+## Authoring conventions (for these skills)
+
+- **Language.** Write AI-facing routing metadata in **English** — skill `name` /
+  `description` frontmatter, action names, navigational headers (this is what the
+  agent matches on to find a skill). Keep substantive body content in its natural
+  language; **Chinese prose stays Chinese**.
+- **Reference files by bare name, not full path.** In prompts, action `Description`s,
+  and code comments, cite `orientation.json` / `pcb-layout-conventions.md` — not the
+  full repo path. The agent resolves by name, and the reference **survives file
+  moves** (full paths are exactly what broke during this split). Only *clickable*
+  markdown links use a short **relative** path.
+- **One prompt, one home.** Guidance prose lives once — in the relevant skill /
+  conventions doc. Code (action descriptions, comments) stays short and points to it
+  by filename; don't grow a second copy of the prompt inside the code.
