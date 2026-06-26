@@ -25,10 +25,17 @@ part genuinely isn't in the library (a hand-built symbol loses the
 footprint/supplier linkage and is error-prone — prefer a library part, even a
 near-equivalent, first).
 
-1. **Search** `schematic.library.search` (free-text: an MPN, value+package, or a
-   name like `ESP32-S3-WROOM-1`). Each candidate carries `uuid`, `libraryUuid`,
-   `name`, `footprintName`, `supplierId` (LCSC). Refine the query if it returns
-   the wrong category — `100nF 0402` can match resistors; add `X7R` or use the MPN.
+0. **Standard parts first.** Check [`tools/standard-parts.json`](../../tools/standard-parts.json)
+   for the category you need (10k 0402, 100nF, ESP32-S3, AMS1117, USB-C, …). If it's
+   there, place straight from its `{ libraryUuid, deviceUuid }` — deterministic,
+   BOM-ready, with the real LCSC C-number. Only search when the category is missing,
+   and ADD the chosen part back to `standard-parts.json` (with its C-number) so the
+   next design is reproducible.
+1. **Search** (fallback) `schematic.library.search` (free-text: an MPN, value+package,
+   or a name like `ESP32-S3-WROOM-1`). Results are **reranked by relevance** (best
+   category first; each carries a `score`), so the right part usually leads — but
+   still sanity-check `value`/`footprintName`/`lcsc` before placing. Each candidate
+   carries `uuid`, `libraryUuid`, `name`, `footprintName`, `lcsc`, `manufacturerId`.
 2. **Place** `schematic.component.place` with the chosen `{libraryUuid, uuid}` at a
    coordinate → a manufacturable part with correct symbol + footprint + LCSC number.
 3. **Read pins** (`schematic.components.list` / pin readback) for exact pin

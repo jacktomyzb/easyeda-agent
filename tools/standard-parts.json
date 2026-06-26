@@ -1,0 +1,75 @@
+{
+  "_doc": [
+    "Curated STANDARD PARTS for the easyeda-agent library-first workflow (器件标准化).",
+    "Place from here FIRST — it is deterministic, BOM-ready, and LCSC-orderable. Fall back",
+    "to schematic.library.search only for a category not listed here. Each part places via",
+    "schematic.component.place with { libraryUuid, uuid: deviceUuid }. The lcsc field is the",
+    "立创 C-number for direct ordering. All deviceUuid/lcsc values were captured from live",
+    "lib_Device.search and validated by placing on real boards (ESP32-S3 system + USB-C",
+    "power). Prefer JLC basic parts (basic:true) to avoid extended-part feeder fees.",
+    "When a needed category is missing, search it, pick the best candidate, then ADD it here",
+    "with its real C-number so the next design is reproducible."
+  ],
+  "libraryUuid": "0819f05c4eef4c71ace90d822a990e87",
+  "parts": {
+    "mcu.esp32s3_wroom1": {
+      "value": "ESP32-S3-WROOM-1", "mpn": "ESP32-S3-WROOM-1", "lcsc": "C9900163599",
+      "manufacturer": "Espressif", "deviceUuid": "ebc5227ec05f4bcbbb5581e49a5f7cc6",
+      "footprint": "WIRELM-SMD_ESP32-S3-WROOM-1", "basic": false,
+      "desc": "ESP32-S3 Wi-Fi+BLE module (flash+xtal+antenna integrated)"
+    },
+    "ldo.ams1117_3v3": {
+      "value": "AMS1117-3.3", "mpn": "AMS1117-3.3", "lcsc": "C6186",
+      "manufacturer": "AMS", "deviceUuid": "9f9c6cb41c7449fd8acf96aceed2661a",
+      "footprint": "SOT-223-3", "basic": false,
+      "desc": "5V→3.3V linear regulator, 1A, SOT-223"
+    },
+    "conn.usb_c_16p": {
+      "value": "TYPE-C-16P", "mpn": "USB3.1TYPE-C16P", "lcsc": "C9900012665",
+      "manufacturer": "Korean Hroparts", "deviceUuid": "fafc5d2de09d4595b0cc7abedc0530e6",
+      "footprint": "USB-C-SMD_TYPE-C-16PIN", "basic": false,
+      "desc": "USB Type-C 16-pin SMD receptacle (VBUS/GND/CC/DP/DN)"
+    },
+    "sw.tact_smd": {
+      "value": "TS-1088", "mpn": "TS-1088-AR02016", "lcsc": "C720477",
+      "manufacturer": "XUNPU", "deviceUuid": "cff07d923b95482c818b184e98b80db7",
+      "footprint": "SW-SMD_L3.9-W3.0-P4.45", "basic": false,
+      "desc": "SMD tactile push button (reset/boot)"
+    },
+    "res.10k_0402": {
+      "value": "10kΩ", "mpn": "0402WGF1002TCE", "lcsc": "C25744",
+      "manufacturer": "UNI-ROYAL", "deviceUuid": "c3b9baa5ef2e4070a4c0f9e9cd04fe6e",
+      "footprint": "R0402", "basic": true, "desc": "10k 1% 0402 (pull-up/down)"
+    },
+    "res.5k1_0402": {
+      "value": "5.1kΩ", "mpn": "0402WGF5101TCE", "lcsc": "C25905",
+      "manufacturer": "UNI-ROYAL", "deviceUuid": "ef1f93374e0c4079b48a2d1a3cec8f6b",
+      "footprint": "R0402", "basic": true, "desc": "5.1k 1% 0402 (USB-C CC pulldown)"
+    },
+    "res.330_0402": {
+      "value": "330Ω", "mpn": "0402WGF3300TCE", "lcsc": "C25104",
+      "manufacturer": "UNI-ROYAL", "deviceUuid": "a60160c6e65140998078961749427162",
+      "footprint": "R0402", "basic": true, "desc": "330R 1% 0402 (LED current limit)"
+    },
+    "cap.100nf_0402": {
+      "value": "100nF", "mpn": "CL05B104KO5NNNC", "lcsc": "C1525",
+      "manufacturer": "SAMSUNG", "deviceUuid": "87bb635d0b2f489a9f60e7cd225beb3c",
+      "footprint": "C0402", "basic": true, "desc": "100nF X7R 0402 (HF decoupling)"
+    },
+    "cap.10uf_0805": {
+      "value": "10µF", "mpn": "GRM21BR61H106KE43L", "lcsc": "C440198",
+      "manufacturer": "muRata", "deviceUuid": "6e5726223dd84f70bc3b626fc7d1f72c",
+      "footprint": "C0805", "basic": false, "desc": "10µF 50V X5R 0805 (bulk decoupling)"
+    },
+    "cap.22uf_0805": {
+      "value": "22µF", "mpn": "CL21A226MAQNNNE", "lcsc": "C45783",
+      "manufacturer": "SAMSUNG", "deviceUuid": "159c3da60be9490abf4e97599788a0d5",
+      "footprint": "C0805", "basic": false, "desc": "22µF 25V X5R 0805 (LDO output)"
+    },
+    "led.red_0805": {
+      "value": "RED", "mpn": "KT-0805Y", "lcsc": "C2296",
+      "manufacturer": "Hubei KENTO", "deviceUuid": "06303f8c50b646d88d0dd08d2ec9692c",
+      "footprint": "LED0805-R-RD", "basic": false, "desc": "0805 indicator LED"
+    }
+  }
+}

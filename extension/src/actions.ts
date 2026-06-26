@@ -596,8 +596,32 @@ const schematicLibrarySearch: Handler = async (payload) => {
 		return { result: { count: 0, components: [] } };
 	}
 
-	const components = raw.slice(0, limit).map((d) => {
-		const r = d as Record<string, unknown>;
+	// Relevance rerank. EasyEDA's raw order often surfaces the wrong category first
+	// (e.g. "100nF 0402" returns resistors before the capacitor). Score each
+	// candidate by how many query terms hit its fields — weighted name/value/MPN >
+	// footprint/symbol/manufacturer > description — then stable-sort (original order
+	// breaks ties, so a zero-match query degrades gracefully to EasyEDA's order).
+	const terms = query.toLowerCase().split(/[\s,]+/).filter(Boolean);
+	const norm = (s: unknown) => String(s ?? '').toLowerCase();
+	const scoreOf = (r: Record<string, unknown>): number => {
+		const op = (r.otherProperty as Record<string, unknown> | undefined) ?? {};
+		const strong = `${norm(r.name)} ${norm(op.Value)} ${norm(r.manufacturerId)}`;
+		const mid = `${norm(r.footprintName)} ${norm(r.symbolName)} ${norm(r.manufacturer)}`;
+		const weak = norm(r.description);
+		let s = 0;
+		for (const t of terms) {
+			if (strong.includes(t)) s += 3;
+			else if (mid.includes(t)) s += 2;
+			else if (weak.includes(t)) s += 1;
+		}
+		return s;
+	};
+	const ranked = (raw as Array<Record<string, unknown>>)
+		.map((d, i) => ({ d, i, s: scoreOf(d) }))
+		.sort((a, b) => (b.s - a.s) || (a.i - b.i))
+		.slice(0, limit);
+
+	const components = ranked.map(({ d: r, s }) => {
 		const otherProperty = (r.otherProperty as Record<string, unknown> | undefined) ?? {};
 		return {
 			uuid: r.uuid,
@@ -609,6 +633,7 @@ const schematicLibrarySearch: Handler = async (payload) => {
 			lcsc: r.supplierId,
 			manufacturer: r.manufacturer,
 			manufacturerId: r.manufacturerId,
+			score: s,
 			description: typeof r.description === 'string' ? r.description.slice(0, 200) : r.description,
 		};
 	});
