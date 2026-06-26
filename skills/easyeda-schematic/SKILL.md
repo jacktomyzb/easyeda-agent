@@ -25,7 +25,7 @@ part genuinely isn't in the library (a hand-built symbol loses the
 footprint/supplier linkage and is error-prone — prefer a library part, even a
 near-equivalent, first).
 
-0. **Standard parts first.** Check [`tools/standard-parts.json`](../../tools/standard-parts.json)
+0. **Standard parts first.** Check [`references/standard-parts.json`](references/standard-parts.json)
    for the category you need (10k 0402, 100nF, ESP32-S3, AMS1117, USB-C, …). If it's
    there, place straight from its `{ libraryUuid, deviceUuid }` — deterministic,
    BOM-ready, with the real LCSC C-number. Only search when the category is missing,
@@ -44,7 +44,7 @@ near-equivalent, first).
    short wires that all meet at ONE junction point (star node) so EasyEDA junctions
    them — see the Electrical Rules below (pin → wire → flag, never flag-on-pin).
 5. **Verify** with `schematic.drc.check` + the data linter
-   (`tools/schematic-lint/lint.sh <project>`), and fix what it reports.
+   (`scripts/lint.sh <project>`), and fix what it reports.
 
 ## Actions
 
@@ -83,6 +83,19 @@ Run `easyeda actions` for the current machine-readable action list.
 - `pcb.components.list` — 列出 PCB 上的封装/器件
 - `pcb.layers.list` — 列出 PCB 层信息
 - `pcb.nets.list` — 列出 PCB 网络
+
+## Bundled Scripts
+
+| 脚本 | 用途 |
+|---|---|
+| `scripts/lint.sh <project>` | 原理图数据 lint（几何 + 连通性检查，无需截图）。有 baseline 时显示 DIFF |
+| `scripts/lint.sh <project> --save` | 全量 lint 并记录 baseline |
+| `scripts/bom-enrich.py <bom.tsv>` | 将导出的 BOM 里 `SupplierId` 从 MPN 补全为 LCSC C 号 |
+| `scripts/parts-select.py` | 器件选型辅助工具 |
+
+`references/standard-parts.json` — 标准器件库（libraryUuid + deviceUuid + LCSC C 号），放置前先查这里。
+
+`references/orientation.json` — flag 旋转真值表（lint 和 connector 共用，不要手动修改）。
 
 ## Guardrails
 

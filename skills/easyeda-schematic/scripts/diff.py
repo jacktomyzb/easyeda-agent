@@ -1,0 +1,1 @@
+../../tools/schematic-lint/diff.py
