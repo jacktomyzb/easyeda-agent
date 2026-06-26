@@ -6,7 +6,8 @@ staying tightly cross-referenced.
 | Skill | Kind | Holds |
 |---|---|---|
 | [`easyeda-conventions`](easyeda-conventions/SKILL.md) | **Reference** (no actions) | The tool-agnostic EE design truth — schematic/PCB layout conventions, part-selection criteria, and the canonical data (`orientation.json`, `standard-parts.json`). |
-| [`easyeda-schematic`](easyeda-schematic/SKILL.md) | **Operational** | How to drive `easyeda-agent`: the typed-action workflow, scripts (`lint`, `bom-enrich`, `parts-select`, `calibrate`), and guardrails. (`easyeda-pcb` will join later.) |
+| [`easyeda-schematic`](easyeda-schematic/SKILL.md) | **Operational** | How to drive `easyeda-agent` for **schematics**: the typed-action workflow, scripts (`lint`, `bom-enrich`, `parts-select`, `calibrate`), and guardrails. |
+| [`easyeda-pcb`](easyeda-pcb/SKILL.md) | **Operational** | How to drive `easyeda-agent` for **PCB**: switch to a PCB, read components/layers/nets/board, sync from the schematic (`import_changes`), and lay out components (move/rotate/align/distribute/grid-snap/cluster-arrange). |
 
 ## Why split
 

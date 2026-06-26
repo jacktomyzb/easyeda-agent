@@ -1,0 +1,88 @@
+---
+name: easyeda-pcb
+description: EasyEDA PCB automation skill. Use when working with EasyEDA PCB documents through the easyeda-agent CLI or daemon — switching to a PCB, reading components/layers/nets/board context, syncing components from the schematic (import changes), and laying out components (move, rotate, flip, align, distribute, grid-snap, and net-cluster auto-arrange). PCB design rules live in the sibling easyeda-conventions skill.
+---
+
+# EasyEDA PCB
+
+Drive `easyeda-agent` typed actions. Run `easyeda actions` for the live machine-readable
+list. Prefer typed actions; only fall back to `debug.exec_js` when a typed action is
+missing **and** the user explicitly accepts a debug path.
+
+> **PCB design rules live in the sibling [`easyeda-conventions`](../easyeda-conventions/SKILL.md)
+> skill** — especially [`pcb-layout-conventions.md`](../easyeda-conventions/references/pcb-layout-conventions.md)
+> (placement priority P0–P7, stackup-conditioned decoupling, thermal/SI/DFM/grid rules,
+> each with a data-detectable check). This operational skill **links** to it — single
+> source, never copy the rules here.
+
+## Coordinate system & model (load-bearing)
+
+- **Data unit = `1 mil`** (schematics are `10 mil` / 0.01in — different). **y-UP**: +y renders upward.
+- Every component is bound to a **layer** (`TOP` / `BOTTOM`). **No left/right mirror — only flip** (change layer via `pcb.component.modify`).
+- **No programmatic undo.** Snapshot before/after into the audit log; pull a **fresh `primitiveId`** right before mutating.
+- `pcb.component.delete` returns a boolean meaning *"operation completed"*, **not** *"actually deleted something"* — don't rely on it; verify with `pcb.components.list`.
+- Layout actions (`align` / `distribute` / `grid_snap` / `components.move` / `components.arrange`) act on the **current selection** by default; pass `primitiveIds` to target a specific set. With nothing selected and no `primitiveIds`, they error (0 targets).
+
+## Workflow
+
+1. `easyeda health` → confirm a connected window (multi-window: pass `--window <windowId>`).
+2. `document.current` → if not a PCB, `pcb.documents.list` then `document.open <pcbUuid>`.
+3. **Inspect before mutating**: `pcb.components.list` (`includeBBox`+`includePads`), `pcb.layers.list` (read `copperLayerCount`), `pcb.nets.list`, `pcb.board.info`.
+4. Small additive operations; **verify each** by readback + `pcb.drc.check`.
+5. **Confirm** before destructive ops (`delete`, `import_changes`, bulk `arrange`) and before saving.
+6. Summarize moved/changed primitives, warnings, and artifacts.
+
+## Actions
+
+### Navigation
+
+- `pcb.documents.list` — all PCB documents in the project (uuid + name); pair with `document.open`.
+- `document.open` — open any document (schematic page or PCB) by uuid; the cross-type switch entry.
+- `pcb.board.info` — current Board (schematic↔PCB linkage) + current PCB; the prerequisite context for `import_changes`.
+
+### Read / inspect
+
+- `pcb.components.list` — placed footprints. `includeBBox` → per-component rendered extent (for overlap/spacing reasoning); `includePads` → pads + net (the net-by-name connectivity).
+- `pcb.layers.list` — layers (id/name/type), `currentLayer`, and `copperLayerCount` (2-layer vs 4+-layer — gates the decoupling rules).
+- `pcb.nets.list` — nets (`net` / `length` / `color`).
+
+### Schematic → PCB sync + component CRUD
+
+- `pcb.import_changes` — **sync components/netlist from the schematic** (从原理图导入变更). The primary way parts arrive on the board: ensures a Board links SCH+PCB, then `importChanges`, then recomputes ratlines. **Mutates the board; confirm first.** Returns `imported:false` (with a reason) for a floating/unlinked PCB.
+- `pcb.component.modify` — move (x/y), rotate, flip layer (top/bottom), lock, designator/BOM flags.
+- `pcb.component.delete` — delete component primitives. **Confirm first** (no undo).
+
+### Layout adjustment (deterministic — EasyEDA exposes no align/grid API)
+
+- `pcb.align` — `mode = left | right | top | bottom | centerX | centerY` (y-up: `top` = larger y), aligned to the group extent.
+- `pcb.distribute` — even center spacing, `axis = x | y`, extremes fixed.
+- `pcb.grid_snap` — round component anchors to `grid` (mil; SMD 25, THT 50).
+- `pcb.components.move` — translate a group by relative `dx` / `dy`.
+- `pcb.components.arrange` — coarse auto-layout **seed** (priority P6): `mode=cluster` groups by shared local nets then grid-packs each cluster into a tidy non-overlapping block; `mode=grid` packs a flat grid. Skips locked parts.
+
+## Auto-layout — execute per the conventions
+
+Follow the priority hierarchy in
+[`pcb-layout-conventions.md`](../easyeda-conventions/references/pcb-layout-conventions.md)
+(**P0 mechanical/enclosure > P1 safety/isolation > P2 EMI hot-loop + critical decoupling >
+P3 reference-plane/return > P4 thermal keep-out > P5 functional grouping > P6 DFM >
+P7 grid/align/silkscreen** — P7 is cosmetic and never overrides a function-driven position).
+
+Operational order:
+
+1. **Read state** — `pcb.components.list` (`includeBBox`+`includePads`) + `pcb.layers.list` (`copperLayerCount`) + `pcb.nets.list`; classify each part by net/designator (anchor / hot / sensitive / IC / passive).
+2. **P0** — place connectors (J/USB) and mounting holes (H/MH) at enclosure coords and **`lock`** them; treat as immovable obstacles; edge connectors open outward.
+3. **P6 coarse seed** — `pcb.components.arrange mode=cluster` for an initial net-clustered layout.
+4. **P2/P4 local overrides** — decoupling caps tight to the IC power pin (≤2-layer ≤150 mil; 4+-layer ≤250 mil **but leave via room**); crystal + 2 load caps tight to the MCU osc pins inside a 200 mil guard; minimize the switcher input loop `{Cin + switch + catch-diode}` bbox; spread hot parts ≥400 mil; keep heat-sensitive parts (electrolytics/crystals/sensors) ≥200 mil from heat.
+5. **P7 tidy-up** — `pcb.align` / `pcb.distribute` / `pcb.grid_snap`, **without breaking any function-driven position**.
+6. **Verify** — `pcb.drc.check` (and the PCB linter once it lands); fix by rule number. Pull fresh primitiveIds before each mutation; confirm destructive ops; log before/after.
+
+**Key corrections from review** (see the conventions doc): decoupling effectiveness is governed by the cap's **mounting-loop inductance** (pad→via→plane), not raw distance; **default a single solid ground plane** partitioned by placement (do *not* split-ground by default); all hard thresholds are **conditioned on stackup / fab / enclosure** context.
+
+## Guardrails
+
+- Confirm before `pcb.component.delete`, `pcb.import_changes`, or a bulk `arrange`/auto-layout plan.
+- Confirm before saving unless the user asked to save.
+- Do not claim completion after a mutation until readback / DRC verifies it (or state the remaining risk).
+- No undo — record before/after into the audit log so a move can be reversed by re-applying the old coordinates.
+- Treat `File`/`Blob` outputs (gerber/pick-and-place/3D) as artifacts.
