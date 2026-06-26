@@ -1173,6 +1173,110 @@ const pcbBoardInfo: Handler = async () => {
 	};
 };
 
+// ─── Board (板子/组合 — schematic↔PCB binding) ─────────────────────────
+// A Board groups one schematic + one PCB and is identified by NAME (not uuid).
+
+type BoardItem = NonNullable<Awaited<ReturnType<typeof eda.dmt_Board.getCurrentBoardInfo>>>;
+
+/** Serialize a Board to the {name, schematic, pcb, parentProjectUuid} shape. */
+function serializeBoard(board: BoardItem): Record<string, unknown> {
+	return {
+		name: board.name,
+		schematicUuid: board.schematic.uuid,
+		schematicName: board.schematic.name,
+		pcbUuid: board.pcb.uuid,
+		pcbName: board.pcb.name,
+		parentProjectUuid: board.parentProjectUuid,
+	};
+}
+
+/** List all Boards (组合) in the current project. */
+const boardList: Handler = async () => {
+	let boards;
+	try {
+		boards = await eda.dmt_Board.getAllBoardsInfo();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to list Boards.');
+	}
+	return { result: { boards: boards.map(serializeBoard), count: boards.length } };
+};
+
+/** Read the current Board (its bound schematic + PCB). */
+const boardCurrent: Handler = async () => {
+	let board;
+	try {
+		board = await eda.dmt_Board.getCurrentBoardInfo();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read current Board.');
+	}
+	return { result: { linked: !!board, board: board ? serializeBoard(board) : null } };
+};
+
+/** Create a Board binding a schematic and/or PCB into one group. */
+const boardCreate: Handler = async (payload) => {
+	const schematicUuid = optionalString(payload, 'schematicUuid');
+	const pcbUuid = optionalString(payload, 'pcbUuid');
+	if (schematicUuid === undefined && pcbUuid === undefined) {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'Pass at least one of "schematicUuid" or "pcbUuid".');
+	}
+	let name;
+	try {
+		name = await eda.dmt_Board.createBoard(schematicUuid, pcbUuid);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to create Board.');
+	}
+	if (name === undefined) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Failed to create Board (check the schematic/PCB UUIDs).');
+	}
+	return { result: { boardName: name } };
+};
+
+/** Rename a Board by its current name. */
+const boardRename: Handler = async (payload) => {
+	const name = requireString(payload, 'name');
+	const newName = requireString(payload, 'newName');
+	let ok;
+	try {
+		ok = await eda.dmt_Board.modifyBoardName(name, newName);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to rename Board.');
+	}
+	return { result: { ok } };
+};
+
+/** Copy a Board (its schematic + PCB) into a new Board. */
+const boardCopy: Handler = async (payload) => {
+	const name = requireString(payload, 'name');
+	let newName;
+	try {
+		newName = await eda.dmt_Board.copyBoard(name);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to copy Board.');
+	}
+	if (newName === undefined) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Failed to copy Board "${name}".`);
+	}
+	return { result: { boardName: newName } };
+};
+
+/** Delete a Board by name. */
+const boardDelete: Handler = async (payload) => {
+	const name = requireString(payload, 'name');
+	let ok;
+	try {
+		ok = await eda.dmt_Board.deleteBoard(name);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to delete Board.');
+	}
+	return { result: { ok } };
+};
+
 /**
  * Sync the schematic netlist/components into the active PCB (从原理图导入变更) —
  * the primary way components arrive on the board. `importChanges` returns false
@@ -1894,6 +1998,12 @@ const HANDLERS: Record<string, Handler> = {
 	'pcb.layers.list': pcbLayersList,
 	'pcb.nets.list': pcbNetsList,
 	'pcb.board.info': pcbBoardInfo,
+	'board.list': boardList,
+	'board.current': boardCurrent,
+	'board.create': boardCreate,
+	'board.rename': boardRename,
+	'board.copy': boardCopy,
+	'board.delete': boardDelete,
 	'pcb.import_changes': pcbImportChanges,
 	'pcb.component.modify': pcbComponentModify,
 	'pcb.component.delete': pcbComponentDelete,

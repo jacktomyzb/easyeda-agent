@@ -64,10 +64,21 @@ Run `easyeda actions` for the authoritative machine-readable list.
 - `pcb.layers.list` — PCB 层列表 + 当前层 + 铜层数
 - `pcb.nets.list` — PCB 全部网络
 
+## Board（板子/组合 — 原理图↔PCB 绑定）
+
+一个 **Board = 1 张原理图 + 1 块 PCB**，原理图与 PCB 就是通过它「组合」在一起（`import_changes` 也沿此链接同步）。Board 以**名称**标识。CLI：`easyeda board …`。
+
+- `board.list` / `board.current` — 列出全部组合（名称 + 原理图 + PCB）/ 当前组合
+- `board.create` — 把原理图和/或 PCB 绑成新组合（`--schematic` / `--pcb`）；游离 PCB 在 `import_changes` 前的修复手段
+- `board.rename` — 重命名组合（`--name` → `--new`）
+- `board.copy` — 复制组合（连同原理图 + PCB）
+- `board.delete` — 删除组合（**需确认**，无 undo）
+
 ## Confirmation Required
 
 - `schematic.component.delete`
 - `schematic.page.delete`（删除图页，无 undo）
+- `board.delete`（删除组合/板子，无 undo）
 - `schematic.save`（未明确要求保存时）
 - 生成的多步 mutation 计划
 - `debug.exec_js`（任何情况）

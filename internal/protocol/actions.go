@@ -7,6 +7,7 @@ const (
 	DomainDocument  Domain = "document"
 	DomainSchematic Domain = "schematic"
 	DomainPcb       Domain = "pcb"
+	DomainBoard     Domain = "board"
 	DomainArtifact  Domain = "artifact"
 	DomainSystem    Domain = "system"
 	DomainDebug     Domain = "debug"
@@ -365,6 +366,68 @@ func AllActions() []ActionSpec {
 			NeedsWindow: true,
 			Description: "Read the current Board (schematic+PCB linkage) and current PCB info — the prerequisite context for pcb.import_changes.",
 			Outputs:     []string{"linked", "board", "pcb"},
+		},
+		// ── board (板子/组合 — the schematic↔PCB binding) ──────────────────
+		// A Board groups exactly one schematic + one PCB; it is identified by
+		// NAME (not uuid). All map to eda.dmt_Board.*. Domain-agnostic routing.
+		{
+			Name:        "board.list",
+			Domain:      DomainBoard,
+			Phase:       2,
+			NeedsWindow: true,
+			Description: "List all Boards (板子) in the current project. A Board binds one schematic + one PCB into a group — this is how schematic and PCB are kept together (and what import_changes follows).",
+			Outputs:     []string{"boards (name + schematic + pcb)"},
+		},
+		{
+			Name:        "board.current",
+			Domain:      DomainBoard,
+			Phase:       2,
+			NeedsWindow: true,
+			Description: "Read the current Board (its bound schematic + PCB).",
+			Outputs:     []string{"linked", "board"},
+		},
+		{
+			Name:        "board.create",
+			Domain:      DomainBoard,
+			Phase:       2,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Create a Board binding a schematic and/or a PCB into one group (组合). Pass schematicUuid and/or pcbUuid; returns the new board name.",
+			Inputs:      []string{"schematicUuid optional", "pcbUuid optional"},
+			Outputs:     []string{"boardName"},
+			VerifyWith:  []string{"board.list"},
+		},
+		{
+			Name:        "board.rename",
+			Domain:      DomainBoard,
+			Phase:       2,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Rename a Board (板子) by its current name.",
+			Inputs:      []string{"name", "newName"},
+			Outputs:     []string{"ok"},
+		},
+		{
+			Name:        "board.copy",
+			Domain:      DomainBoard,
+			Phase:       2,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Copy a Board (its schematic + PCB) into a new Board; returns the new board name.",
+			Inputs:      []string{"name"},
+			Outputs:     []string{"boardName"},
+			VerifyWith:  []string{"board.list"},
+		},
+		{
+			Name:         "board.delete",
+			Domain:       DomainBoard,
+			Phase:        2,
+			Mutates:      true,
+			NeedsWindow:  true,
+			NeedsConfirm: true,
+			Description:  "Delete a Board by name (无 undo). Removes the schematic↔PCB grouping and its documents.",
+			Inputs:       []string{"name"},
+			Outputs:      []string{"ok"},
 		},
 		{
 			Name:         "pcb.import_changes",

@@ -52,6 +52,21 @@ Pro; the title block (明细表) is the editable "图纸" surface. CLI: `easyeda
 | `schematic.page.delete` | Delete a page (confirmation-gated, no undo). Mutates. |
 | `schematic.rename` | Rename a schematic document (whole sheet; may also rename a linked reuse-module symbol + PCB). Mutates. |
 
+### Board / 组合 — schematic↔PCB binding (6 actions, `board` domain)
+
+A **Board groups one schematic + one PCB** (识别符是 name, not uuid) — the structural
+unit that keeps the two together and that `import_changes` follows. Project tree:
+Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*`. CLI: `easyeda board …`.
+
+| Action | What |
+|---|---|
+| `board.list` | All boards in the project — name + bound schematic + pcb. |
+| `board.current` | The current board (its bound schematic + PCB). |
+| `board.create` | Bind a schematic and/or PCB into a new board. Fixes a floating PCB before `import_changes`. Mutates. |
+| `board.rename` | Rename a board by its current name. Mutates. |
+| `board.copy` | Duplicate a board (schematic + PCB). Mutates. |
+| `board.delete` | Delete a board by name (confirmation-gated, no undo). Mutates. |
+
 ### Draw / edit (6 actions, all mutate)
 
 | Action | What |

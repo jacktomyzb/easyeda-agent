@@ -40,6 +40,18 @@ missing **and** the user explicitly accepts a debug path.
 - `document.open` — open any document (schematic page or PCB) by uuid; the cross-type switch entry.
 - `pcb.board.info` — current Board (schematic↔PCB linkage) + current PCB; the prerequisite context for `import_changes`.
 
+### Board (板子/组合 — the schematic↔PCB binding)
+
+A **Board groups exactly one schematic + one PCB** — that is how the two are kept
+together, and what `import_changes` follows. Boards are identified by **name**, not
+uuid. CLI: `easyeda board …`. Maps to `eda.dmt_Board.*`.
+
+- `board.list` / `board.current` — all boards (name + bound schematic + pcb) / the current one.
+- `board.create` — bind a schematic and/or PCB into a new board (`--schematic` / `--pcb`). The fix for a floating/unlinked PCB before `import_changes`.
+- `board.rename` — rename a board (`--name` → `--new`).
+- `board.copy` — duplicate a board (its schematic + PCB).
+- `board.delete` — delete a board by name (**confirm** — no undo).
+
 ### View (canvas — shared with the schematic editor)
 
 Act on the focused canvas; the editor view shortcuts. CLI: `easyeda view …`.
