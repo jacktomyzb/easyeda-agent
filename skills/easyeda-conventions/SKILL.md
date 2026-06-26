@@ -36,3 +36,27 @@ zones in easyeda-conventions").
 - Canonical **data** files (`orientation.json`, `standard-parts.json`) are read across
   the skill boundary by `easyeda-schematic/scripts/{orient,bom-enrich}.py`; the paths
   are relative (`../../easyeda-conventions/references/…`).
+
+## Contributing domain knowledge
+
+**This skill is the right place to contribute EE expertise.** If you have hands-on
+experience with EasyEDA Pro, JLC/LCSC sourcing, or PCB/schematic design conventions,
+a focused PR that improves one of the reference files is the highest-leverage
+contribution you can make — it propagates to every AI-assisted design immediately.
+
+High-value contributions:
+
+| What | Where |
+|---|---|
+| Schematic layout rules: zone map, spacing, flag orientation | [`references/schematic-layout-conventions.md`](references/schematic-layout-conventions.md) |
+| PCB placement/routing rules: line widths, grid, keep-outs | [`references/pcb-layout-conventions.md`](references/pcb-layout-conventions.md) |
+| Part selection criteria: ranking, sourcing, standardisation loop | [`references/part-selection.md`](references/part-selection.md) |
+| New standard parts (MPN + LCSC C-number + libraryUuid) | [`references/standard-parts.json`](references/standard-parts.json) |
+
+**PR guidelines:**
+- One convention per PR — small and reviewable beats large and risky.
+- Cite the *why*: a real failure mode, a JLC sourcing constraint, or a tested measurement.
+- If you're updating `orientation.json`, run `make lint-test` first — it asserts the
+  linter and connector derive the same rotation table from that file.
+- `standard-parts.json` additions should include MPN, LCSC C-number, libraryUuid,
+  deviceUuid, and package; verify the C-number is in stock on lcsc.com before PR.
