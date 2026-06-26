@@ -300,6 +300,42 @@ func AllActions() []ActionSpec {
 			Outputs:      []string{"deleted"},
 			VerifyWith:   []string{"pcb.components.list"},
 		},
+		// ─── PCB layout-adjustment (deterministic; no native align/grid API) ──
+		// Read each component's bbox + anchor, compute, write absolute x/y.
+		// Operate on the current selection by default, or explicit primitiveIds.
+		{
+			Name:        "pcb.align",
+			Domain:      DomainPcb,
+			Phase:       2,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Align components by an edge or center. mode = left|right|top|bottom|centerX|centerY (top/bottom are y-up: top = larger y). Aligns to the group extent. Operates on the current selection unless primitiveIds is given.",
+			Inputs:      []string{"mode", "primitiveIds optional"},
+			Outputs:     []string{"moved[].primitiveId", "moved[].designator", "moved[].from", "moved[].to", "count"},
+			VerifyWith:  []string{"pcb.components.list"},
+		},
+		{
+			Name:        "pcb.distribute",
+			Domain:      DomainPcb,
+			Phase:       2,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Evenly space component centers along an axis. axis = x|y. Keeps the two extreme components fixed and distributes the rest between them. Operates on the current selection unless primitiveIds is given.",
+			Inputs:      []string{"axis", "primitiveIds optional"},
+			Outputs:     []string{"moved[].primitiveId", "moved[].designator", "moved[].from", "moved[].to", "count"},
+			VerifyWith:  []string{"pcb.components.list"},
+		},
+		{
+			Name:        "pcb.grid_snap",
+			Domain:      DomainPcb,
+			Phase:       2,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Snap component anchors to a grid: round x/y to the nearest multiple of grid (in PCB data units, mil-scale). Operates on the current selection unless primitiveIds is given.",
+			Inputs:      []string{"grid", "primitiveIds optional"},
+			Outputs:     []string{"snapped[].primitiveId", "snapped[].from", "snapped[].to", "grid", "count"},
+			VerifyWith:  []string{"pcb.components.list"},
+		},
 		{
 			Name:         "debug.exec_js",
 			Domain:       DomainDebug,

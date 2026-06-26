@@ -1162,6 +1162,152 @@ const pcbComponentDelete: Handler = async (payload) => {
 	return { result: { deleted } };
 };
 
+// ─── PCB layout adjustment (deterministic align / distribute / grid-snap) ──
+// EasyEDA exposes NO component align/distribute/grid API, so these read each
+// component's bbox + anchor, compute, and write absolute x/y. Fully testable.
+
+type PcbBox = { minX: number; minY: number; maxX: number; maxY: number };
+type PcbLayoutItem = { id: string; designator: string | undefined; x: number; y: number; box: PcbBox };
+
+/** Resolve target component ids: explicit primitiveIds, else the current selection. */
+async function resolvePcbTargetIds(payload: Payload): Promise<Array<string>> {
+	const raw = payload.primitiveIds;
+	if (typeof raw === 'string') return [raw];
+	if (Array.isArray(raw) && raw.every(id => typeof id === 'string')) return raw as Array<string>;
+	try {
+		return (await eda.pcb_SelectControl.getAllSelectedPrimitives_PrimitiveId()) ?? [];
+	}
+	catch { return []; }
+}
+
+/** Read a component's anchor (x/y) and rendered bbox. Returns null for non-components. */
+async function readPcbComponentLayout(id: string): Promise<PcbLayoutItem | null> {
+	const component = await eda.pcb_PrimitiveComponent.get(id);
+	if (!component) return null;
+	const box = await eda.pcb_Primitive.getPrimitivesBBox([id]);
+	if (!box) return null;
+	return {
+		id,
+		designator: component.getState_Designator(),
+		x: component.getState_X(),
+		y: component.getState_Y(),
+		box,
+	};
+}
+
+const pcbAlign: Handler = async (payload) => {
+	const mode = requireString(payload, 'mode');
+	const ids = await resolvePcbTargetIds(payload);
+	const items = (await Promise.all(ids.map(readPcbComponentLayout))).filter((i): i is PcbLayoutItem => i !== null);
+	if (items.length < 2) {
+		throw new ActionError(
+			ErrorCodes.MISSING_PAYLOAD_FIELD,
+			`align needs >= 2 components (got ${items.length}); select components or pass primitiveIds.`,
+		);
+	}
+
+	const cx = (b: PcbBox) => (b.minX + b.maxX) / 2;
+	const cy = (b: PcbBox) => (b.minY + b.maxY) / 2;
+	// Target reference = the group extent; each item shifts so its edge/center matches.
+	let targetFor: (it: PcbLayoutItem) => { x?: number; y?: number };
+	switch (mode) {
+		case 'left': { const t = Math.min(...items.map(i => i.box.minX)); targetFor = i => ({ x: i.x + (t - i.box.minX) }); break; }
+		case 'right': { const t = Math.max(...items.map(i => i.box.maxX)); targetFor = i => ({ x: i.x + (t - i.box.maxX) }); break; }
+		// y-up: "top" is the larger y.
+		case 'top': { const t = Math.max(...items.map(i => i.box.maxY)); targetFor = i => ({ y: i.y + (t - i.box.maxY) }); break; }
+		case 'bottom': { const t = Math.min(...items.map(i => i.box.minY)); targetFor = i => ({ y: i.y + (t - i.box.minY) }); break; }
+		case 'centerX': { const t = items.reduce((s, i) => s + cx(i.box), 0) / items.length; targetFor = i => ({ x: i.x + (t - cx(i.box)) }); break; }
+		case 'centerY': { const t = items.reduce((s, i) => s + cy(i.box), 0) / items.length; targetFor = i => ({ y: i.y + (t - cy(i.box)) }); break; }
+		default:
+			throw new ActionError(
+				ErrorCodes.MISSING_PAYLOAD_FIELD,
+				`Unknown align mode "${mode}"; expected left|right|top|bottom|centerX|centerY.`,
+			);
+	}
+
+	const moved: Array<Record<string, unknown>> = [];
+	for (const it of items) {
+		const t = targetFor(it);
+		const nx = t.x ?? it.x;
+		const ny = t.y ?? it.y;
+		try {
+			if (nx !== it.x || ny !== it.y) await eda.pcb_PrimitiveComponent.modify(it.id, { x: nx, y: ny });
+		}
+		catch (err) {
+			throw edaError(err, `Failed to align component ${it.designator ?? it.id}.`);
+		}
+		moved.push({ primitiveId: it.id, designator: it.designator, from: { x: it.x, y: it.y }, to: { x: nx, y: ny } });
+	}
+	return { result: { mode, moved, count: moved.length } };
+};
+
+const pcbDistribute: Handler = async (payload) => {
+	const axis = requireString(payload, 'axis');
+	if (axis !== 'x' && axis !== 'y') {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, `Unknown axis "${axis}"; expected x or y.`);
+	}
+	const ids = await resolvePcbTargetIds(payload);
+	const items = (await Promise.all(ids.map(readPcbComponentLayout))).filter((i): i is PcbLayoutItem => i !== null);
+	if (items.length < 3) {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, `distribute needs >= 3 components (got ${items.length}).`);
+	}
+
+	const center = (it: PcbLayoutItem) => axis === 'x' ? (it.box.minX + it.box.maxX) / 2 : (it.box.minY + it.box.maxY) / 2;
+	const sorted = [...items].sort((a, b) => center(a) - center(b));
+	const first = center(sorted[0]);
+	const last = center(sorted[sorted.length - 1]);
+	const step = (last - first) / (sorted.length - 1);
+
+	const moved: Array<Record<string, unknown>> = [];
+	for (let i = 0; i < sorted.length; i++) {
+		const it = sorted[i];
+		const delta = (first + i * step) - center(it);
+		const nx = axis === 'x' ? it.x + delta : it.x;
+		const ny = axis === 'y' ? it.y + delta : it.y;
+		try {
+			// Keep the two extremes fixed; move only the interior ones.
+			if (i !== 0 && i !== sorted.length - 1 && Math.abs(delta) > 1e-6) {
+				await eda.pcb_PrimitiveComponent.modify(it.id, { x: nx, y: ny });
+			}
+		}
+		catch (err) {
+			throw edaError(err, `Failed to distribute component ${it.designator ?? it.id}.`);
+		}
+		moved.push({ primitiveId: it.id, designator: it.designator, from: { x: it.x, y: it.y }, to: { x: nx, y: ny } });
+	}
+	return { result: { axis, moved, count: moved.length } };
+};
+
+const pcbGridSnap: Handler = async (payload) => {
+	const grid = requireNumber(payload, 'grid');
+	if (grid <= 0) {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, `grid must be > 0 (got ${grid}).`);
+	}
+	const ids = await resolvePcbTargetIds(payload);
+	if (ids.length === 0) {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'No target components; select components or pass primitiveIds.');
+	}
+
+	const snap = (v: number) => Math.round(v / grid) * grid;
+	const snapped: Array<Record<string, unknown>> = [];
+	for (const id of ids) {
+		const component = await eda.pcb_PrimitiveComponent.get(id);
+		if (!component) continue;
+		const x = component.getState_X();
+		const y = component.getState_Y();
+		const nx = snap(x);
+		const ny = snap(y);
+		try {
+			if (nx !== x || ny !== y) await eda.pcb_PrimitiveComponent.modify(id, { x: nx, y: ny });
+		}
+		catch (err) {
+			throw edaError(err, `Failed to grid-snap component ${component.getState_Designator() ?? id}.`);
+		}
+		snapped.push({ primitiveId: id, designator: component.getState_Designator(), from: { x, y }, to: { x: nx, y: ny } });
+	}
+	return { result: { grid, snapped, count: snapped.length } };
+};
+
 // ─── Debug escape hatch ──────────────────────────────────────────────
 
 /**
@@ -1217,6 +1363,9 @@ const HANDLERS: Record<string, Handler> = {
 	'pcb.import_changes': pcbImportChanges,
 	'pcb.component.modify': pcbComponentModify,
 	'pcb.component.delete': pcbComponentDelete,
+	'pcb.align': pcbAlign,
+	'pcb.distribute': pcbDistribute,
+	'pcb.grid_snap': pcbGridSnap,
 	'debug.exec_js': debugExecJs,
 };
 
