@@ -68,30 +68,13 @@ def unit_price_at(prices, qty):
     return prices[0].get('productPrice')
 
 
-def score(c, qty):
-    is_base = c.get('componentLibraryType') == 'base'
-    preferred = bool(c.get('preferredComponentFlag'))
-    stock = c.get('stockCount') or 0
-    price = unit_price_at(c.get('componentPrices'), qty) or 9.99
-
-    s = 0.0
-    s += 1000 if is_base else 0                 # basic dominates (no feeder fee)
-    s += 200 if preferred else 0
-    if stock >= qty:
-        s += 300
-    elif stock > 0:
-        s += 100
-    else:
-        s -= 1000                                # out of stock
-    s += -float(price) * 1000                    # cheaper = higher (tiebreaker)
-    return s, {'base': is_base, 'preferred': preferred, 'stock': stock, 'unit': price}
-
-
 def select(keyword, qty=100, n=20):
     # JLC's default search returns only extended parts in the top page; the few
-    # BASIC parts must be requested explicitly. Fetch both and merge (dedup by C#).
+    # BASIC parts must be requested explicitly. The base library per category is
+    # small (~tens), but the wanted basic (e.g. the 10k C25744) can rank below other
+    # basic 0402 parts, so fetch a generous page. Merge both, dedup by C#.
     seen, cands = set(), []
-    for c in jlc_search(keyword, 10, library_type='base') + jlc_search(keyword, n):
+    for c in jlc_search(keyword, 50, library_type='base') + jlc_search(keyword, n):
         code = c.get('componentCode')
         if code and code not in seen:
             seen.add(code)
@@ -99,20 +82,27 @@ def select(keyword, qty=100, n=20):
     qterms = [t for t in norm(keyword).split() if t]
     ranked = []
     for c in cands:
-        sc, why = score(c, qty)
+        stock = c.get('stockCount') or 0
+        unit = float(unit_price_at(c.get('componentPrices'), qty) or 9.99)
         ranked.append({
             'lcsc': c.get('componentCode'),
             'mpn': c.get('componentModelEn'),
             'brand': c.get('componentBrandEn'),
             'desc': c.get('describe') or c.get('componentSpecificationEn'),
-            'relevance': relevance(c, qterms), 'score': round(sc, 2), **why,
+            'relevance': relevance(c, qterms),
+            'base': c.get('componentLibraryType') == 'base',
+            'preferred': bool(c.get('preferredComponentFlag')),
+            'stock': stock, 'in_stock': stock >= qty, 'unit': unit,
         })
-    # Spec match FIRST (drop candidates that don't match the value, e.g. a cheap
-    # basic 220pF when you asked for 10k), then base/stock/price.
+    # Spec match FIRST (drop candidates whose value doesn't match — a cheap basic
+    # 220pF must not win a 10k query); THEN buildable (stock >= qty, so the pick can
+    # actually be ordered); THEN basic (no feeder fee); preferred; cheapest. A basic
+    # part with too little stock thus yields to an in-stock part — buildability wins.
     maxrel = max((r['relevance'] for r in ranked), default=0)
     if maxrel:
         ranked = [r for r in ranked if r['relevance'] >= maxrel]
-    ranked.sort(key=lambda r: (r['relevance'], r['score']), reverse=True)
+    ranked.sort(key=lambda r: (r['relevance'], r['in_stock'], r['base'],
+                               r['preferred'], -r['unit']), reverse=True)
     return ranked
 
 
@@ -129,15 +119,19 @@ def main():
         print(json.dumps(ranked, ensure_ascii=False, indent=1))
         return 0
     print(f'query="{args[0]}"  qty={qty}  candidates={len(ranked)}\n')
-    print(f"{'#':>2} {'LCSC':>10} {'type':<7} {'stock':>8} {'unit@'+str(qty):>9} {'score':>8}  MPN / desc")
+    print(f"{'#':>2} {'LCSC':>10} {'type':<7} {'stock':>9} {'unit@'+str(qty):>9}  MPN / desc")
     for i, r in enumerate(ranked[:10], 1):
         tag = 'BASIC' if r['base'] else 'ext'
-        print(f"{i:>2} {str(r['lcsc']):>10} {tag:<7} {r['stock']:>8} {str(r['unit']):>9} {r['score']:>8}  "
+        low = '' if r['in_stock'] else '!'      # ! = stock < build qty
+        print(f"{i:>2} {str(r['lcsc']):>10} {tag:<7} {r['stock']:>8}{low:1} {str(r['unit']):>9}  "
               f"{str(r['mpn'])[:20]:<20} {str(r['desc'])[:34]}")
     best = ranked[0] if ranked else None
     if best:
+        warn = '' if best['in_stock'] else (
+            f"  ⚠ 库存 {best['stock']} < {qty},可能不够;表中带库存的可作替代")
         print(f"\n✅ 推荐: {best['lcsc']} ({best['mpn']}) — "
-              f"{'BASIC' if best['base'] else 'extended'}, 库存 {best['stock']}, 单价@{qty} {best['unit']}")
+              f"{'BASIC' if best['base'] else 'extended'}, 库存 {best['stock']}, "
+              f"单价@{qty} {best['unit']}{warn}")
     return 0
 
 

@@ -23,14 +23,18 @@ EasyEDA webview can't make these cross-origin fetches; the daemon/tool can.
 
 ## Ranking (`skills/easyeda-schematic/scripts/parts-select.py`)
 
+Tuple sort — each tier breaks ties of the one above:
+
 1. **Relevance gate** — normalize value text (`10kohm`/`10kΩ`/`10k` → `10k`,
    `µ`→`u`) and require the candidate to match the query's value, so a cheap basic
    220pF can't win when you asked for 10k. Keep only the top-relevance candidates.
-2. **Basic** (`componentLibraryType=base`) — dominant bonus (avoids the per-extended
-   feeder fee).
-3. **Preferred** flag — quality/availability signal.
-4. **In stock** ≥ build qty — out-of-stock heavily penalized.
-5. **Cheapest** unit price at the build qty — tiebreaker.
+2. **Buildable** — `stockCount ≥ build qty`, so the pick can actually be ordered. A
+   basic part with too little stock yields to an in-stock one (marked `!` in the
+   table); the build qty makes this stock-aware (10k basic wins at qty 100, yields at
+   qty 5000 when its stock can't cover it).
+3. **Basic** (`componentLibraryType=base`) — avoids the per-extended feeder fee.
+4. **Preferred** flag — quality/availability signal.
+5. **Cheapest** unit price at the build qty — final tiebreaker.
 
 ```
 parts-select.py "100nF 0402 X7R" --qty 100        # → recommends C1525 (BASIC, 22M stock)
@@ -53,10 +57,9 @@ by live stock/price/basic data instead of a guess. Validated: 100nF→C1525,
 
 ## Known limitations / refinements
 
-- **Basic-search keyword matching is weak** — e.g. `10kohm 0402` did not surface the
-  basic 10k (C25744) in the base-filtered page, so the selector recommended a correct
-  but *extended* 10k. Refinements: add a category filter, normalize the value into
-  JLC's indexed form, or cross-check `standard-parts.json` for a known basic.
+- **Basic-search page depth** — *fixed*: the base-filtered query fetches a generous
+  page (50), so a wanted basic that JLC ranks low (e.g. 10k C25744) still surfaces and
+  the relevance gate picks it. A category filter would harden this further.
 - **Spec-attribute matching** — currently value-token overlap; could compare the
   `attributes` array (voltage / tolerance / temperature) against an explicit spec.
 - **Caching & rate limits** — cache JLC responses; the APIs are unofficial and may
