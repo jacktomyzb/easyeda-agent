@@ -46,28 +46,43 @@ near-equivalent, first).
 5. **Verify** with `schematic.drc.check` + the data linter
    (`tools/schematic-lint/lint.sh <project>`), and fix what it reports.
 
-## Phase 1 Actions
+## Actions
 
 Run `easyeda actions` for the current machine-readable action list.
 
-Core schematic operations:
+### 导航 / Navigation
 
-- `project.current`
-- `document.current`
-- `schematic.pages.list`
-- `schematic.page.open`
+- `project.current` — 当前工程信息（uuid / name / teamUuid）
+- `document.current` — 当前激活文档信息（uuid / tabId / documentType）
+- `document.open` — 按 UUID 打开任意文档（原理图页或 PCB），通用版切换入口
+- `schematic.pages.list` — 列出工程内所有原理图及页面
+- `schematic.page.open` — 按 UUID 切换到指定原理图页（等同于 `document.open`，保留兼容）
+
+多窗口说明：EasyEDA 每个窗口对应一个独立的 connector（windowId）。`system.health` 列出所有已连接窗口；在任意 action 中传 `--window <windowId>` 可指定操作哪个工程。
+
+### 原理图编辑
+
 - `schematic.components.list`
 - `schematic.component.place`
 - `schematic.component.modify`
 - `schematic.component.delete`
 - `schematic.wire.create`
 - `schematic.netflag.create`
+- `schematic.power.connect_pin`
 - `schematic.select`
 - `schematic.snapshot`
 - `schematic.drc.check`
 - `schematic.save`
 - `schematic.export.netlist`
 - `schematic.export.bom`
+- `schematic.library.search`
+
+### PCB（Phase 2，只读）
+
+- `pcb.documents.list` — 列出工程内所有 PCB 文档（uuid + name），配合 `document.open` 切换到 PCB
+- `pcb.components.list` — 列出 PCB 上的封装/器件
+- `pcb.layers.list` — 列出 PCB 层信息
+- `pcb.nets.list` — 列出 PCB 网络
 
 ## Guardrails
 
