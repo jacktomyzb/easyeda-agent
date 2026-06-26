@@ -83,6 +83,8 @@ curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main
 
 **版本号约定**：CLI 和 connector 始终用同一版本号（`make release` 负责把 `extension.json` 同步到 VERSION，不需要提前跑 `make eext`）。`make release` 会自动打 git tag、push 并创建 GitHub Release。
 
+**Changelog 门禁**：`extension/CHANGELOG.md` 必须有对应版本的 `## [x.y.z]` 条目。`make release` 会**硬校验**（缺条目直接报错退出，发版前先补 changelog）；`make eext`（dev 循环）只**警告**不阻断。校验逻辑在 `extension/scripts/bump.mjs`（`--require-changelog`）。
+
 ## Skill scripts usage
 
 All tools live in `skills/easyeda-schematic/scripts/`.

@@ -92,7 +92,7 @@ endif
 	@echo "── Building release $(VERSION) ──"
 	rm -rf $(DIST) && mkdir -p $(DIST)
 	@echo "  syncing connector version to $(VERSION)..."
-	node extension/scripts/bump.mjs $(VERSION:v%=%)
+	node extension/scripts/bump.mjs $(VERSION:v%=%) --require-changelog
 	npm --prefix extension run typecheck
 	npm --prefix extension run build
 	@echo "  compiling CLI..."

@@ -19,6 +19,21 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extPath = path.join(here, '..', 'extension.json');
 const pkgPath = path.join(here, '..', 'package.json');
+const changelogPath = path.join(here, '..', 'CHANGELOG.md');
+
+// Does CHANGELOG.md carry a `## [<version>]` heading for this version?
+function changelogHasEntry(version) {
+	let text;
+	try {
+		text = fs.readFileSync(changelogPath, 'utf-8');
+	}
+	catch {
+		return false;
+	}
+	// `## [0.5.4]` at the start of a line, version bracketed.
+	const re = new RegExp(`^##\\s*\\[${version.replace(/\./g, '\\.')}\\]`, 'm');
+	return re.test(text);
+}
 
 function parse(v) {
 	const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v);
@@ -44,6 +59,9 @@ function writeJsonTabs(file, obj) {
 const args = process.argv.slice(2);
 const mode = args.find((a) => !a.startsWith('--')) ?? 'patch';
 const freshUuid = args.includes('--uuid'); // opt-in fallback: mint a new uuid
+// --require-changelog: hard-fail when the new version has no CHANGELOG entry
+// (used by `make release`); otherwise a missing entry is just a warning.
+const requireChangelog = args.includes('--require-changelog');
 
 const ext = JSON.parse(fs.readFileSync(extPath, 'utf-8'));
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
@@ -71,3 +89,13 @@ console.log(`version ${from} -> ${to}  (extension.json + package.json)`);
 console.log(freshUuid
 	? `uuid    ${fromUuid} -> ${toUuid}  (FRESH uuid — imports as a new extension; delete the old one)`
 	: `uuid    ${toUuid}  (unchanged — update in place: uninstall old in 已安装, then import)`);
+
+// Changelog gate: a release MUST document the version; the dev loop only nags.
+if (!changelogHasEntry(to)) {
+	const msg = `CHANGELOG.md has no "## [${to}]" entry — add one in extension/CHANGELOG.md`;
+	if (requireChangelog) {
+		console.error(`\n❌ ${msg}\n   (release requires a changelog entry for this version)`);
+		process.exit(1);
+	}
+	console.warn(`\n⚠️  ${msg} before release.`);
+}
