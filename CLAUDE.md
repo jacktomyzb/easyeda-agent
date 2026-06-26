@@ -17,6 +17,7 @@ skill ──▶ Go CLI/daemon ──WebSocket──▶ connector .eext ──▶
 | `extension/` | TypeScript connector → esbuild → `.eext`. `src/transport.ts` (port-scan + auto-reconnect), `src/actions.ts` (eda.* handlers + `connect_pin`). |
 | `tools/schematic-lint/` | Data-only schematic linter (no screenshots) + rule-trust harness + diff baseline. |
 | `docs/schematic-layout-conventions.md` | Layout/orientation conventions the agent must follow. |
+| `docs/FEATURES.md` | Feature-status inventory (20 actions grouped by capability) + roadmap. |
 | `skills/easyeda-schematic/SKILL.md` | The user-facing skill. |
 
 ## Dev workflow
@@ -65,11 +66,22 @@ reaches the daemon.
   uninstall. Our manifest is complete; there is no in-place auto-update for
   sideloaded `.eext` (that's a marketplace-only feature). **Most changes don't
   even need a re-import — use the `debug.exec_js` escape hatch** for scriptable
-  behavior; only manifest/handler changes require a rebuild.
-- **EasyEDA schematic coords are y-UP** (+y renders upward); `createNetFlag` /
-  `createNetPort` rotation is **identity** (no negation). Orientation table lives
-  in `tools/schematic-lint/orientation.json` (single source of truth, derived by
-  both the linter and `connect_pin`).
+  behavior; only manifest/handler changes require a rebuild. **And re-importing
+  does NOT reload already-open EasyEDA windows** — an open window keeps running the
+  OLD connector code and fights the freshly-imported one over the daemon socket;
+  **fully quit and relaunch EasyEDA** to load new connector code.
+- **EasyEDA schematic coords are y-UP** (+y renders upward). The orientation table
+  in `tools/schematic-lint/orientation.json` is the single source of truth (derived
+  by both the linter and `connect_pin`), validated read-only against real placed
+  flags by `calibrate.js`. ⚠️ **Rotation behavior is connector-version-dependent and
+  must be VERIFIED, not assumed:** the code passes rotation through *identity*, and
+  the prior "negation" was reverted as a misdiagnosis — yet a 2026-06 connector
+  build empirically stored `createNetFlag` rotations **negated** (passed 90 →
+  re-pulled 270; flags only rendered correctly when the negated value was passed).
+  So: after creating flags, **read back / lint the orientation and compensate if it
+  reads wrong** — and beware `getState_Rotation()` *immediately* after create can
+  return the input value while a fresh re-pull shows the stored (possibly negated)
+  one. Resolve definitively by placing one flag via `connect_pin` and eyeballing it.
 - **A netflag must connect via a real wire** — overlapping the pin coordinate is
   NOT a connection (DRC won't see it).
 - No programmatic undo in `eda.*`; `modify` only works on components (not flags —

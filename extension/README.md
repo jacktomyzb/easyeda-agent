@@ -131,8 +131,11 @@ Frame sequence:
 3. **Connector → daemon (best-effort):**
    `{"type":"context","windowId":"...","projectUuid":"...","projectName":"...","documentUuid":"...","documentType":"schematic","tabId":"..."}`
    — empty fields are omitted.
-4. **Heartbeat:** connector sends `{"type":"ping","id":"hb-<n>"}` every 15s; a
-   missing `pong` within 5s is treated as dead → reconnect. A daemon-initiated
+4. **Heartbeat:** connector sends `{"type":"ping","id":"hb-<n>"}` every 3s.
+   Liveness is **consecutive-miss based**, not a single round-trip deadline: only
+   after 3 pings go unanswered in a row (~9s of true silence) is the socket
+   considered dead → reconnect. A single lagged pong (EasyEDA's webview stalls on
+   canvas redraw / GC) does NOT tear the socket down. A daemon-initiated
    `{"type":"ping","id":...}` is answered with `{"type":"pong","id":...}`.
 5. **Daemon → connector:**
    `{"type":"request","id":"req_N","version":"v1","action":"<action>","payload":{...},"windowId":"..."}`.
@@ -140,13 +143,19 @@ Frame sequence:
    `{"type":"response","id":"req_N","version":"v1","ok":true,"result":{...},"context":{...},"artifacts":[...],"warnings":[...]}`
    or on failure
    `{"type":"response","id":"req_N","version":"v1","ok":false,"error":{"code":"...","message":"...","detail":"<original eda error>"}}`.
+7. **Connector → daemon (diagnostics, best-effort):**
+   `{"type":"log","msg":"<connection-lifecycle event>"}` — reconnect reasons and
+   register attempts, surfaced in the daemon log as `connector LOG: …`. Deliberately
+   NOT emitted per ping/pong, to keep the log readable.
 
-Auto-reconnect: up to 5 retries, 3s apart, before giving up (re-armed by
-**Reconnect**).
+Auto-reconnect **never permanently gives up**. Up to 5 fast retries 3s apart, then
+it falls back to a quiet 10s background poll (announced once, then silent) so a
+daemon started/restarted later auto-connects with no manual **Reconnect**. The
+liveness loop also reconnects on a `send` throw (the underlying socket is gone).
 
 ---
 
-## Action → `eda.*` mapping (16 Phase-1 actions)
+## Action → `eda.*` mapping (19 connector-dispatched actions)
 
 All `eda.*` calls are `await`ed. Component fields are read via `getState_*()`
 accessors. Coordinates are passed through from the payload unchanged (unit
@@ -164,16 +173,23 @@ handling is the daemon/skill's concern).
 | `schematic.component.delete` | `sch_PrimitiveComponent.delete(primitiveIds)` → `{deleted}` |
 | `schematic.wire.create` | `sch_PrimitiveWire.create(points, net?, color?, lineWidth?, lineType?)` |
 | `schematic.netflag.create` | branches on `kind` (see below) |
+| `schematic.power.connect_pin` | composite: `sch_PrimitiveWire.create([pinX,pinY,endX,endY])` then `createNetFlag`/`createNetPort` at the far end. Default offset 30u; flag body oriented outward along the stub. |
+| `schematic.library.search` | `lib_Device.search(query)` → first `limit` results (default 10), each mapped to `{libraryUuid, uuid, name, value, footprintName, lcsc, description}` |
 | `schematic.select` | `sch_SelectControl.doSelectPrimitives(primitiveIds)` then `getAllSelectedPrimitives_PrimitiveId()` |
 | `schematic.snapshot` | `dmt_EditorControl.getCurrentRenderedAreaImage(tabId?)` → Blob → artifact |
 | `schematic.drc.check` | `sch_Drc.check(strict, false, true)` → `{passed: arr.length===0, violations: arr}` |
 | `schematic.save` | `sch_Document.save()` → `{saved}` |
 | `schematic.export.netlist` | `sch_ManufactureData.getNetlistFile(fileName?, netlistType?)` → File → artifact |
 | `schematic.export.bom` | `sch_ManufactureData.getBomFile(fileName?, fileType, template?, filterOptions?, statistics?, property?, columns?)` → File → artifact |
+| `debug.exec_js` | runs raw `eda.*` JS via an `AsyncFunction('eda', code)` — escape hatch, confirmation-gated |
 
-> Note: `system.health` (action #1 in `Phase1Actions()`) is handled by the Go
-> daemon itself (daemon/connector liveness) and is not dispatched to the
-> connector, so it is not in the table above.
+> Note: the catalog has **20** typed actions (`make actions`). `system.health` is
+> handled by the Go daemon itself (daemon/connector liveness, no window) and is not
+> dispatched to the connector, so the connector's handler map is the **19** above.
+>
+> `schematic.library.search` returns EasyEDA's native result order truncated to
+> `limit` — it does NOT rerank, despite the action description's "ranked list"
+> wording. See [docs/FEATURES.md](../docs/FEATURES.md) (optimized-search roadmap).
 
 ### `schematic.netflag.create` — payload `kind` → API mapping
 

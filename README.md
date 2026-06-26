@@ -16,6 +16,8 @@
 
 The upstream `run-api-gateway` proves the important entry point: code can run inside EasyEDA with access to the official `eda` object. Its rough edge is that it exposes raw JavaScript execution as the main workflow. That is powerful, but brittle for agents.
 
+The connector is real and working: it port-scans `49620-49629`, validates a handshake, self-heals its connection, and dispatches **20 typed actions** to the official `eda.*` API. Raw JS survives only as the confirmation-gated `debug.exec_js` escape hatch. See [docs/FEATURES.md](docs/FEATURES.md) for the full feature/roadmap inventory.
+
 This project moves the system into a better shape:
 
 - Skill describes expert workflow and guardrails.
@@ -30,27 +32,35 @@ Phase 1 focuses on schematic workflows:
 - connect to an active EasyEDA window
 - read project and current document context
 - list schematic pages
+- search the EasyEDA device library and place real LCSC / 立创 parts by identity
 - list, place, modify, and delete schematic components
 - create wires, net labels, ports, power flags, and ground flags
+- `connect_pin` — draw a stub wire out of a pin and place a netflag at its far end in one call (avoids the "flag overlaps pin" DRC fatal)
 - select and inspect primitives
 - run schematic DRC
 - save schematic changes
 - export schematic netlist and BOM artifacts
 - capture schematic viewport snapshots for verification
 
+A data-only [schematic linter](tools/schematic-lint/README.md) finds layout and
+connectivity problems from primitive data (no screenshots), with a diff baseline.
+
 PCB, footprint, manufacturing, and library authoring are intentionally deferred.
+A roadmap (standard-parts library, optimized search, LCSC mall comparison) lives
+in [docs/FEATURES.md](docs/FEATURES.md).
 
 ## Repository Layout
 
 ```text
 cmd/easyeda/                 CLI entrypoint used by humans and Skills
 internal/app/                CLI command implementation
-internal/daemon/             Future local daemon boundary
-internal/protocol/           Typed action protocol shared with connector
+internal/daemon/             Local daemon: /health, /eda (connector WS), /action
+internal/protocol/           Typed action protocol shared with connector (actions.go)
 internal/version/            Build/version metadata
-extension/                   EasyEDA connector notes and future source
-skills/easyeda-schematic/    Phase 1 Skill draft
-docs/                        Architecture, protocol, roadmap, decisions
+extension/                   EasyEDA connector (.eext) source + build (TypeScript → esbuild)
+tools/schematic-lint/        Data-only schematic linter + rule-trust harness + diff baseline
+skills/easyeda-schematic/    The user-facing Skill
+docs/                        Architecture, protocol, features/roadmap, conventions, decisions
 ```
 
 ## Current Commands
@@ -74,7 +84,7 @@ go run ./cmd/easyeda call system.health
 
 `call <action>` finds the running daemon and posts a typed action to it. `system.health` is answered by the daemon itself (no connector required); schematic actions need a connected EasyEDA window and return `NO_CONNECTOR` until the connector extension is running.
 
-The Go daemon side of the action protocol is in place. The EasyEDA connector under `extension/` is a working transport/dispatch skeleton; its `eda.*` calls are stubbed pending validation against the official EasyEDA extension SDK.
+Both sides of the action protocol are in place and working. The Go daemon owns the protocol, state, artifacts, and validation; the EasyEDA connector under `extension/` is a buildable `.eext` that dispatches the 20 typed actions to live `eda.*` calls (type-checked against `@jlceda/pro-api-types`). See [extension/README.md](extension/README.md).
 
 ## Design Position
 
