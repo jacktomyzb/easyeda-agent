@@ -12,6 +12,10 @@ skill ──▶ Go CLI/daemon ──WebSocket──▶ connector .eext ──▶
 
 reply as chiense! reply as chiense! reply as chiense!
 
+**Commit directly on `main` — do NOT create feature branches.** Develop and commit
+on `main` by default (user preference). Don't `git checkout -b`; just commit to
+`main`. Push only when explicitly asked.
+
 ## Layout
 
 | Path | What |
