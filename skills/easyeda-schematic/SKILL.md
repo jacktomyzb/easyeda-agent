@@ -53,7 +53,7 @@ near-equivalent, first).
    coordinate → a manufacturable part with correct symbol + footprint + LCSC number.
 3. **Read pins** (`schematic.components.list` / pin readback) for exact pin
    coordinates before wiring.
-4. **Wire** (reference-validated — see the **原子 SOP 构件 W/F/D** in
+4. **Wire** (reference-validated — see **画线 / flag / 去耦(CLI 级硬规则)** in
    [`auto-layout-sop.md`](../easyeda-conventions/references/auto-layout-sop.md);
    the 嘉立创 ESP32-S3 standard project is **flags only on power/ground rails, every
    signal a real local wire**):
