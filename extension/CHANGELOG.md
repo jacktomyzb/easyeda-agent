@@ -4,6 +4,15 @@ All notable changes to the **EasyEDA Agent Connector** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); versions
 follow [SemVer](https://semver.org/).
 
+## [0.5.6] - 2026-06-27
+### Changed
+- **Rebuild to pair with the daemon's live-context + `doc` work.** No connector
+  behavior change vs 0.5.5 — this build exists so a window stuck on a stale
+  connector can be re-imported to pick up real version reporting + port-scan
+  (49620–49629). The daemon now refreshes each window's context from every action
+  response (so `health` no longer reads `home` forever) and `easyeda doc ls/switch`
+  drives the discover→switch loop on top of the existing `document.open` action.
+
 ## [0.5.5] - 2026-06-27
 ### Fixed
 - **Handshake reports the real connector version.** `connectorVersion` was a
