@@ -53,11 +53,23 @@ near-equivalent, first).
    coordinate → a manufacturable part with correct symbol + footprint + LCSC number.
 3. **Read pins** (`schematic.components.list` / pin readback) for exact pin
    coordinates before wiring.
-4. **Wire**: net flags for the power/ground rails; for a local signal net, route
-   short wires that all meet at ONE junction point (star node) so EasyEDA junctions
-   them — see the Electrical Rules below (pin → wire → flag, never flag-on-pin).
+4. **Wire** (reference-validated — see the **原子 SOP 构件 W/F/D** in
+   [`auto-layout-sop.md`](../easyeda-conventions/references/auto-layout-sop.md);
+   the 嘉立创 ESP32-S3 standard project is **flags only on power/ground rails, every
+   signal a real local wire**):
+   - **Signals = real local orthogonal wires** (pin→wire→pin). Endpoint on a pin coord
+     = connected; non-aligned pins → L-route `[x1,y1, x2,y1, x2,y2]`.
+   - ⚠️ **Never run a wire through another pin** — EasyEDA trims+connects it there.
+     Route in pin-free channels.
+   - ⚠️ **Multi-pin nets: chain pin→pin** (each segment anchored on a pin), NOT a star
+     to a free junction (EasyEDA drops the un-anchored junction on merge).
+   - **Flags ONLY for power/ground rails** (`connect_pin direction=`, never blanket rot 0).
 5. **Verify** with `schematic.drc.check` + the data linter
-   (`scripts/lint.sh <project>`), and fix what it reports.
+   (`scripts/lint.sh <project>`). ⚠️ After API edits the **EasyEDA canvas may not
+   auto-redraw** → `schematic.snapshot` / `getCurrentRenderedAreaImage` return a STALE
+   frame (even `view fit` framing is stale). **Judge STATE by data (`sch list`/`getAll`),
+   use the screenshot for visual layout only**, and touch the page in EasyEDA (scroll/
+   click) to force a redraw before trusting a snapshot.
 
 ## Bulk realization from a netlist (automated)
 

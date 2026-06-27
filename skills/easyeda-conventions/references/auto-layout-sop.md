@@ -93,6 +93,39 @@ EasyEDA Pro **无 set-paper-size API**;纸张大小由**明细表/图纸符号**
 
 ---
 
+## 原子 SOP 构件(实测调通,2026-06)— building blocks
+
+> **嘉立创标准工程「实战派 ESP32-S3」校准**(3 页 A4,43/52/85=180 件):
+> **flag 网名 100% 是电源/地轨**(GND/3V3/VBUS/AU_GND/各电源域),flag/件 ≈ **0.4**;
+> **信号全是真·本地正交线**(wire/件 **1.3–2.6**),**没有一个信号用 flag/port 满天飞**;
+> 去耦距 IC ~**90–230u**。每页填满 A4 不出界。下面构件已在活板逐个单独调通。
+
+**每个构件的验收 = ① 连通 ✓ ② 布局合理 ✓(按组、器件间距合理、导线长短合理)③ 截图肉眼确认 ✓**,缺一不算过。
+
+### SOP-W 画真网线 ⭐(信号的默认连法,不是 flag/port)
+- 线**端点落在引脚坐标 = 连通**;同行/列 → 直线 `[x1,y1,x2,y2]`;不对齐 → L `[x1,y1, x2,y1, x2,y2]`(EDA 自动拆成 2 正交段)。
+- ⚠️ **线段绝不能穿过任何别的引脚**——EDA 会在穿过处**截断并连上那个引脚**(沿一排同 y/x 的引脚走线必中招)→ **走无引脚通道**。
+- ⚠️ **多脚网用 pin→pin 链式**(每段端点都锚在引脚上),**不要"星点连到空中 junction"**(EDA 合并线时丢掉无锚点 junction)。
+
+### SOP-F 电源/地轨 flag(只给轨)
+- `pin → 朝外短桩 → createNetFlag(family,net,ex,ey,applied)`,`applied=(360-BODY_ROT[fam][朝外方向])%360`(2026-06 build 存储取反)。
+- **只给电源/地轨**;信号一律走 SOP-W。
+
+### SOP-D 去耦就近
+- 读 IC 引脚 **name** 找 VCC/GND → 去耦电容放 VCC 焊盘**朝外 ~100u**(实测 95u)→ `VCC→cap.near` 短线(走无引脚通道)→ cap.far 接 GND flag、cap.near 接电源 flag。
+
+### SOP-C 模块成簇
+- 1 IC + 它**所有**去耦/上拉/外围聚成**一簇**(间距合理、线短);簇内信号本地线、轨用 flag。
+- ⚠️ IC pinout 电源+信号**同侧**(如 CH340K 右侧 VCC/V3/TXD/RXD)会挤 → 去耦挪到 IC 上/下方,让信号直出,避免信号线绕过去耦变长。
+
+### 验证 & 截图(实测可靠法)
+- **连通验证(代码,页内可靠)**:`getAll` 引脚 + `sch_PrimitiveWire` 的 `getState_Line`(**按每 4 数 = 1 段**解析,别当连续折线)→ union-find;flag 当"该节点网名"。⚠️ wire 的 `getState_Net` 不可靠(常返 `''`),别拿它判网。
+- **截图(给人看布局)**:typed `sch snapshot` → 取 `<cwd>/.easyeda/artifacts/` 里最新 png(可靠);raw `getCurrentRenderedAreaImage` 会返回**旧缓存帧**。
+- ⚠️ **API 改完 EDA 画布可能不自动重绘** → 截图/`view fit` 都是旧的(连 fit 都只框旧图元)。需在 EDA 里**碰一下那页**(滚动/点选/手动刷新)触发重绘后再截。
+- **状态查真相只信数据(`getAll`),别信截图**——截图冻结时会误导(box-v2 SOP-C:截图显示口没建成 → 重复建了一遍)。
+
+---
+
 ## 执行次序(给自动实现器)+ 收尾
 ```
 fit_sheet()                         # Step 0:估面积→定图纸/分页→记边界
@@ -125,4 +158,6 @@ writeback(): 把新解析件 diff 进 standard-parts.json(与原理图同 PR)
 ## 大批量(>~50 mutation)抗 churn(实测必备)
 (a) 显式传 `--project/--window`,中途重连不会打错窗口;(b) 用 `debug.exec_js` **批量**多图元/次,别一图元一 CLI;(c) 每个 exec_js 批**切到 <~20s**(place/wire 各分 N 块 ~20 op),长调用必被心跳杀;(d) 每块**重试 + 增量 `schematic.save`**(无 undo,半落未存=不可恢复);(e) 每块开头**重拉新 pid**。
 
-> 状态:**建议稿**(box-v2 单板实测 + 5 维审计)。后续按更多板子细化:图纸尺寸阈值、去耦 Nu 阈值、本地线 vs flag 边界。lint 须加对应门禁(decap_far / zone-adherence / flag-density / local-net-as-flag / 预放置 min-distance,见 skill-iteration 计划 #15–20)。
+> 状态:方法论(Step 0-3)+ **原子构件 W/F/D/C 已在活板逐个实测调通**,并用嘉立创标准工程校准。
+> 待办:SOP-N(网分类自动判定)、SOP-G(多页)继续按三标准调通;lint 加对应门禁(decap_far /
+> zone-adherence / flag-density / local-net-as-flag / 预放置 min-distance);把构件封装成执行器复用。
