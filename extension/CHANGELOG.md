@@ -4,6 +4,15 @@ All notable changes to the **EasyEDA Agent Connector** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); versions
 follow [SemVer](https://semver.org/).
 
+## [0.5.8] - 2026-06-27
+### Changed
+- **Version bump to pair with the daemon/CLI artifact-path change.** No connector
+  behavior change vs 0.5.7. The CLI now sends its working directory and the daemon
+  writes artifacts (snapshots, netlist/BOM exports) under `<cwd>/.easyeda/artifacts`
+  with sortable timestamped names (`<YYYYMMDD-HHMMSS>-<kind>-<short>.ext`) instead
+  of a flat `artifacts/art_<uuid>` in the daemon's cwd. Released together to keep
+  CLI and connector on the same version.
+
 ## [0.5.7] - 2026-06-27
 ### Added
 - **Heartbeat-carried context.** The connector now re-reads the active
