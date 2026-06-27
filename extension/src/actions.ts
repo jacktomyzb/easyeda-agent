@@ -60,6 +60,15 @@ function edaError(err: unknown, message: string): ActionError {
  * Serialize a schematic component primitive to plain JSON using its public
  * getState_* accessors.
  *
+ * NOTE: the `uniqueId`, `component`, `symbol`, and `footprint` fields are
+ * placed-INSTANCE identifiers (sub-primitive ids of this specific placement).
+ * They are NOT the device-library uuid that `schematicComponentPlace`
+ * ({ libraryUuid, uuid }) expects — replaying one of them into `sch place`
+ * makes `eda.sch_PrimitiveComponent.create` hang. To re-place the same part,
+ * fetch a fresh device uuid via `schematicLibrarySearch` (lib search). The
+ * connector exposes no replayable deviceUuid because `eda.sch_*` does not
+ * surface the source device-library identity of a placed instance.
+ *
  * @param component - the component primitive object
  * @returns a plain JSON record
  */

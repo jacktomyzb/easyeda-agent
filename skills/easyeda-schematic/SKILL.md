@@ -54,6 +54,12 @@ near-equivalent, first).
    carries `uuid`, `libraryUuid`, `name`, `footprintName`, `lcsc`, `manufacturerId`.
 2. **Place** `schematic.component.place` with the chosen `{libraryUuid, uuid}` at a
    coordinate → a manufacturable part with correct symbol + footprint + LCSC number.
+   ⚠️ **`--uuid` must be a DEVICE-library uuid** (from `lib search` / `standard-parts.json`),
+   **never** one of the uuid-looking fields `component`/`symbol`/`footprint`/`uniqueId`
+   that `sch list` reports — those are placed-INSTANCE ids and **cannot be replayed**.
+   Feeding an instance uuid hangs the EasyEDA API; `sch place` now fails fast (~8s) with
+   a hint instead of stalling 20s on `context deadline exceeded`. To re-place an existing
+   part, run `lib search` again to get its device uuid.
 3. **Read pins** (`schematic.components.list` / pin readback) for exact pin
    coordinates before wiring.
 4. **Wire** (reference-validated — see **画线 / flag / 去耦(CLI 级硬规则)** in
