@@ -19,8 +19,8 @@ zones in easyeda-conventions").
 
 | File | What it governs |
 |---|---|
-| [`references/design-pre-analysis.md`](references/design-pre-analysis.md) | **事前分析 SOP**（动手前）— 像设计师那样先分析(重器件/电源树/功能分组+信号流/网络分类/BOM明细表/幅面分页),产出一份「布局计划」+ 12 项 Gate 自检。`auto-layout-sop` 的**上游**。**不出计划不落坐标。** |
-| [`references/auto-layout-sop.md`](references/auto-layout-sop.md) | **自动布局执行 SOP**（动手时）— 照「布局计划」自顶向下落坐标:图纸自适应 → 主器件分区 → 去耦绑定 → 接线/朝向微调。`design-pre-analysis` 的**下游**。 |
+| [`references/design-pre-analysis.md`](references/design-pre-analysis.md) | **事前快速摸底**（可选,不是门禁）— 动手前花几分钟读懂设计(器件/电源树/功能分组/幅面)少返工;轻量摸底,布局智能交给 AI 自调。 |
+| [`references/auto-layout-sop.md`](references/auto-layout-sop.md) | **布局 CLI 能力 + 硬坑**(不是规则书)— 一条原则(flag 只给轨 / 信号=真本地线 / 去耦贴 IC / 多页分功能)+ 数据自调闭环 + 工具硬坑(画布冻结、纸张改不动、多页交错、抗 churn)。 |
 | [`references/schematic-layout-conventions.md`](references/schematic-layout-conventions.md) | Schematic: 3×3 zone map, module spacing, wire stub lengths, right-angle routing, **netflag/component orientation**, decoupling placement. |
 | [`references/pcb-layout-conventions.md`](references/pcb-layout-conventions.md) | PCB: placement priority, net-class line widths/vias, layer assignment, grid pitch, keep-outs, silkscreen — the PCB counterpart of the above. |
 | [`references/part-selection.md`](references/part-selection.md) | LCSC/JLC 比对选型: data sources, the ranking (spec → buildable → basic → preferred → cheapest), and the standardization loop. |
