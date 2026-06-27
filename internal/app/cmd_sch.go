@@ -392,7 +392,8 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 			Use:   "wire",
 			Short: "Create a schematic wire polyline",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda sch wire --points '[[100,200],[100,300]]'
+			Example: `  easyeda sch wire --points '[[100,200],[100,300]]'        # nested pairs
+  easyeda sch wire --points '[100,200,100,300]'            # flat (also accepted)
   easyeda sch wire --points '[[100,200],[100,300]]' --net VCC`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if pointsJSON == "" {
@@ -416,7 +417,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 				return dispatch(cfg, "schematic.wire.create", window, payload, stdout, stderr)
 			},
 		}
-		c.Flags().StringVar(&pointsJSON, "points", "", `JSON array of [x,y] coordinate pairs (required)`)
+		c.Flags().StringVar(&pointsJSON, "points", "", `JSON coordinate list, nested '[[x,y],...]' or flat '[x1,y1,x2,y2,...]' (connector normalizes; required)`)
 		c.Flags().StringVar(&net, "net", "", "net name to assign to the wire")
 		c.Flags().StringVar(&styleJSON, "style", "", "JSON object with wire style overrides")
 		sch.AddCommand(c)

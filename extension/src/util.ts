@@ -149,3 +149,65 @@ export function optionalBoolean(payload: PayloadRecord, field: string): boolean 
 	const value = payload[field];
 	return typeof value === 'boolean' ? value : undefined;
 }
+
+/**
+ * Normalize wire `points` into the flat `number[]` form that
+ * `eda.sch_PrimitiveWire.create` actually accepts.
+ *
+ * Callers may pass either:
+ *  - flat:   `[x1, y1, x2, y2, ...]`
+ *  - nested: `[[x1, y1], [x2, y2], ...]`
+ *
+ * EDA only accepts the flat form — nested arrays make `create` fail with
+ * `EDA_CALL_FAILED / "create failed!"` (see issue #5). We flatten here so every
+ * caller (CLI / `call` / sch.py / debug.exec_js) is normalized at a single source
+ * of truth. The result is validated to be an even-length (`≥4`) array of finite
+ * numbers — i.e. at least two coordinate pairs.
+ *
+ * @param points - raw `points` value from the payload
+ * @returns flat `number[]` (`[x1, y1, x2, y2, ...]`)
+ * @throws ActionError when `points` is missing/empty or not a valid coordinate list
+ */
+export function normalizeWirePoints(points: unknown): number[] {
+	if (!Array.isArray(points) || points.length === 0) {
+		throw new ActionError(
+			ErrorCodes.MISSING_PAYLOAD_FIELD,
+			'Missing required field "points" (number[] or number[][]).',
+		);
+	}
+
+	let flat: unknown[];
+	if (Array.isArray(points[0])) {
+		// Nested [[x,y],...] → flatten one level into [x,y,...].
+		flat = [];
+		for (const pair of points) {
+			if (!Array.isArray(pair) || pair.length !== 2) {
+				throw new ActionError(
+					ErrorCodes.MISSING_PAYLOAD_FIELD,
+					'Invalid "points": each nested entry must be a [x, y] pair.',
+				);
+			}
+			flat.push(pair[0], pair[1]);
+		}
+	}
+	else {
+		flat = points;
+	}
+
+	if (flat.length < 4 || flat.length % 2 !== 0) {
+		throw new ActionError(
+			ErrorCodes.MISSING_PAYLOAD_FIELD,
+			`Invalid "points": expected an even number of coordinates (≥4 = at least two [x, y] points), got ${flat.length}.`,
+		);
+	}
+	for (const n of flat) {
+		if (typeof n !== 'number' || !Number.isFinite(n)) {
+			throw new ActionError(
+				ErrorCodes.MISSING_PAYLOAD_FIELD,
+				'Invalid "points": all coordinates must be finite numbers.',
+			);
+		}
+	}
+
+	return flat as number[];
+}
