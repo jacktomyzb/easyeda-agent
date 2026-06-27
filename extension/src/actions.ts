@@ -1256,12 +1256,13 @@ const schematicDrcCheck: Handler = async (payload) => {
 
 // One reconstructed design-check finding. Reuses the DRC severity buckets.
 interface CheckFinding {
-	type: string; // 'floating-pin'
+	type: string; // 'floating-pin' | 'wire-crossing' | 'wire-over-pin'
 	level: DrcSeverity;
 	designator?: string;
 	pins?: Array<string>;
 	count?: number;
 	message?: string;
+	at?: { x: number; y: number }; // location of a crossing / through-pin
 }
 
 // Geometry tolerance in schematic units. Pin and wire-endpoint coords come off
@@ -1292,6 +1293,47 @@ function collectWireSegments(wires: Array<{ getState_Line: () => Array<number> }
 	return segs;
 }
 
+type Seg = [number, number, number, number];
+
+// Signed orientation of point C relative to directed segment A→B; 0 = collinear
+// (within eps), ±1 = the two sides. Used for the proper-intersection test.
+function orient(ax: number, ay: number, bx: number, by: number, cx: number, cy: number): number {
+	const v = (by - ay) * (cx - bx) - (bx - ax) * (cy - by);
+	return v > CHECK_EPS ? 1 : v < -CHECK_EPS ? -1 : 0;
+}
+
+// True only when two segments cross in BOTH interiors (a real routing tangle).
+// Shared endpoints, T-junctions, and collinear overlaps give a 0 orientation and
+// are excluded — those are legitimate (wires meet at pins/junctions).
+function segmentsProperlyCross(s1: Seg, s2: Seg): boolean {
+	const [a, b, c, d] = s1;
+	const [e, f, g, h] = s2;
+	const o1 = orient(a, b, c, d, e, f);
+	const o2 = orient(a, b, c, d, g, h);
+	const o3 = orient(e, f, g, h, a, b);
+	const o4 = orient(e, f, g, h, c, d);
+	return o1 !== 0 && o2 !== 0 && o3 !== 0 && o4 !== 0 && o1 !== o2 && o3 !== o4;
+}
+
+// Intersection point of two (properly crossing) segments; null if near-parallel.
+function segIntersection(s1: Seg, s2: Seg): { x: number; y: number } | null {
+	const [x1, y1, x2, y2] = s1;
+	const [x3, y3, x4, y4] = s2;
+	const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+	if (Math.abs(den) < 1e-9) return null;
+	const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den;
+	return { x: Math.round((x1 + t * (x2 - x1)) * 100) / 100, y: Math.round((y1 + t * (y2 - y1)) * 100) / 100 };
+}
+
+// True if (px,py) lies on the segment but NOT at either endpoint — i.e. the wire
+// passes THROUGH the point. EasyEDA trims+connects a wire at any pin it crosses, so
+// a pin in a wire's interior is an unintended-connection hazard.
+function interiorOnSegment(px: number, py: number, s: Seg): boolean {
+	if (!pointOnSegment(px, py, s[0], s[1], s[2], s[3])) return false;
+	const endTol = CHECK_EPS * 8;
+	return Math.hypot(px - s[0], py - s[1]) > endTol && Math.hypot(px - s[2], py - s[3]) > endTol;
+}
+
 const schematicCheck: Handler = async (payload) => {
 	const allPages = optionalBoolean(payload, 'allPages') === true;
 	let components, wires;
@@ -1306,6 +1348,9 @@ const schematicCheck: Handler = async (payload) => {
 
 	const findings: Array<CheckFinding> = [];
 	let floatingTotal = 0;
+	let componentsWithFloating = 0;
+	// All component pins, kept for the wire-over-pin rule below.
+	const allPins: Array<{ designator: string; number: string; x: number; y: number }> = [];
 
 	for (const c of components ?? []) {
 		// Net flags/ports/labels are components too but have no real pins to float
@@ -1314,23 +1359,28 @@ const schematicCheck: Handler = async (payload) => {
 		try { pins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(c.getState_PrimitiveId()); }
 		catch { continue; }
 		if (!pins || pins.length === 0) continue;
+		const designator = c.getState_Designator?.() ?? '';
 
+		// Rule 1: floating pins (geometric connectivity).
 		const floating: Array<string> = [];
 		for (const p of pins) {
+			const px = p.getState_X();
+			const py = p.getState_Y();
+			const num = String(p.getState_PinNumber?.() ?? '');
+			allPins.push({ designator, number: num, x: px, y: py });
 			// Intentionally-NC pins (the X marker) are not "floating" — skip them.
 			try { if (p.getState_NoConnected && p.getState_NoConnected()) continue; }
 			catch { /* treat as not-NC */ }
-			const px = p.getState_X();
-			const py = p.getState_Y();
 			const connected = segs.some(s => pointOnSegment(px, py, s[0], s[1], s[2], s[3]));
-			if (!connected) floating.push(String(p.getState_PinNumber?.() ?? ''));
+			if (!connected) floating.push(num);
 		}
 		if (floating.length > 0) {
 			floatingTotal += floating.length;
+			componentsWithFloating++;
 			findings.push({
 				type: 'floating-pin',
 				level: 'warn',
-				designator: c.getState_Designator?.(),
+				designator,
 				pins: floating,
 				count: floating.length,
 				message: `${floating.length} 个引脚悬空(无导线连接,未打 NC 标识)`,
@@ -1338,9 +1388,51 @@ const schematicCheck: Handler = async (payload) => {
 		}
 	}
 
+	// Rule 2: wire-crossing — two wire segments cross in their interiors (a routing
+	// tangle layout-lint can't see; it only checks component bbox overlap). Shared
+	// endpoints / junctions are excluded. Cap reported findings, count them all.
+	const CROSS_CAP = 50;
+	let crossingTotal = 0;
+	for (let i = 0; i < segs.length; i++) {
+		for (let j = i + 1; j < segs.length; j++) {
+			if (!segmentsProperlyCross(segs[i], segs[j])) continue;
+			crossingTotal++;
+			if (findings.filter(f => f.type === 'wire-crossing').length < CROSS_CAP) {
+				const at = segIntersection(segs[i], segs[j]) ?? undefined;
+				findings.push({
+					type: 'wire-crossing',
+					level: 'warn',
+					count: 1,
+					at,
+					message: '两条导线交叉(走线打结;改走通道/换 L 形拐点避开)',
+				});
+			}
+		}
+	}
+
+	// Rule 3: wire-over-pin — a pin sits in a wire's INTERIOR (the wire passes
+	// through it). EasyEDA trims+connects there, an unintended connection.
+	let overPinTotal = 0;
+	for (const p of allPins) {
+		const hit = segs.some(s => interiorOnSegment(p.x, p.y, s));
+		if (hit) {
+			overPinTotal++;
+			findings.push({
+				type: 'wire-over-pin',
+				level: 'warn',
+				designator: p.designator,
+				pins: [p.number],
+				at: { x: p.x, y: p.y },
+				message: '导线穿过该引脚(EasyEDA 会在此处截断并连接 — 非预期短接)',
+			});
+		}
+	}
+
 	const summary = {
 		floatingPins: floatingTotal,
-		componentsWithFloating: findings.length,
+		componentsWithFloating,
+		wireCrossings: crossingTotal,
+		wireOverPins: overPinTotal,
 		total: findings.length,
 	};
 	return { result: { passed: findings.length === 0, summary, findings } };

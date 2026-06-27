@@ -23,11 +23,17 @@ type checkFinding struct {
 	Pins       []string `json:"pins,omitempty"`
 	Count      int      `json:"count,omitempty"`
 	Message    string   `json:"message,omitempty"`
+	At         *struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	} `json:"at,omitempty"`
 }
 
 type checkSummary struct {
 	FloatingPins           int `json:"floatingPins"`
 	ComponentsWithFloating int `json:"componentsWithFloating"`
+	WireCrossings          int `json:"wireCrossings"`
+	WireOverPins           int `json:"wireOverPins"`
 	Total                  int `json:"total"`
 }
 
@@ -107,8 +113,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s) across %d component(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d wire-crossing(s), %d wire-over-pin(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.WireCrossings, s.WireOverPins)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -116,17 +122,29 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 		if msg == "" {
 			msg = f.Type
 		}
-		line := fmt.Sprintf("  %-5s  %-13s  %s  %s", tag, f.Type, f.Designator, msg)
+		line := fmt.Sprintf("  %-5s  %-14s  ", tag, f.Type)
+		if f.Designator != "" {
+			line += f.Designator + "  "
+		}
+		line += msg
 		if len(f.Pins) > 0 {
 			line += "  [" + strings.Join(f.Pins, ",") + "]"
+		}
+		if f.At != nil {
+			line += fmt.Sprintf("  @(%.2f,%.2f)", f.At.X, f.At.Y)
 		}
 		fmt.Fprintln(w, line)
 	}
 
 	if rep.Passed {
 		fmt.Fprintln(w, "✓ no findings")
-	} else if s.FloatingPins > 0 {
+		return
+	}
+	if s.FloatingPins > 0 {
 		// The floating-pin list is the exact input `sch no-connect` takes.
-		fmt.Fprintln(w, "→ fix by wiring the pins, or mark intentional ones: easyeda sch no-connect --designator <D> --pin <n,n,…>")
+		fmt.Fprintln(w, "→ floating pins: wire them, or (where supported) mark intentional ones NC")
+	}
+	if s.WireCrossings > 0 || s.WireOverPins > 0 {
+		fmt.Fprintln(w, "→ routing: reroute crossings in clear channels (L-bends); never run a wire through a pin")
 	}
 }

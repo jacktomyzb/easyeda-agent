@@ -26,15 +26,20 @@ follow [SemVer](https://semver.org/).
   `auto-layout-sop.md` updated to document both forms.
 
 ### Added
-- **`schematic.check` — reconstructed per-item design check.** The EDA schematic DRC
-  API (`eda.sch_Drc.check`) returns only an aggregate `{count,type}`; the per-item
-  detail the UI DRC panel shows is not exposed by any public API. `schematic.check`
-  recomputes the actionable findings from primitives. Rule 1: **floating pins** via
-  geometric connectivity (a pin is connected iff a wire touches its coordinate;
-  NC-marked pins excluded), grouped by component as `{designator, pins[]}` — the
-  exact input `schematic.pin.set_no_connect` takes. Returns `{passed, summary,
-  findings[]}`. CLI: `easyeda sch check` (`--json`, `--strict`, `--all-pages`).
-  Verified live: 34 floating pins on an ESP32-S3, matching the EDA DRC panel.
+- **`schematic.check` — reconstructed per-item design check + routing-quality
+  rules.** The EDA schematic DRC API (`eda.sch_Drc.check`) returns only an aggregate
+  `{count,type}` and `layout-lint` only sees component bbox overlap; this fills both
+  gaps by computing findings geometrically from primitives. Rules: (1) **floating
+  pins** — a pin is connected iff a wire touches its coordinate (NC-marked excluded),
+  grouped by component as `{designator, pins[]}` (the exact input
+  `schematic.pin.set_no_connect` takes); (2) **wire-crossing** — two wire segments
+  cross in their interiors (a routing tangle; shared endpoints/junctions excluded),
+  reported with the intersection point; (3) **wire-over-pin** — a pin sits in a
+  wire's interior (EasyEDA trims+connects there → unintended short; enforces the SOP
+  "chain pin→pin, don't run a wire through a pin"). Returns `{passed,
+  summary{floatingPins,wireCrossings,wireOverPins,…}, findings[]}`. CLI:
+  `easyeda sch check` (`--json`, `--strict`, `--all-pages`). Verified live via a
+  detect→fix→re-check loop on an ESP32-S3: 2 wire-crossings found and driven to 0.
 - **`schematic.drc.check` now returns per-violation detail.** Normalizes the SDK
   result into `{passed, fatal, summary, violations[]}` — each violation projects
   `{level, rule, message, primitiveIds, designators, x, y}` (raw kept) plus a

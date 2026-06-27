@@ -41,7 +41,31 @@ func TestParseAndRenderCheck_Floating(t *testing.T) {
 	var buf bytes.Buffer
 	renderCheckReport(rep, &buf)
 	out := buf.String()
-	for _, want := range []string{"WARN", "floating-pin", "U1", "[4,5,15,36,37]", "sch no-connect"} {
+	for _, want := range []string{"WARN", "floating-pin", "U1", "[4,5,15,36,37]", "floating pins"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
+// Wire-crossing + wire-over-pin: render shows the type, coords, and routing hint.
+func TestRenderCheck_Routing(t *testing.T) {
+	at := &struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	}{X: 90, Y: 135}
+	rep := checkReport{
+		Passed:  false,
+		Summary: checkSummary{WireCrossings: 1, WireOverPins: 1, Total: 2},
+		Findings: []checkFinding{
+			{Type: "wire-crossing", Level: "warn", Count: 1, Message: "两条导线交叉", At: at},
+			{Type: "wire-over-pin", Level: "warn", Designator: "U1", Pins: []string{"5"}, Message: "导线穿过该引脚", At: at},
+		},
+	}
+	var buf bytes.Buffer
+	renderCheckReport(rep, &buf)
+	out := buf.String()
+	for _, want := range []string{"wire-crossing", "@(90.00,135.00)", "wire-over-pin", "U1", "routing"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q\n--- output ---\n%s", want, out)
 		}

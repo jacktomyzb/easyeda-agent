@@ -332,7 +332,7 @@ func AllActions() []ActionSpec {
 			Domain:      DomainSchematic,
 			Phase:       1,
 			NeedsWindow: true,
-			Description: "Reconstructed per-item design check that the SDK's schematic DRC API cannot expose (eda.sch_Drc.check returns only an aggregate {count,type}). Computes findings from primitives directly. Rule 1: floating pins — geometric connectivity (a pin is connected iff a wire touches its coordinate; NC-marked pins excluded), grouped by component as {designator, pins[]} — the exact input schematic.pin.set_no_connect takes, so 'find floating → mark NC' is one loop. Returns {passed, summary, findings[]}.",
+			Description: "Reconstructed per-item design check that the SDK's schematic DRC API cannot expose (eda.sch_Drc.check returns only an aggregate {count,type}) and that complements layout-lint (which only sees component bbox overlap). Computes findings geometrically from primitives. Rules: (1) floating pins — a pin is connected iff a wire touches its coordinate, NC-marked excluded, grouped by component as {designator, pins[]} (the exact input schematic.pin.set_no_connect takes); (2) wire-crossing — two wire segments cross in their interiors (routing tangle; shared endpoints/junctions excluded), reported with the intersection point; (3) wire-over-pin — a pin sits in a wire's interior (EasyEDA trims+connects there → unintended short). Returns {passed, summary{floatingPins,wireCrossings,wireOverPins,…}, findings[]}.",
 			Inputs:      []string{"allPages optional"},
 			Outputs:     []string{"passed", "summary", "findings"},
 		},
