@@ -6,6 +6,16 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 ### Fixed
+- **`schematic.pin.set_no_connect` no longer reports a false success.** On EasyEDA
+  Pro 3.2.x, `pin.setState_NoConnected` is a **no-op** — the pin primitive has no
+  `noConnected` field (verified by re-pull, DRC re-run, and a canvas snapshot: no
+  非连接标识 is ever placed and DRC still treats the pin as floating). The setter is
+  typed `@public`, so the prior implementation compiled and returned `ok` while
+  silently doing nothing. The handler now **verifies** the write and fails with
+  `EDA_CALL_FAILED`, naming it as an EasyEDA platform limitation (not a connector
+  defect) and returning `notApplied[]`. It auto-passes if a future build makes the
+  setter real. There is no public `eda.*` API to place a 非连接标识 on this version —
+  use `schematic.check` to enumerate floating pins.
 - **`schematic.wire.create` now normalizes nested `points` (issue #5).** EDA's
   `eda.sch_PrimitiveWire.create` only accepts a **flat** `number[]`
   (`[x1,y1,x2,y2,…]`); a nested `[[x,y],…]` payload failed with
@@ -16,6 +26,23 @@ follow [SemVer](https://semver.org/).
   `auto-layout-sop.md` updated to document both forms.
 
 ### Added
+- **`schematic.check` — reconstructed per-item design check.** The EDA schematic DRC
+  API (`eda.sch_Drc.check`) returns only an aggregate `{count,type}`; the per-item
+  detail the UI DRC panel shows is not exposed by any public API. `schematic.check`
+  recomputes the actionable findings from primitives. Rule 1: **floating pins** via
+  geometric connectivity (a pin is connected iff a wire touches its coordinate;
+  NC-marked pins excluded), grouped by component as `{designator, pins[]}` — the
+  exact input `schematic.pin.set_no_connect` takes. Returns `{passed, summary,
+  findings[]}`. CLI: `easyeda sch check` (`--json`, `--strict`, `--all-pages`).
+  Verified live: 34 floating pins on an ESP32-S3, matching the EDA DRC panel.
+- **`schematic.drc.check` now returns per-violation detail.** Normalizes the SDK
+  result into `{passed, fatal, summary, violations[]}` — each violation projects
+  `{level, rule, message, primitiveIds, designators, x, y}` (raw kept) plus a
+  severity summary and a `fatal` count for the design-flow S5 gate. CLI `sch drc`
+  prints one line per violation and exits non-zero only when `fatal > 0`. NOTE: the
+  schematic SDK only provides an aggregate, so detail degrades honestly to
+  "N issue(s) — EDA returned no per-item detail" (use `schematic.check` for the
+  itemized floating-pin findings).
 - **`schematic.snapshot` anti-stale metadata (issue #2).** The snapshot result now
   carries `primitiveCount` (live components + page primitives on the current page),
   `capturedAt` (ISO timestamp), and a `stale` advisory string. EasyEDA does not
