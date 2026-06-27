@@ -35,7 +35,7 @@ Run `easyeda actions` for the authoritative machine-readable list.
 
 - `schematic.components.list` — 当前页（或全页）所有元件，可含 pins
 - `schematic.select` — 按 primitiveId 选中图元
-- `schematic.snapshot` — 截取当前渲染区域为 PNG artifact（`easyeda sch snapshot --fit` 先适应全部再截，整张图入画）
+- `schematic.snapshot` — 截取当前渲染区域为 PNG artifact。**默认先「适应全部」再截**（整张图入画，无需另调 `view.fit`）；`easyeda sch snapshot --no-fit` 保留当前视口。**局部截图**：先 `easyeda view region --left --right --top --bottom`（或 `view zoom --x --y --scale`）框住目标区域，再 `easyeda sch snapshot --no-fit` 截该视口
 
 ## Mutate Schematic
 

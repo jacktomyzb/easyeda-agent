@@ -971,6 +971,22 @@ async function countLivePagePrimitives(): Promise<number | null> {
 
 const schematicSnapshot: Handler = async (payload) => {
 	const tabId = optionalString(payload, 'tabId');
+	// Auto fit-to-all before capturing (适应全部) is ON by default so the whole
+	// sheet lands in frame without the caller having to issue a separate view.fit
+	// — pass fit=false to keep the current viewport. Best-effort: a failure must
+	// not block the capture. Bonus: changing the viewport also nudges EasyEDA to
+	// redraw, which mitigates the stale-frame problem documented below.
+	const fit = optionalBoolean(payload, 'fit') !== false;
+	let fitted = false;
+	if (fit) {
+		try {
+			await eda.dmt_EditorControl.zoomToAllPrimitives();
+			fitted = true;
+		}
+		catch {
+			/* best-effort — fall through and capture at the current viewport */
+		}
+	}
 	let blob;
 	try {
 		blob = await eda.dmt_EditorControl.getCurrentRenderedAreaImage(tabId);
@@ -992,6 +1008,7 @@ const schematicSnapshot: Handler = async (payload) => {
 		result: {
 			artifactId: artifact.id,
 			primitiveCount,
+			fitted,
 			capturedAt: new Date().toISOString(),
 			stale: 'EasyEDA may not auto-redraw after API edits; compare primitiveCount across snapshots to detect a stale frame. Judge state by data, screenshot for layout only.',
 		},

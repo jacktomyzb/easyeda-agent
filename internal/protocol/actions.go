@@ -314,8 +314,9 @@ func AllActions() []ActionSpec {
 			Domain:      DomainSchematic,
 			Phase:       1,
 			NeedsWindow: true,
-			Description: "Capture current rendered area image as an artifact. WARNING: EasyEDA may not auto-redraw after API edits, so the image can be a STALE frame — judge state by data (sch list/getAll), not the screenshot. Returns primitiveCount + capturedAt; if primitiveCount changed between two snapshots but the image is unchanged, the frame is stale.",
-			Outputs:     []string{"artifact id", "file path", "mime type", "primitiveCount", "capturedAt"},
+			Description: "Capture current rendered area image as an artifact. Zooms to fit all primitives (适应全部) BY DEFAULT before capturing so the whole sheet lands in frame (and the viewport change nudges a redraw); pass fit=false to keep the current viewport. WARNING: EasyEDA may not auto-redraw after API edits, so the image can be a STALE frame — judge state by data (sch list/getAll), not the screenshot. Returns primitiveCount + capturedAt; if primitiveCount changed between two snapshots but the image is unchanged, the frame is stale.",
+			Inputs:      []string{"fit optional (default true)"},
+			Outputs:     []string{"artifact id", "file path", "mime type", "primitiveCount", "fitted", "capturedAt"},
 		},
 		{
 			Name:        "schematic.drc.check",

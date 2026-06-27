@@ -631,31 +631,38 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	// ── snapshot ──────────────────────────────────────────────────────────
 	// schematic.snapshot
 	{
-		var fit bool
+		var noFit bool
 		c := &cobra.Command{
 			Use:   "snapshot",
 			Short: "Capture the current schematic view as an image artifact",
 			Long: `Capture the current schematic view as an image artifact.
 
+Zooms to fit all primitives (适应全部) before capturing BY DEFAULT, so the whole
+sheet lands in frame without a separate view.fit — pass --no-fit to keep the
+current viewport.
+
+For a PARTIAL / zoomed-in shot, frame the area first with "easyeda view region
+--left --right --top --bottom" (or "view zoom --x --y --scale"), then capture
+with --no-fit so the snapshot keeps that viewport instead of zooming back out.
+
 WARNING: EasyEDA does NOT auto-redraw after API edits, so the captured frame can
 be STALE (byte-identical to the previous one even though the page changed). The
 result includes primitiveCount + capturedAt — compare primitiveCount across two
 snapshots to detect a stale frame, and judge STATE by data (sch list/getAll), not
-by the screenshot. Touch the page in EasyEDA (scroll/click) to force a redraw.`,
+by the screenshot. (The auto-fit also nudges a redraw, which helps.)`,
 			Args: cobra.NoArgs,
-			Example: `  easyeda sch snapshot
-  easyeda sch snapshot --fit   # zoom to fit all first (whole sheet in frame)`,
+			Example: `  easyeda sch snapshot           # auto fit-to-all, then capture
+  easyeda sch snapshot --no-fit  # keep the current viewport (partial shot)
+  easyeda view region --left 100 --right 400 --top 500 --bottom 200 && easyeda sch snapshot --no-fit`,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				// --fit: zoom to fit all primitives before capturing so the
-				// whole sheet lands in frame. Best-effort — its output is
-				// discarded and a failure does not block the snapshot.
-				if fit {
-					_ = dispatch(cfg, "view.fit", window, nil, io.Discard, stderr)
-				}
-				return dispatch(cfg, "schematic.snapshot", window, nil, stdout, stderr)
+				// Auto-fit is built into the schematic.snapshot action (default on);
+				// the CLI just forwards the opt-out so a single round-trip both fits
+				// and captures.
+				return dispatch(cfg, "schematic.snapshot", window,
+					map[string]any{"fit": !noFit}, stdout, stderr)
 			},
 		}
-		c.Flags().BoolVar(&fit, "fit", false, "zoom to fit all (适应全部) before capturing")
+		c.Flags().BoolVar(&noFit, "no-fit", false, "do NOT zoom to fit before capturing (keep current viewport)")
 		sch.AddCommand(c)
 	}
 
