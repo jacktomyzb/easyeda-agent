@@ -16,6 +16,7 @@ import {
 	asPayload,
 	blobToBase64,
 	newArtifactId,
+	normalizeWirePoints,
 	optionalBoolean,
 	optionalNumber,
 	optionalString,
@@ -715,13 +716,11 @@ const schematicPrimitivesDelete: Handler = async (payload) => {
 // ─── Wire ─────────────────────────────────────────────────────────────
 
 const schematicWireCreate: Handler = async (payload) => {
-	const points = payload.points;
-	if (!Array.isArray(points)) {
-		throw new ActionError(
-			ErrorCodes.MISSING_PAYLOAD_FIELD,
-			'Missing required field "points" (number[] or number[][]).',
-		);
-	}
+	// EDA's `sch_PrimitiveWire.create` only accepts a flat `number[]`
+	// (`[x1,y1,x2,y2,...]`). Callers may pass either flat or nested
+	// (`[[x1,y1],[x2,y2],...]`) points; normalize to flat at this single source
+	// of truth so CLI / `call` / sch.py / debug.exec_js all work. See issue #5.
+	const points = normalizeWirePoints(payload.points);
 	const net = optionalString(payload, 'net');
 	const color = optionalString(payload, 'color') ?? null;
 	const lineWidth = optionalNumber(payload, 'lineWidth') ?? null;
@@ -730,7 +729,7 @@ const schematicWireCreate: Handler = async (payload) => {
 	let wire;
 	try {
 		wire = await eda.sch_PrimitiveWire.create(
-			points as Array<number> | Array<Array<number>>,
+			points,
 			net,
 			color,
 			lineWidth,

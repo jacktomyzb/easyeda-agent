@@ -8,6 +8,49 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// netflagKindAliases maps user-friendly CLI shorthands to the canonical kind
+// enum the connector (extension/src/actions.ts NET_FLAG_KINDS / NET_PORT_KINDS)
+// actually accepts. Canonical names also pass through unchanged so both
+// `--kind gnd` and `--kind ground` work. Keep this list in sync with the
+// connector's accepted set to avoid CLI↔connector drift.
+var netflagKindAliases = map[string]string{
+	// shorthands
+	"gnd":     "ground",
+	"agnd":    "analog_ground",
+	"pgnd":    "protective_ground",
+	"netport": "net_port_bi", // bidirectional port is the most general default
+	// canonical passthrough (connector-native names)
+	"power":             "power",
+	"ground":            "ground",
+	"analog_ground":     "analog_ground",
+	"protective_ground": "protective_ground",
+	"protect_ground":    "protect_ground",
+	"net_port_in":       "net_port_in",
+	"net_port_out":      "net_port_out",
+	"net_port_bi":       "net_port_bi",
+}
+
+// netflagKindHelp is the single source of truth for the --kind help text so the
+// listed values stay in sync with what resolveNetflagKind actually accepts.
+const netflagKindHelp = "flag kind (required). Shorthands: gnd→ground, agnd→analog_ground, " +
+	"pgnd→protective_ground, netport→net_port_bi. Canonical: power, ground, analog_ground, " +
+	"protective_ground, protect_ground, net_port_in, net_port_out, net_port_bi"
+
+// resolveNetflagKind translates a CLI --kind value (shorthand or canonical) to
+// the canonical kind the connector accepts. Unknown values get a friendly CLI
+// error listing every valid value, instead of leaking the raw connector error.
+func resolveNetflagKind(kind string) (string, error) {
+	if canonical, ok := netflagKindAliases[kind]; ok {
+		return canonical, nil
+	}
+	valid := []string{
+		"gnd", "agnd", "pgnd", "netport",
+		"power", "ground", "analog_ground", "protective_ground", "protect_ground",
+		"net_port_in", "net_port_out", "net_port_bi",
+	}
+	return "", fmt.Errorf("unknown --kind %q; expected one of: %v", kind, valid)
+}
+
 // newSchCmd returns the "sch" subcommand group with all schematic actions.
 // --window is a persistent flag on the group so every subcommand inherits it.
 func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
@@ -233,14 +276,15 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	// ── list ─────────────────────────────────────────────────────────────
 	// schematic.components.list
 	{
-		var allPages, includeBBox bool
+		var allPages, includeBBox, includePins bool
 		c := &cobra.Command{
 			Use:   "list",
 			Short: "List components on the active (or all) schematic page(s)",
 			Args:  cobra.NoArgs,
 			Example: `  easyeda sch list
   easyeda sch list --all-pages
-  easyeda sch list --include-bbox`,
+  easyeda sch list --include-bbox
+  easyeda sch list --include-pins`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				payload := map[string]any{}
 				if allPages {
@@ -248,6 +292,9 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 				}
 				if includeBBox {
 					payload["includeBBox"] = true
+				}
+				if includePins {
+					payload["includePins"] = true
 				}
 				if len(payload) == 0 {
 					return dispatch(cfg, "schematic.components.list", window, nil, stdout, stderr)
@@ -257,6 +304,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		}
 		c.Flags().BoolVar(&allPages, "all-pages", false, "list components across all schematic pages")
 		c.Flags().BoolVar(&includeBBox, "include-bbox", false, "attach each component's rendered extent {minX,minY,maxX,maxY}")
+		c.Flags().BoolVar(&includePins, "include-pins", false, "attach each pin's {pinName,pinNumber,x,y,noConnected} — the data plane for routing/connectivity checks (output grows, esp. with --all-pages)")
 		sch.AddCommand(c)
 	}
 
@@ -392,7 +440,8 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 			Use:   "wire",
 			Short: "Create a schematic wire polyline",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda sch wire --points '[[100,200],[100,300]]'
+			Example: `  easyeda sch wire --points '[[100,200],[100,300]]'        # nested pairs
+  easyeda sch wire --points '[100,200,100,300]'            # flat (also accepted)
   easyeda sch wire --points '[[100,200],[100,300]]' --net VCC`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if pointsJSON == "" {
@@ -416,7 +465,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 				return dispatch(cfg, "schematic.wire.create", window, payload, stdout, stderr)
 			},
 		}
-		c.Flags().StringVar(&pointsJSON, "points", "", `JSON array of [x,y] coordinate pairs (required)`)
+		c.Flags().StringVar(&pointsJSON, "points", "", `JSON coordinate list, nested '[[x,y],...]' or flat '[x1,y1,x2,y2,...]' (connector normalizes; required)`)
 		c.Flags().StringVar(&net, "net", "", "net name to assign to the wire")
 		c.Flags().StringVar(&styleJSON, "style", "", "JSON object with wire style overrides")
 		sch.AddCommand(c)
@@ -440,8 +489,12 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 				if net == "" {
 					return fmt.Errorf("--net is required")
 				}
+				canonicalKind, err := resolveNetflagKind(kind)
+				if err != nil {
+					return err
+				}
 				payload := map[string]any{
-					"kind": kind,
+					"kind": canonicalKind,
 					"net":  net,
 					"x":    x,
 					"y":    y,
@@ -452,7 +505,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 				return dispatch(cfg, "schematic.netflag.create", window, payload, stdout, stderr)
 			},
 		}
-		c.Flags().StringVar(&kind, "kind", "", "flag kind: power, gnd, agnd, pgnd, netport, short (required)")
+		c.Flags().StringVar(&kind, "kind", "", netflagKindHelp)
 		c.Flags().StringVar(&net, "net", "", "net name (required)")
 		c.Flags().Float64Var(&x, "x", 0, "X coordinate")
 		c.Flags().Float64Var(&y, "y", 0, "Y coordinate")
@@ -478,10 +531,14 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 				if net == "" {
 					return fmt.Errorf("--net is required")
 				}
+				canonicalKind, err := resolveNetflagKind(kind)
+				if err != nil {
+					return err
+				}
 				payload := map[string]any{
 					"pinX": x,
 					"pinY": y,
-					"kind": kind,
+					"kind": canonicalKind,
 					"net":  net,
 				}
 				if cmd.Flags().Changed("direction") {
@@ -498,7 +555,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		}
 		c.Flags().Float64Var(&x, "x", 0, "pin X coordinate")
 		c.Flags().Float64Var(&y, "y", 0, "pin Y coordinate")
-		c.Flags().StringVar(&kind, "kind", "", "flag kind: power, gnd, agnd, pgnd, netport (required)")
+		c.Flags().StringVar(&kind, "kind", "", netflagKindHelp)
 		c.Flags().StringVar(&net, "net", "", "net name (required)")
 		c.Flags().StringVar(&direction, "direction", "", "wire direction: up, down, left, right")
 		c.Flags().Float64Var(&offset, "offset", 0, "wire length in schematic units")
