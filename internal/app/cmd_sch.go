@@ -1,12 +1,36 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/spf13/cobra"
 )
+
+// placeTimeout fails `sch place` fast instead of waiting out the full default
+// window. A successful placement returns near-instantly; a hang almost always
+// means the EasyEDA API never settled on a bad {libraryUuid, uuid} — most often
+// because --uuid is a placed-instance id (from `sch list`) rather than a device
+// library uuid (from `lib search`). See placeUUIDHint.
+const placeTimeout = 8 * time.Second
+
+// placeUUIDHint translates a bare deadline-exceeded into an actionable message:
+// the most common cause of a hung placement is replaying an instance uuid that
+// `sch list` exposes (component/symbol/footprint/uniqueId) instead of the
+// device-library uuid that `lib search` returns.
+func placeUUIDHint(timeout time.Duration) error {
+	return fmt.Errorf(
+		"placement timed out after %s — the EasyEDA API never returned for this {libraryUuid, uuid}.\n"+
+			"This usually means --uuid is NOT a device-library uuid. The component/symbol/footprint/uniqueId\n"+
+			"fields from `easyeda sch list` are placed-INSTANCE ids and cannot be replayed into `sch place`.\n"+
+			"Get a replayable device uuid first: `easyeda lib search --query \"<part>\"` → use its `uuid` + `libraryUuid`.",
+		timeout,
+	)
+}
 
 // netflagKindAliases maps user-friendly CLI shorthands to the canonical kind
 // enum the connector (extension/src/actions.ts NET_FLAG_KINDS / NET_PORT_KINDS)
@@ -318,6 +342,13 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 			Use:   "place",
 			Short: "Place a component from the device library at coordinates",
 			Args:  cobra.NoArgs,
+			Long: `Place a device/component from the EasyEDA device library at coordinates.
+
+--uuid MUST be a device-library uuid (from ` + "`easyeda lib search`" + `), NOT one of
+the uuid-looking fields ` + "`component`/`symbol`/`footprint`/`uniqueId`" + ` that
+` + "`easyeda sch list`" + ` reports — those are placed-INSTANCE ids and are not valid
+` + "`sch place`" + ` inputs. Passing an instance uuid makes the EasyEDA API hang; this
+command fails fast after a short timeout with a hint instead of stalling.`,
 			Example: `  easyeda sch place --lib <libraryUuid> --uuid <deviceUuid> --x 100 --y 200
   easyeda sch place --lib <l> --uuid <u> --x 100 --y 200 --rotation 90 --mirror`,
 			RunE: func(cmd *cobra.Command, args []string) error {
@@ -339,7 +370,11 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 				if cmd.Flags().Changed("mirror") {
 					payload["mirror"] = mirror
 				}
-				return dispatch(cfg, "schematic.component.place", window, payload, stdout, stderr)
+				err := dispatchTimed(cfg, "schematic.component.place", window, payload, placeTimeout, stdout, stderr)
+				if err != nil && errors.Is(err, context.DeadlineExceeded) {
+					return placeUUIDHint(placeTimeout)
+				}
+				return err
 			},
 		}
 		c.Flags().StringVar(&lib, "lib", "", "library UUID (required)")
