@@ -5,6 +5,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); versions
 follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
+### Changed
+- **`schematic.drc.check` now returns per-violation detail (issue #7).** The handler
+  used to pass the SDK result straight through, so callers saw only the aggregate
+  `{count, type}` groups with no way to locate a violation. It now **normalizes** the
+  result: `flattenDrcNodes` walks any nested `list` containers (PCB-style) and the
+  flat aggregates (schematic) into per-violation leaves, each projected to
+  `{level, rule, message, primitiveIds, designators, x, y, raw}` (raw EDA object
+  preserved). The result is `{passed, fatal, summary:{fatal,error,warn,info,unknown,total},
+  violations, raw}` — `fatal` = error+fatal severities, the input the design-flow S5
+  gate ("0 fatal") needs. Also fixes a secondary bug: `includeVerboseError` is now
+  actually read (default true) instead of hardcoded, so the CLI flag is no longer
+  silently ignored. When the build returns only aggregate counts (no per-item
+  detail), each group is kept as a `count`-bearing leaf so the human view can still
+  say "warn × N".
+
 ### Added
 - **`schematic.snapshot` anti-stale metadata (issue #2).** The snapshot result now
   carries `primitiveCount` (live components + page primitives on the current page),

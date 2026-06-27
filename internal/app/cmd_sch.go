@@ -565,29 +565,33 @@ by the screenshot. Touch the page in EasyEDA (scroll/click) to force a redraw.`,
 	// ── drc ───────────────────────────────────────────────────────────────
 	// schematic.drc.check
 	{
-		var strict, verbose bool
+		var strict, verbose, asJSON bool
 		c := &cobra.Command{
 			Use:   "drc",
-			Short: "Run schematic DRC and return normalized violations",
-			Args:  cobra.NoArgs,
+			Short: "Run schematic DRC and print per-violation detail (rule/message/coords)",
+			Long: `Run schematic DRC and print each violation, not just an aggregate count.
+
+The connector normalizes the EDA result into per-violation records — each with a
+severity level, rule, message, related primitive/designator ids, and (when the
+build provides it) x/y coordinates — plus a severity summary. The human view
+prints one line per violation (LEVEL <rule> <message> @(x,y)), mirroring
+layout-lint; --json emits the structured report.
+
+Exit code: non-zero ONLY when the fatal count (error + fatal severities) is > 0.
+Warnings alone exit 0, so the design-flow S5 gate can demand "0 fatal" while
+still surfacing warnings for review.`,
+			Args: cobra.NoArgs,
 			Example: `  easyeda sch drc
-  easyeda sch drc --strict --verbose`,
+  easyeda sch drc --strict          # treat warnings as errors (SDK strict mode)
+  easyeda sch drc --json            # structured per-violation output
+  easyeda sch drc --verbose         # also dump each violation's raw EDA object`,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				payload := map[string]any{}
-				if strict {
-					payload["strict"] = true
-				}
-				if verbose {
-					payload["includeVerboseError"] = true
-				}
-				if len(payload) == 0 {
-					return dispatch(cfg, "schematic.drc.check", window, nil, stdout, stderr)
-				}
-				return dispatch(cfg, "schematic.drc.check", window, payload, stdout, stderr)
+				return runSchDrc(cfg, window, strict, verbose, asJSON, stdout, stderr)
 			},
 		}
-		c.Flags().BoolVar(&strict, "strict", false, "treat warnings as errors")
-		c.Flags().BoolVar(&verbose, "verbose", false, "include verbose error details")
+		c.Flags().BoolVar(&strict, "strict", false, "treat warnings as errors (SDK strict mode)")
+		c.Flags().BoolVar(&verbose, "verbose", false, "also print each violation's raw EDA object")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the normalized report as JSON")
 		sch.AddCommand(c)
 	}
 

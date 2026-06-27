@@ -311,9 +311,9 @@ func AllActions() []ActionSpec {
 			Domain:      DomainSchematic,
 			Phase:       1,
 			NeedsWindow: true,
-			Description: "Run schematic DRC and normalize the result.",
+			Description: "Run schematic DRC and normalize the result into per-violation detail. Each violation carries {level, rule, message, primitiveIds, designators, x, y} (best-effort projection over the SDK shape, raw kept) plus a severity `summary` and a `fatal` count (error+fatal severities) for the design-flow S5 gate. `includeVerboseError` (default true) selects the detailed/array SDK overload.",
 			Inputs:      []string{"strict", "includeVerboseError"},
-			Outputs:     []string{"passed", "violations"},
+			Outputs:     []string{"passed", "fatal", "summary", "violations"},
 		},
 		{
 			Name:        "schematic.save",

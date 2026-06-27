@@ -61,7 +61,8 @@ S0 预分析 → S1 分页💾 → S2 模块编组 → S3 按组摆放💾 → S
    - **任何 `overlap` ERROR = 必须修**(命令非零退出,可直接当 gate)。
    - `spacing` WARN = 评估是否太挤,外围贴芯片可接受、模块间过近要拉开。
 2. **电气门** `easyeda sch drc`(+ `scripts/lint.sh <project>` 数据 lint)
-   - fatal / 未连接网络 = 必须修。
+   - **逐条**输出 `LEVEL <rule> <message> @(x,y)`;命令**仅在 `fatal>0`(error/fatal)时非零退出**,可直接当 gate(`0 fatal` = 过门)。
+   - fatal / 未连接网络 = 必须修;`summary.warn` 警告(如未用 IO 悬空)逐条复核、可接受则放行。
 - ⚠️ **判状态看数据(`sch list` / layout-lint / drc),不看截图**(API 改动后画布可能不重绘 → 截图 stale)。
 
 ### S6 — 调整闭环(立刻调,再验)
