@@ -386,9 +386,9 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	{
 		var idsJSON string
 		c := &cobra.Command{
-			Use:   "delete",
-			Short: "Delete schematic component primitives",
-			Args:  cobra.NoArgs,
+			Use:     "delete",
+			Short:   "Delete schematic component primitives",
+			Args:    cobra.NoArgs,
 			Example: `  easyeda sch delete --ids '["id1","id2"]'`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if idsJSON == "" {
@@ -696,6 +696,43 @@ still surfacing warnings for review.`,
 		c.Flags().BoolVar(&strict, "strict", false, "treat warnings as errors (SDK strict mode)")
 		c.Flags().BoolVar(&verbose, "verbose", false, "also print each violation's raw EDA object")
 		c.Flags().BoolVar(&asJSON, "json", false, "emit the normalized report as JSON")
+		sch.AddCommand(c)
+	}
+
+	// ── check ─────────────────────────────────────────────────────────────
+	// schematic.check — reconstructed per-item design check (floating pins, …).
+	// Fills the gap the SDK schematic DRC API can't: eda.sch_Drc.check returns
+	// only an aggregate, so the itemized findings the UI panel shows are computed
+	// here from primitives. Output (designator + pin numbers) feeds `sch no-connect`.
+	{
+		var allPages, strict, asJSON bool
+		c := &cobra.Command{
+			Use:   "check",
+			Short: "Reconstructed per-item design check (floating pins) the SDK DRC can't itemize",
+			Long: `Reconstructed per-item design check — the detail the EDA schematic DRC API can't expose.
+
+eda.sch_Drc.check (what 'sch drc' uses) returns only an aggregate {count,type}; the
+itemized findings the UI DRC panel shows are not in any public API. 'sch check'
+recomputes them from the primitives. Rule 1: floating pins — geometric connectivity
+(a pin is connected iff a wire touches its coordinate; NC-marked pins excluded),
+grouped by component.
+
+The floating-pin output is the exact input 'sch no-connect' takes, so the loop is:
+sch check → wire the real ones / sch no-connect the intentional ones → sch check.
+
+Exit code: 0 by default (floating IO pins are normal until NC-marked); --strict
+exits non-zero when there are any findings, to use it as a gate.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda sch check
+  easyeda sch check --json
+  easyeda sch check --strict      # non-zero exit if any findings`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runSchCheck(cfg, window, allPages, strict, asJSON, stdout, stderr)
+			},
+		}
+		c.Flags().BoolVar(&allPages, "all-pages", false, "check components across all schematic pages")
+		c.Flags().BoolVar(&strict, "strict", false, "exit non-zero when there are findings (gate mode)")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
 		sch.AddCommand(c)
 	}
 

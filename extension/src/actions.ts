@@ -909,7 +909,30 @@ const schematicPinSetNoConnect: Handler = async (payload) => {
 		}));
 	}
 	catch {
+		// Could not re-pull — fall back to the optimistic value, and let the
+		// no-op guard below skip (we can't prove it failed without a read).
 		confirmed = wantPins.map(n => ({ pin: n, noConnected: value }));
+	}
+
+	// VERIFY-OR-FAIL. On EasyEDA Pro 3.2.x, pin.setState_NoConnected is a NO-OP:
+	// the pin primitive has no `noConnected` field (sch_PrimitivePin.get exposes
+	// none), the @public setter silently does nothing, and a re-pull / DRC re-run /
+	// canvas snapshot all confirm no NC mark is ever placed. The setter type is
+	// marked @public so this compiles and "succeeds" — which is exactly why it
+	// silently lied before. Detect the no-op and fail loudly instead, naming it as
+	// a platform limitation (not a connector bug) so the caller doesn't trust a
+	// phantom result. If a future EDA build makes the setter real, this guard
+	// passes automatically.
+	const notApplied = confirmed.filter(c => c.noConnected !== value);
+	if (notApplied.length === wantPins.length) {
+		throw new ActionError(
+			ErrorCodes.EDA_CALL_FAILED,
+			`EasyEDA did not apply no-connect to ${designator} pin(s) ${wantPins.join(', ')}: `
+			+ `pin.setState_NoConnected is a no-op on this EDA build (verified by re-pull). The pin `
+			+ `primitive has no noConnected field, so DRC still treats these pins as floating. This is `
+			+ `an EasyEDA platform limitation, not a connector defect — there is no public API to place `
+			+ `a 非连接标识 on this version.`,
+		);
 	}
 
 	return {
@@ -918,6 +941,9 @@ const schematicPinSetNoConnect: Handler = async (payload) => {
 			primitiveId: cid,
 			noConnected: value,
 			pins: confirmed,
+			// Per-pin pass/fail so partial application (should a future build allow
+			// it) is visible rather than masked by the top-level noConnected.
+			notApplied: notApplied.map(c => c.pin),
 		},
 	};
 };
@@ -1211,6 +1237,113 @@ const schematicDrcCheck: Handler = async (payload) => {
 	// a severity summary so callers can locate issues and gate on fatal count,
 	// instead of seeing only the SDK's aggregate `{count, type}` groups. issue #7
 	return { result: normalizeDrc(violations) };
+};
+
+// ─── Design check (reconstructed detail the SDK DRC can't expose) ────────────
+//
+// eda.sch_Drc.check() returns ONLY an aggregate {count,type} for schematic — the
+// per-item detail the UI DRC panel shows (which pins float, …) is NOT exposed by
+// the official API (verified: absent from check()'s return, sys_Log, sch_Event,
+// and every eda.* namespace; it's built inside the EasyEDA UI). This is an EDA
+// SDK limitation, not a connector one — PCB's pcb_Drc DOES return nested detail.
+//
+// So we RECONSTRUCT the actionable findings from primitives we CAN read. Rule 1:
+// floating pins — geometric connectivity. A pin is connected iff a wire touches
+// its coordinate (endpoints on pins / stubs from connect_pin / pass-through), which
+// matches EasyEDA's own "引脚悬空" definition. Output is by designator + pin number
+// — the exact input schematic.pin.set_no_connect takes, so "find floating → mark
+// NC" is one loop. More rules (empty value, standardization) can be added here.
+
+// One reconstructed design-check finding. Reuses the DRC severity buckets.
+interface CheckFinding {
+	type: string; // 'floating-pin'
+	level: DrcSeverity;
+	designator?: string;
+	pins?: Array<string>;
+	count?: number;
+	message?: string;
+}
+
+// Geometry tolerance in schematic units. Pin and wire-endpoint coords come off
+// the same grid, so they match exactly; a small epsilon absorbs float noise and
+// catches a pin sitting ON a pass-through segment.
+const CHECK_EPS = 0.05;
+
+// True if (px,py) lies on the segment (x1,y1)-(x2,y2) — endpoints included.
+function pointOnSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): boolean {
+	if (px < Math.min(x1, x2) - CHECK_EPS || px > Math.max(x1, x2) + CHECK_EPS) return false;
+	if (py < Math.min(y1, y2) - CHECK_EPS || py > Math.max(y1, y2) + CHECK_EPS) return false;
+	const cross = (px - x1) * (y2 - y1) - (py - y1) * (x2 - x1);
+	return Math.abs(cross) <= CHECK_EPS * Math.max(1, Math.hypot(x2 - x1, y2 - y1));
+}
+
+// Flatten every wire's polyline (getState_Line → flat [x0,y0,x1,y1,…]) into segments.
+function collectWireSegments(wires: Array<{ getState_Line: () => Array<number> }>): Array<[number, number, number, number]> {
+	const segs: Array<[number, number, number, number]> = [];
+	for (const w of wires) {
+		let line: Array<number> | undefined;
+		try { line = w.getState_Line(); }
+		catch { continue; }
+		if (!Array.isArray(line)) continue;
+		for (let i = 0; i + 3 < line.length; i += 2) {
+			segs.push([line[i], line[i + 1], line[i + 2], line[i + 3]]);
+		}
+	}
+	return segs;
+}
+
+const schematicCheck: Handler = async (payload) => {
+	const allPages = optionalBoolean(payload, 'allPages') === true;
+	let components, wires;
+	try {
+		components = await eda.sch_PrimitiveComponent.getAll(undefined, allPages);
+		wires = await eda.sch_PrimitiveWire.getAll();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read schematic for design check.');
+	}
+	const segs = collectWireSegments((wires ?? []) as Array<{ getState_Line: () => Array<number> }>);
+
+	const findings: Array<CheckFinding> = [];
+	let floatingTotal = 0;
+
+	for (const c of components ?? []) {
+		// Net flags/ports/labels are components too but have no real pins to float
+		// — getAllPinsByPrimitiveId returns empty for them, so they're skipped.
+		let pins;
+		try { pins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(c.getState_PrimitiveId()); }
+		catch { continue; }
+		if (!pins || pins.length === 0) continue;
+
+		const floating: Array<string> = [];
+		for (const p of pins) {
+			// Intentionally-NC pins (the X marker) are not "floating" — skip them.
+			try { if (p.getState_NoConnected && p.getState_NoConnected()) continue; }
+			catch { /* treat as not-NC */ }
+			const px = p.getState_X();
+			const py = p.getState_Y();
+			const connected = segs.some(s => pointOnSegment(px, py, s[0], s[1], s[2], s[3]));
+			if (!connected) floating.push(String(p.getState_PinNumber?.() ?? ''));
+		}
+		if (floating.length > 0) {
+			floatingTotal += floating.length;
+			findings.push({
+				type: 'floating-pin',
+				level: 'warn',
+				designator: c.getState_Designator?.(),
+				pins: floating,
+				count: floating.length,
+				message: `${floating.length} 个引脚悬空(无导线连接,未打 NC 标识)`,
+			});
+		}
+	}
+
+	const summary = {
+		floatingPins: floatingTotal,
+		componentsWithFloating: findings.length,
+		total: findings.length,
+	};
+	return { result: { passed: findings.length === 0, summary, findings } };
 };
 
 // ─── Save ─────────────────────────────────────────────────────────────
@@ -2535,6 +2668,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.select': schematicSelect,
 	'schematic.snapshot': schematicSnapshot,
 	'schematic.drc.check': schematicDrcCheck,
+	'schematic.check': schematicCheck,
 	'schematic.save': schematicSave,
 	'schematic.export.netlist': schematicExportNetlist,
 	'schematic.export.bom': schematicExportBom,
