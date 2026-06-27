@@ -49,6 +49,39 @@ PCB, footprint, manufacturing, and library authoring are intentionally deferred.
 A roadmap (standard-parts library, optimized search, LCSC mall comparison) lives
 in [docs/FEATURES.md](docs/FEATURES.md).
 
+## Demo Examples
+
+Boards driven end-to-end through the typed-action + Skill workflow — placed
+**entirely from real LCSC / 立创 library parts** (search → place by uuid → wire →
+flag → DRC), not hand-drawn symbols. Layout follows the
+[auto-layout SOP](skills/easyeda-conventions/references/auto-layout-sop.md) distilled
+from a 嘉立创 reference design: **flags only on power/ground rails; signals are real
+local orthogonal wires; decoupling hugs each IC's VCC pad; multi-page by function.**
+
+> 截图(原理图 + PCB 布局)随后补充到每个示例下。Schematic + PCB-layout screenshots
+> for each example will be added below.
+
+### 1. ESP32-S3-WROOM-1 minimal system board
+ESP32-S3 module + decoupling + USB-C + 3V3 LDO + boot/reset. Library-first, lint-clean.
+
+<!-- ![sch](docs/assets/demo-esp32s3-sch.png) ![pcb](docs/assets/demo-esp32s3-pcb.png) -->
+*原理图 / PCB 截图:待补充 (TBD)*
+
+### 2. USB-C + AMS1117-3.3 power board
+USB-C input → AMS1117-3.3 LDO rail with input/output decoupling. Library-first, lint-clean.
+
+<!-- ![sch](docs/assets/demo-usbc-power-sch.png) ![pcb](docs/assets/demo-usbc-power-pcb.png) -->
+*原理图 / PCB 截图:待补充 (TBD)*
+
+### 3. motobox2026 — ESP32-S3 · 4G · GNSS · IMU tracker (≈110 parts, 3 pages)
+A larger multi-page board: ESP32-S3 + Air780EG (4G) + LC29H (GNSS) + LSM6DSV16X (IMU)
++ SD-NAND + multi-rail power (buck / charger / LDOs) + USB. Realized across **3 A4 pages**
+(Power / MCU+Digital / RF+4G) with cross-page net ports; layout refined SOP-by-SOP
+(W wire → F rail-flag → D decouple → C cluster → N net-classify → G multipage). WIP.
+
+<!-- ![sch](docs/assets/demo-motobox2026-sch.png) ![pcb](docs/assets/demo-motobox2026-pcb.png) -->
+*原理图 / PCB 截图:待补充 (TBD)*
+
 ## Repository Layout
 
 ```text
