@@ -754,7 +754,7 @@ exits non-zero when there are any findings, to use it as a gate.`,
 	// eyeballed. Exits non-zero when overlaps exist → usable as a gate.
 	{
 		var minGap float64
-		var asJSON, allPages bool
+		var asJSON, allPages, includeNonParts bool
 		c := &cobra.Command{
 			Use:   "layout-lint",
 			Short: "Check component placement for bbox overlaps and tight spacing",
@@ -766,6 +766,12 @@ and runs two pairwise checks in Go:
   • overlap  — two component bounding boxes intersect            → ERROR
   • spacing  — bbox gap is below --min-gap (default 2.54mm)      → WARN
 
+Only real parts (componentType "part") are checked by default. The drawing
+sheet / title block (图框) spans the whole page, so including it would false-flag
+an overlap against nearly every component; netflag/netport/netlabel and other
+non-part primitives are likewise excluded. Pass --include-non-parts to score them
+too (e.g. to inspect the sheet bbox).
+
 This is the mechanical ground truth for the place→verify→adjust loop: run it
 after each placement stage, fix every ERROR (move/align/distribute), then re-run.
 Exits non-zero when any overlap is found, so it can gate a workflow.`,
@@ -774,12 +780,13 @@ Exits non-zero when any overlap is found, so it can gate a workflow.`,
   easyeda sch layout-lint --min-gap 5.08
   easyeda sch layout-lint --all-pages --json`,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return runLayoutLint(cfg, window, minGap, allPages, asJSON, stdout, stderr)
+				return runLayoutLint(cfg, window, minGap, allPages, asJSON, includeNonParts, stdout, stderr)
 			},
 		}
 		c.Flags().Float64Var(&minGap, "min-gap", 2.54, "minimum gap between component bboxes in mm (closer = WARN)")
 		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
 		c.Flags().BoolVar(&allPages, "all-pages", false, "lint components across all schematic pages")
+		c.Flags().BoolVar(&includeNonParts, "include-non-parts", false, "also lint non-part primitives (sheet/title-frame, netflag/netport/…); excluded by default")
 		sch.AddCommand(c)
 	}
 
