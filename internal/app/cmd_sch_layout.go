@@ -1,0 +1,244 @@
+package app
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"sort"
+	"strings"
+)
+
+// ── layout-lint: mechanical placement check ─────────────────────────────────
+//
+// The overlap problem reported from real use ("元件覆盖在一起") is fundamentally a
+// missing-feedback problem: the agent placed components but had no ground truth
+// for whether they collided. `sch layout-lint` is that ground truth — it pulls
+// every component's rendered bbox and runs cheap pairwise geometry in Go, so the
+// place→verify→adjust loop has a quantified input instead of an eyeball.
+
+// layoutBBox is a component's rendered extent in schematic mm (y-up).
+type layoutBBox struct {
+	MinX float64 `json:"minX"`
+	MinY float64 `json:"minY"`
+	MaxX float64 `json:"maxX"`
+	MaxY float64 `json:"maxY"`
+}
+
+// layoutComp is the minimal per-component shape layout-lint reasons about.
+type layoutComp struct {
+	ID         string
+	Designator string
+	BBox       *layoutBBox
+}
+
+// layoutFinding is one pairwise issue (overlap or tight spacing).
+type layoutFinding struct {
+	Type string  `json:"type"` // "overlap" | "spacing"
+	A    string  `json:"a"`    // designator (or id)
+	B    string  `json:"b"`
+	OvX  float64 `json:"overlapX,omitempty"` // overlap extent (mm), overlap only
+	OvY  float64 `json:"overlapY,omitempty"`
+	Gap  float64 `json:"gap,omitempty"` // edge-to-edge gap (mm), spacing only
+}
+
+// layoutReport is the full normalized result of a layout-lint run.
+type layoutReport struct {
+	OK         bool            `json:"ok"`
+	MinGap     float64         `json:"minGap"`
+	Total      int             `json:"componentCount"`
+	WithBBox   int             `json:"withBBox"`
+	NoBBox     []string        `json:"noBBox,omitempty"`
+	Overlaps   []layoutFinding `json:"overlaps"`
+	TightPairs []layoutFinding `json:"tightSpacing"`
+	Summary    string          `json:"summary"`
+}
+
+// analyzeLayout is the pure core: given components and a min-gap threshold,
+// return every overlapping and too-close pair. Deterministic ordering so output
+// and tests are stable. Kept free of I/O for unit-testing.
+func analyzeLayout(comps []layoutComp, minGap float64) layoutReport {
+	rep := layoutReport{MinGap: minGap, Total: len(comps)}
+
+	withBBox := make([]layoutComp, 0, len(comps))
+	for _, c := range comps {
+		if c.BBox != nil {
+			withBBox = append(withBBox, c)
+		} else {
+			rep.NoBBox = append(rep.NoBBox, label(c))
+		}
+	}
+	rep.WithBBox = len(withBBox)
+	sort.Strings(rep.NoBBox)
+
+	for i := 0; i < len(withBBox); i++ {
+		for j := i + 1; j < len(withBBox); j++ {
+			a, b := withBBox[i], withBBox[j]
+			ox, oy, overlap := overlapExtent(*a.BBox, *b.BBox)
+			la, lb := label(a), label(b)
+			// Order the pair labels for a stable, readable A↔B.
+			if lb < la {
+				la, lb = lb, la
+			}
+			if overlap {
+				rep.Overlaps = append(rep.Overlaps, layoutFinding{Type: "overlap", A: la, B: lb, OvX: round2(ox), OvY: round2(oy)})
+				continue
+			}
+			if gap := rectGap(*a.BBox, *b.BBox); gap < minGap {
+				rep.TightPairs = append(rep.TightPairs, layoutFinding{Type: "spacing", A: la, B: lb, Gap: round2(gap)})
+			}
+		}
+	}
+
+	sortFindings(rep.Overlaps)
+	sortFindings(rep.TightPairs)
+
+	rep.OK = len(rep.Overlaps) == 0
+	rep.Summary = fmt.Sprintf("%d components (%d with bbox): %d overlap, %d tight (<%.2fmm)",
+		rep.Total, rep.WithBBox, len(rep.Overlaps), len(rep.TightPairs), minGap)
+	return rep
+}
+
+// overlapExtent reports the intersection extent of two bboxes and whether they
+// actually overlap (positive area on both axes). Touching edges do NOT count.
+func overlapExtent(a, b layoutBBox) (ox, oy float64, overlap bool) {
+	ox = math.Min(a.MaxX, b.MaxX) - math.Max(a.MinX, b.MinX)
+	oy = math.Min(a.MaxY, b.MaxY) - math.Max(a.MinY, b.MinY)
+	return ox, oy, ox > 0 && oy > 0
+}
+
+// rectGap is the edge-to-edge separation between two non-overlapping bboxes.
+func rectGap(a, b layoutBBox) float64 {
+	dx := math.Max(0, math.Max(a.MinX-b.MaxX, b.MinX-a.MaxX))
+	dy := math.Max(0, math.Max(a.MinY-b.MaxY, b.MinY-a.MaxY))
+	return math.Hypot(dx, dy)
+}
+
+// label picks the most identifying name. A freshly placed part carries an
+// UNASSIGNED designator ("C?", "R?", or empty) — useless for telling two apart —
+// so fall back to the primitiveId in that case.
+func label(c layoutComp) string {
+	d := c.Designator
+	if d != "" && !strings.HasSuffix(d, "?") {
+		return d
+	}
+	if c.ID != "" {
+		if d != "" {
+			return d + "@" + c.ID // e.g. "C?@129274a01919b064"
+		}
+		return c.ID
+	}
+	return d
+}
+
+func round2(v float64) float64 { return math.Round(v*100) / 100 }
+
+func sortFindings(f []layoutFinding) {
+	sort.Slice(f, func(i, j int) bool {
+		if f[i].A != f[j].A {
+			return f[i].A < f[j].A
+		}
+		return f[i].B < f[j].B
+	})
+}
+
+// runLayoutLint fetches components with bbox, analyzes, renders, and returns a
+// non-nil error when overlaps exist so the command exits non-zero (gate-able).
+func runLayoutLint(cfg *appConfig, window string, minGap float64, allPages, asJSON bool, stdout, stderr io.Writer) error {
+	payload := map[string]any{"includeBBox": true}
+	if allPages {
+		payload["allPages"] = true
+	}
+	res, err := requestAction(cfg, "schematic.components.list", window, payload)
+	if err != nil {
+		return err
+	}
+
+	comps, perr := parseLayoutComps(res.Result)
+	if perr != nil {
+		return perr
+	}
+	rep := analyzeLayout(comps, minGap)
+
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			return err
+		}
+	} else {
+		renderLayoutReport(rep, stdout)
+	}
+
+	if !rep.OK {
+		return fmt.Errorf("layout-lint: %d overlap(s) found", len(rep.Overlaps))
+	}
+	return nil
+}
+
+// parseLayoutComps extracts the minimal layoutComp slice from a components.list
+// result map (components: [{primitiveId, designator, bbox:{minX..}}...]).
+func parseLayoutComps(result map[string]any) ([]layoutComp, error) {
+	raw, ok := result["components"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected components.list result: missing components array")
+	}
+	out := make([]layoutComp, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		c := layoutComp{
+			ID:         asString(m["primitiveId"]),
+			Designator: asString(m["designator"]),
+		}
+		if bm, ok := m["bbox"].(map[string]any); ok {
+			c.BBox = &layoutBBox{
+				MinX: asFloat(bm["minX"]),
+				MinY: asFloat(bm["minY"]),
+				MaxX: asFloat(bm["maxX"]),
+				MaxY: asFloat(bm["maxY"]),
+			}
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+func asString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func asFloat(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case json.Number:
+		f, _ := n.Float64()
+		return f
+	}
+	return 0
+}
+
+// renderLayoutReport prints a compact human summary.
+func renderLayoutReport(rep layoutReport, w io.Writer) {
+	fmt.Fprintf(w, "layout-lint: %d components (%d with bbox), min-gap %.2fmm\n", rep.Total, rep.WithBBox, rep.MinGap)
+	for _, f := range rep.Overlaps {
+		fmt.Fprintf(w, "  ERROR  overlap  %s ↔ %s   (overlap %.2f × %.2f mm)\n", f.A, f.B, f.OvX, f.OvY)
+	}
+	for _, f := range rep.TightPairs {
+		fmt.Fprintf(w, "  WARN   spacing  %s ↔ %s   (gap %.2fmm < %.2fmm)\n", f.A, f.B, f.Gap, rep.MinGap)
+	}
+	if len(rep.NoBBox) > 0 {
+		fmt.Fprintf(w, "  note: %d component(s) had no bbox (skipped): %v\n", len(rep.NoBBox), rep.NoBBox)
+	}
+	if rep.OK {
+		fmt.Fprintf(w, "✓ no overlaps; %d tight pair(s)\n", len(rep.TightPairs))
+	} else {
+		fmt.Fprintf(w, "✗ %d overlap(s), %d tight pair(s)\n", len(rep.Overlaps), len(rep.TightPairs))
+	}
+}

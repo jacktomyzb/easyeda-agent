@@ -197,9 +197,9 @@ func AllActions() []ActionSpec {
 			Domain:      DomainSchematic,
 			Phase:       1,
 			NeedsWindow: true,
-			Description: "List components on the active schematic page.",
-			Inputs:      []string{"allPages optional"},
-			Outputs:     []string{"component primitives", "designator", "name", "pins"},
+			Description: "List components on the active schematic page. includeBBox attaches each component's rendered extent {minX,minY,maxX,maxY} (used by `easyeda sch layout-lint` for overlap/spacing checks).",
+			Inputs:      []string{"allPages optional", "includePins optional", "includeBBox optional"},
+			Outputs:     []string{"component primitives", "designator", "name", "pins", "bbox"},
 		},
 		{
 			Name:        "schematic.component.place",

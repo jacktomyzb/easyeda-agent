@@ -35,7 +35,8 @@ on `main` by default (user preference). Don't `git checkout -b`; just commit to
 |---|---|
 | `cmd/easyeda` + `internal/{app,daemon,protocol}` | Go CLI + daemon. `internal/protocol/actions.go` = the 20 typed actions. Daemon: `/health`, `/eda` (connector WS), `/action`. |
 | `extension/` | TypeScript connector → esbuild → `.eext`. `src/transport.ts` (port-scan + auto-reconnect), `src/actions.ts` (eda.* handlers + `connect_pin`). |
-| `skills/easyeda-schematic/` | Operational skill (schematic) — typed-action workflow, `scripts/` (lint suite + BOM/parts tools), guardrails. Links to the conventions skill for design rules. |
+| `skills/easyeda-design-flow/` | Orchestration skill — the chief-EDA-engineer **process spine** for a whole board: staged + gated pipeline (pre-analysis → paginate → group → place-by-group → route → DRC + `sch layout-lint` → adjust loop). Sequences/gates only; delegates actions to the operational skills, rules to conventions. |
+| `skills/easyeda-schematic/` | Operational skill (schematic) — typed-action workflow, `scripts/` (lint suite + BOM/parts tools), `sch layout-lint` (bbox overlap/spacing), guardrails. Links to the conventions skill for design rules. |
 | `skills/easyeda-pcb/` | Operational skill (PCB) — switch to a PCB, read components/layers/nets/board, `import_changes` from the schematic, lay out (move/rotate/align/distribute/grid-snap/cluster-arrange). Links to the conventions skill. |
 | `skills/easyeda-conventions/` | Reference skill (no actions) — the EE design truth + canonical data in `references/`: orientation.json, standard-parts.json, schematic/pcb layout conventions, part-selection. See `skills/README.md`. |
 | `docs/FEATURES.md` | Feature-status inventory (20 actions grouped by capability) + roadmap. |

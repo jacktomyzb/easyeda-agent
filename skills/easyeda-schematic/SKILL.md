@@ -24,11 +24,15 @@ Use `easyeda-agent` typed actions. Do not write raw EasyEDA JavaScript unless a 
 > canonical orientation table + standard-parts library). This operational skill
 > **links** to it — single source, never copy the rules here.
 
+> ⚠️ **整板 / 非平凡设计 → 先走 [`easyeda-design-flow`](../easyeda-design-flow/SKILL.md) 流程脊柱。**
+> 那里有分阶段 + 硬门禁(预分析 → 分页 → 模块编组 → 按组摆放 → 通道布线 → DRC + layout-lint → 调整闭环),
+> 专治「随手摆导致覆盖、外围乱飞、线压元件」。本 skill 提供它每一步要调用的**具体动作**。
+>
 > ⚠️ **多器件 / 整板设计:先花几分钟摸底,再动手。** 非平凡板子(>~10 件,或要交付/排 PCB)
 > place 前快速读懂设计(器件/电源树/功能分组/幅面)——见
 > [`design-pre-analysis.md`](../easyeda-conventions/references/design-pre-analysis.md)(轻量摸底,不是门禁)。
 > 然后照 [`auto-layout-sop.md`](../easyeda-conventions/references/auto-layout-sop.md)
-> 的 CLI 能力 + 硬坑落坐标,布局**用数据 + 截图自调**(放→读回坐标→判间距/线长→挪→再读)。
+> 的 CLI 能力 + 硬坑落坐标,布局**用数据 + 截图自调**(放→读回坐标→`sch layout-lint` 判覆盖/间距→挪→再验)。
 > 小改 / 几个器件直接按下面放置。
 
 Place **real parts from the EasyEDA / 立创(LCSC) library**, then wire them.
@@ -63,8 +67,8 @@ near-equivalent, first).
    - ⚠️ **Multi-pin nets: chain pin→pin** (each segment anchored on a pin), NOT a star
      to a free junction (EasyEDA drops the un-anchored junction on merge).
    - **Flags ONLY for power/ground rails** (`connect_pin direction=`, never blanket rot 0).
-5. **Verify** with `schematic.drc.check` + the data linter
-   (`scripts/lint.sh <project>`). ⚠️ After API edits the **EasyEDA canvas may not
+5. **Verify** with `easyeda sch layout-lint`(布局:覆盖/间距)+ `schematic.drc.check`(电气)
+   + the data linter (`scripts/lint.sh <project>`). ⚠️ After API edits the **EasyEDA canvas may not
    auto-redraw** → `schematic.snapshot` / `getCurrentRenderedAreaImage` return a STALE
    frame (even `view fit` framing is stale). **Judge STATE by data (`sch list`/`getAll`),
    use the screenshot for visual layout only**, and touch the page in EasyEDA (scroll/
@@ -135,7 +139,8 @@ easyeda doc switch <P2|PCB1|uuid> --project <名字>   # 切换:按页名/PCB名
 
 ### 原理图编辑
 
-- `schematic.components.list`
+- `schematic.components.list` — `--include-bbox` 附带每个元件渲染范围 `{minX,minY,maxX,maxY}`(供布局推理)。
+- **`easyeda sch layout-lint`** — **布局自检**(治覆盖的机械真值)。拉 `components.list --include-bbox`,Go 侧两两几何检查:**bbox 重叠 = ERROR**(命令非零退出,可当门禁)、**间距 < `--min-gap`(默认 2.54mm)= WARN**。`--all-pages`、`--json`。摆放后跑它判覆盖/间距,比肉眼/截图可靠(截图可能 stale)。是 place→verify→adjust 闭环的输入。
 - `schematic.component.place`
 - `schematic.component.modify`
 - `schematic.component.delete` — ⚠️ **只删组件,不删导线/总线/图形**。删完 `schematic.components.list` 只剩 A4 sheet 会让你误以为页面已干净,实际残留导线还在(DRC 仍会报)。要真正清页用 `schematic.page.clear`。

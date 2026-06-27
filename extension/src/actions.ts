@@ -386,6 +386,10 @@ const schematicRename: Handler = async (payload) => {
 const schematicComponentsList: Handler = async (payload) => {
 	const allPages = optionalBoolean(payload, 'allPages') === true;
 	const includePins = optionalBoolean(payload, 'includePins') === true;
+	// includeBBox attaches each component's rendered extent {minX,minY,maxX,maxY}
+	// (via eda.sch_Primitive.getPrimitivesBBox) so the agent / `sch layout-lint`
+	// can reason about size, spacing, and overlap — mirrors pcb.components.list.
+	const includeBBox = optionalBoolean(payload, 'includeBBox') === true;
 	let components;
 	try {
 		components = await eda.sch_PrimitiveComponent.getAll(undefined, allPages);
@@ -397,6 +401,13 @@ const schematicComponentsList: Handler = async (payload) => {
 	const serialized: Array<Record<string, unknown>> = [];
 	for (const component of components) {
 		const record = serializeComponent(component);
+		if (includeBBox) {
+			try {
+				const box = await eda.sch_Primitive.getPrimitivesBBox([component.getState_PrimitiveId()]);
+				if (box) record.bbox = box;
+			}
+			catch { /* bbox is optional */ }
+		}
 		if (includePins) {
 			try {
 				const pins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(

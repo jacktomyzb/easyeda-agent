@@ -6,7 +6,8 @@ staying tightly cross-referenced.
 | Skill | Kind | Holds |
 |---|---|---|
 | [`easyeda-conventions`](easyeda-conventions/SKILL.md) | **Reference** (no actions) | The tool-agnostic EE design truth — schematic/PCB layout conventions, part-selection criteria, and the canonical data (`orientation.json`, `standard-parts.json`). |
-| [`easyeda-schematic`](easyeda-schematic/SKILL.md) | **Operational** | How to drive `easyeda-agent` for **schematics**: the typed-action workflow, scripts (`lint`, `bom-enrich`, `parts-select`, `calibrate`), and guardrails. |
+| [`easyeda-design-flow`](easyeda-design-flow/SKILL.md) | **Orchestration** | The chief-EDA-engineer **process spine** for a whole board: the staged, gated pipeline (pre-analysis → paginate → group → place-by-group → route → DRC + layout-lint → adjust loop). Sequences and gates; delegates actions to the operational skills and rules to conventions — copies neither. |
+| [`easyeda-schematic`](easyeda-schematic/SKILL.md) | **Operational** | How to drive `easyeda-agent` for **schematics**: the typed-action workflow, scripts (`lint`, `bom-enrich`, `parts-select`, `calibrate`), `sch layout-lint` (bbox overlap/spacing), and guardrails. |
 | [`easyeda-pcb`](easyeda-pcb/SKILL.md) | **Operational** | How to drive `easyeda-agent` for **PCB**: switch to a PCB, read components/layers/nets/board, sync from the schematic (`import_changes`), and lay out components (move/rotate/align/distribute/grid-snap/cluster-arrange). |
 
 ## Why split

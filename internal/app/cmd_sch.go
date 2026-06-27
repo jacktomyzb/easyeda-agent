@@ -233,22 +233,30 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	// ── list ─────────────────────────────────────────────────────────────
 	// schematic.components.list
 	{
-		var allPages bool
+		var allPages, includeBBox bool
 		c := &cobra.Command{
 			Use:   "list",
 			Short: "List components on the active (or all) schematic page(s)",
 			Args:  cobra.NoArgs,
 			Example: `  easyeda sch list
-  easyeda sch list --all-pages`,
+  easyeda sch list --all-pages
+  easyeda sch list --include-bbox`,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				var payload map[string]any
+				payload := map[string]any{}
 				if allPages {
-					payload = map[string]any{"allPages": true}
+					payload["allPages"] = true
+				}
+				if includeBBox {
+					payload["includeBBox"] = true
+				}
+				if len(payload) == 0 {
+					return dispatch(cfg, "schematic.components.list", window, nil, stdout, stderr)
 				}
 				return dispatch(cfg, "schematic.components.list", window, payload, stdout, stderr)
 			},
 		}
 		c.Flags().BoolVar(&allPages, "all-pages", false, "list components across all schematic pages")
+		c.Flags().BoolVar(&includeBBox, "include-bbox", false, "attach each component's rendered extent {minX,minY,maxX,maxY}")
 		sch.AddCommand(c)
 	}
 
@@ -593,6 +601,42 @@ by the screenshot. Touch the page in EasyEDA (scroll/click) to force a redraw.`,
 			return dispatch(cfg, "schematic.save", window, nil, stdout, stderr)
 		},
 	})
+
+	// ── layout-lint ───────────────────────────────────────────────────────
+	// Go-side placement check on schematic.components.list(includeBBox). The
+	// "teeth" of the verify→adjust loop: detect bbox overlaps (ERROR) and
+	// too-tight spacing (WARN) so layout overlap is mechanically caught, not
+	// eyeballed. Exits non-zero when overlaps exist → usable as a gate.
+	{
+		var minGap float64
+		var asJSON, allPages bool
+		c := &cobra.Command{
+			Use:   "layout-lint",
+			Short: "Check component placement for bbox overlaps and tight spacing",
+			Long: `Check component placement on the schematic for overlaps and tight spacing.
+
+Pulls every component's rendered extent (schematic.components.list --include-bbox)
+and runs two pairwise checks in Go:
+
+  • overlap  — two component bounding boxes intersect            → ERROR
+  • spacing  — bbox gap is below --min-gap (default 2.54mm)      → WARN
+
+This is the mechanical ground truth for the place→verify→adjust loop: run it
+after each placement stage, fix every ERROR (move/align/distribute), then re-run.
+Exits non-zero when any overlap is found, so it can gate a workflow.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda sch layout-lint
+  easyeda sch layout-lint --min-gap 5.08
+  easyeda sch layout-lint --all-pages --json`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runLayoutLint(cfg, window, minGap, allPages, asJSON, stdout, stderr)
+			},
+		}
+		c.Flags().Float64Var(&minGap, "min-gap", 2.54, "minimum gap between component bboxes in mm (closer = WARN)")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
+		c.Flags().BoolVar(&allPages, "all-pages", false, "lint components across all schematic pages")
+		sch.AddCommand(c)
+	}
 
 	// ── netlist ───────────────────────────────────────────────────────────
 	// schematic.export.netlist
