@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); versions
 follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.5.14] - 2026-06-28
 ### Fixed
 - **`schematic.pin.set_no_connect` no longer reports a false success.** On EasyEDA
   Pro 3.2.x, `pin.setState_NoConnected` is a **no-op** — the pin primitive has no
