@@ -1001,18 +1001,199 @@ const schematicSnapshot: Handler = async (payload) => {
 
 // ─── DRC ──────────────────────────────────────────────────────────────
 
+// DRC severity buckets. `fatal`/`error` are the must-fix class the design-flow
+// S5 gate counts ("0 fatal"); `warn`/`info` are tolerable. `unknown` is the
+// fallback when the SDK string doesn't classify.
+type DrcSeverity = 'fatal' | 'error' | 'warn' | 'info' | 'unknown';
+
+// One normalized violation. Keeps the EDA raw object under `raw` so nothing is
+// lost; the typed fields are a best-effort projection across the shapes the SDK
+// returns (flat `{count,type}` aggregates AND PCB-style nested `{name,list:[…]}`).
+interface DrcViolation {
+	level: DrcSeverity;
+	type?: string;
+	rule?: string;
+	message?: string;
+	primitiveIds?: Array<string>;
+	designators?: Array<string>;
+	x?: number;
+	y?: number;
+	count?: number; // present when the SDK only gave an aggregate count, no per-item detail
+	raw: unknown;
+}
+
+interface DrcSummary {
+	fatal: number;
+	error: number;
+	warn: number;
+	info: number;
+	unknown: number;
+	total: number;
+}
+
+/** Map an arbitrary SDK severity string to a DrcSeverity bucket. */
+function classifyDrcSeverity(raw: unknown): DrcSeverity {
+	const s = String(raw ?? '').toLowerCase();
+	if (s.includes('fatal')) return 'fatal';
+	if (s.includes('error') || s === 'err') return 'error';
+	if (s.includes('warn')) return 'warn';
+	if (s.includes('info') || s.includes('note') || s.includes('tip')) return 'info';
+	return 'unknown';
+}
+
+function firstString(obj: Record<string, unknown>, keys: Array<string>): string | undefined {
+	for (const k of keys) {
+		const v = obj[k];
+		if (typeof v === 'string' && v.length > 0) return v;
+		if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+	}
+	return undefined;
+}
+
+function firstNumber(obj: Record<string, unknown>, keys: Array<string>): number | undefined {
+	for (const k of keys) {
+		const v = obj[k];
+		if (typeof v === 'number' && Number.isFinite(v)) return v;
+	}
+	return undefined;
+}
+
+/** Collect id-like / designator-like fields into a string array. */
+function collectStrings(obj: Record<string, unknown>, keys: Array<string>): Array<string> | undefined {
+	const out: Array<string> = [];
+	for (const k of keys) {
+		const v = obj[k];
+		if (typeof v === 'string' && v.length > 0) out.push(v);
+		else if (Array.isArray(v)) {
+			for (const e of v) {
+				if (typeof e === 'string' && e.length > 0) out.push(e);
+				else if (e && typeof e === 'object') {
+					const id = firstString(e as Record<string, unknown>, ['primitiveId', 'id', 'designator', 'name']);
+					if (id) out.push(id);
+				}
+			}
+		}
+	}
+	return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Flatten whatever `sch_Drc.check` returns into per-violation leaves. The SDK is
+ * untyped here and ships at least two shapes: schematic returns flat aggregates
+ * `[{count, type}]` while PCB nests `[{name, list:[{name, list:[{errorType,…}]}]}]`.
+ * This walks any `list` containers recursively, inheriting group type/rule, and
+ * emits a leaf per terminal node — so we expand detail when the build provides it
+ * and degrade to a per-group aggregate (with `count`) when it doesn't.
+ */
+function flattenDrcNodes(
+	node: unknown,
+	inherited: { type?: string; rule?: string },
+	out: Array<DrcViolation>,
+): void {
+	if (Array.isArray(node)) {
+		for (const n of node) flattenDrcNodes(n, inherited, out);
+		return;
+	}
+	if (node == null || typeof node !== 'object') return;
+	const obj = node as Record<string, unknown>;
+
+	const type = firstString(obj, ['type', 'level', 'severity', 'errorType']) ?? inherited.type;
+	const rule = firstString(obj, ['rule', 'ruleName', 'title', 'name', 'errorType']) ?? inherited.rule;
+
+	// Container node: recurse into nested violations, carrying group context down.
+	const list = obj.list;
+	if (Array.isArray(list) && list.length > 0) {
+		flattenDrcNodes(list, { type, rule }, out);
+		return;
+	}
+
+	// Leaf node — project the known fields, keep the raw object intact.
+	const message = firstString(obj, ['message', 'text', 'desc', 'description', 'detail', 'info', 'tip']);
+	const primitiveIds = collectStrings(obj, ['primitiveIds', 'primitiveId', 'objs', 'obj1', 'obj2', 'ids']);
+	const designators = collectStrings(obj, ['designators', 'designator', 'components']);
+	const x = firstNumber(obj, ['x', 'posX']);
+	const y = firstNumber(obj, ['y', 'posY']);
+	const count = firstNumber(obj, ['count']);
+
+	out.push({
+		level: classifyDrcSeverity(type),
+		type,
+		rule,
+		message,
+		primitiveIds,
+		designators,
+		x,
+		y,
+		// Only surface `count` when this leaf is an aggregate-only node (no per-item
+		// detail) so the human view can still say "warn × N" without faking coords.
+		count: count !== undefined && message === undefined && x === undefined ? count : undefined,
+		raw: node,
+	});
+}
+
+/** Normalize a raw DRC result array into `{passed, fatal, summary, violations}`. */
+function normalizeDrc(violations: Array<unknown>): {
+	passed: boolean;
+	fatal: number;
+	summary: DrcSummary;
+	violations: Array<DrcViolation>;
+	raw: Array<unknown>;
+} {
+	const leaves: Array<DrcViolation> = [];
+	flattenDrcNodes(violations, {}, leaves);
+
+	const summary: DrcSummary = { fatal: 0, error: 0, warn: 0, info: 0, unknown: 0, total: 0 };
+	for (const v of leaves) {
+		const n = v.count !== undefined && v.count > 0 ? v.count : 1;
+		summary[v.level] += n;
+		summary.total += n;
+	}
+	// `fatal` (the S5 gate input) = the must-fix class: fatal + error severities.
+	const fatal = summary.fatal + summary.error;
+	return { passed: leaves.length === 0, fatal, summary, violations: leaves, raw: violations };
+}
+
 const schematicDrcCheck: Handler = async (payload) => {
 	const strict = optionalBoolean(payload, 'strict') !== false;
+	// `includeVerboseError` selects the SDK overload: the literal `true` overload
+	// returns the violations array (what we normalize); the literal `false` one
+	// returns a bare boolean. Default true so we always get detail — and ACTUALLY
+	// read the payload field (it used to be hardcoded `true`, so the CLI flag was
+	// silently ignored). The overloads demand a literal arg, hence two branches.
+	// issue #7
+	const includeVerbose = optionalBoolean(payload, 'includeVerboseError') !== false;
+	if (!includeVerbose) {
+		// Non-verbose overload: a bare boolean with no per-item detail. Returned
+		// verbatim as `passed` (raw debug callers only — the CLI always asks for
+		// the verbose/array form).
+		let ok: boolean;
+		try {
+			ok = await eda.sch_Drc.check(strict, false, false);
+		}
+		catch (err) {
+			throw edaError(err, 'Failed to run DRC.');
+		}
+		return {
+			result: {
+				passed: ok,
+				fatal: 0,
+				summary: { fatal: 0, error: 0, warn: 0, info: 0, unknown: 0, total: 0 },
+				violations: [],
+				raw: ok,
+			},
+		};
+	}
 	let violations: Array<unknown>;
 	try {
-		// `includeVerboseError: true` selects the verbose overload that returns
-		// an array; the violation shape is untyped (`any`) by the SDK.
 		violations = await eda.sch_Drc.check(strict, false, true);
 	}
 	catch (err) {
 		throw edaError(err, 'Failed to run DRC.');
 	}
-	return { result: { passed: violations.length === 0, violations } };
+	// Normalize: expand each violation to {level, rule, message, ids, x, y} +
+	// a severity summary so callers can locate issues and gate on fatal count,
+	// instead of seeing only the SDK's aggregate `{count, type}` groups. issue #7
+	return { result: normalizeDrc(violations) };
 };
 
 // ─── Save ─────────────────────────────────────────────────────────────

@@ -152,7 +152,7 @@ easyeda doc switch <P2|PCB1|uuid> --project <名字>   # 切换:按页名/PCB名
 - `schematic.pin.set_no_connect` — 打/清「非连接标识」(NC, X 标记),让 DRC 不再对故意悬空的引脚报"未连接"。按位号+引脚号定位:`easyeda sch no-connect --designator U1 --pin 23,24[,…]`(`--clear` 清除)。
 - `schematic.select`
 - `schematic.snapshot` — 截图。**产物保存在 CLI 运行目录下的隐藏目录 `<cwd>/.easyeda/artifacts/`,文件名带本地时间戳**(`<YYYYMMDD-HHMMSS>-<kind>-<短id>.png`,便于排序/查找);响应里的 `artifacts[].path` 是绝对路径。netlist/BOM 等其他产物同此规则。
-- `schematic.drc.check`
+- `schematic.drc.check` — 用 `easyeda sch drc` 跑，**逐条**打印 `LEVEL <rule> <message> @(x,y)`(`--json` 给结构化)。返回含 `summary{fatal,error,warn,…}` 与 `fatal` 计数;**退出码仅在 `fatal>0` 时非零**(warning 不阻塞),据此判 S5 门「0 fatal」。
 - `schematic.save`
 - `schematic.export.netlist`
 - `schematic.export.bom`

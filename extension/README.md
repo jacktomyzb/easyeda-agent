@@ -177,7 +177,7 @@ handling is the daemon/skill's concern).
 | `schematic.library.search` | `lib_Device.search(query)` → first `limit` results (default 10), each mapped to `{libraryUuid, uuid, name, value, footprintName, lcsc, description}` |
 | `schematic.select` | `sch_SelectControl.doSelectPrimitives(primitiveIds)` then `getAllSelectedPrimitives_PrimitiveId()` |
 | `schematic.snapshot` | `dmt_EditorControl.getCurrentRenderedAreaImage(tabId?)` → Blob → artifact |
-| `schematic.drc.check` | `sch_Drc.check(strict, false, true)` → `{passed: arr.length===0, violations: arr}` |
+| `schematic.drc.check` | `sch_Drc.check(strict, false, includeVerboseError)` → normalized `{passed, fatal, summary, violations:[{level,rule,message,primitiveIds,designators,x,y,raw}]}` (per-violation, not aggregate) |
 | `schematic.save` | `sch_Document.save()` → `{saved}` |
 | `schematic.export.netlist` | `sch_ManufactureData.getNetlistFile(fileName?, netlistType?)` → File → artifact |
 | `schematic.export.bom` | `sch_ManufactureData.getBomFile(fileName?, fileType, template?, filterOptions?, statistics?, property?, columns?)` → File → artifact |
@@ -271,8 +271,16 @@ are also exported. Auto-connect preference is stored via
   schematic canvas units span `0.01 inch`. Unit interpretation/conversion is the
   daemon/skill's responsibility, not the connector's.
 - **DRC violation shape.** `sch_Drc.check(..., true)` returns `Array<any>` — the
-  SDK does not type the violation objects. They are passed through untouched as
-  `result.violations`; an empty array means DRC passed.
+  SDK does not type the violation objects, and the shape differs by domain
+  (schematic ships flat aggregates `[{count, type}]`; PCB nests
+  `[{name, list:[{name, list:[{errorType,…}]}]}]`). The handler **normalizes**
+  both: `flattenDrcNodes` walks any `list` containers into per-violation leaves and
+  projects each to `{level, rule, message, primitiveIds, designators, x, y}` while
+  keeping the original under `raw`. The field projection is best-effort over the
+  untyped shape — **verify the real per-item fields against a connected window**
+  (run `easyeda sch drc --json` on a board with known violations) and widen the key
+  lists in `flattenDrcNodes` if a build names them differently. An empty
+  `violations` array (and `passed:true`) means DRC passed.
 - **`easyedaVersion`** is read from `eda.sys_Environment.getEditorCurrentVersion()`
   (best-effort; falls back to `""`).
 - **`eda.sch_PrimitiveComponent` is a union type** (`SCH_PrimitiveComponent |

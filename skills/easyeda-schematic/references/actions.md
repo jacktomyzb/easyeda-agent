@@ -54,7 +54,7 @@ Run `easyeda actions` for the authoritative machine-readable list.
 
 ## Verify & Export
 
-- `schematic.drc.check` — 运行 DRC，返回 passed + violations
+- `schematic.drc.check` — 运行 DRC，返回**逐条** violation（`{level, rule, message, primitiveIds, designators, x, y}`）+ 严重度 `summary` + `fatal` 计数（error+fatal）。CLI 推荐 `easyeda sch drc`（人类逐条视图 `LEVEL <rule> <message> @(x,y)`）或 `--json`（结构化）；**退出码仅在 `fatal>0` 时非零**，warning 不阻塞 → 供 design-flow S5 门「0 fatal」判定。
 - `schematic.export.netlist` — 导出网表为 artifact
 - `schematic.export.bom` — 导出 BOM（csv 或 xlsx）为 artifact
 
