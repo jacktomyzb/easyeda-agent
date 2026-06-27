@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); versions
 follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- **`schematic.wire.create` now normalizes nested `points` (issue #5).** EDA's
+  `eda.sch_PrimitiveWire.create` only accepts a **flat** `number[]`
+  (`[x1,y1,x2,y2,…]`); a nested `[[x,y],…]` payload failed with
+  `EDA_CALL_FAILED / "create failed!"`. The connector now flattens nested points
+  at a single source of truth (`normalizeWirePoints` in `util.ts`), so CLI /
+  `call` / sch.py / `debug.exec_js` all accept either form. Also validates the
+  list is an even-length (`≥4`) run of finite numbers. CLI `sch wire --help` and
+  `auto-layout-sop.md` updated to document both forms.
+
 ### Added
 - **`schematic.snapshot` anti-stale metadata (issue #2).** The snapshot result now
   carries `primitiveCount` (live components + page primitives on the current page),
