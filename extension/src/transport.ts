@@ -19,6 +19,7 @@ import {
 	CAPABILITIES,
 	CONNECTOR_VERSION,
 	ErrorCodes,
+	type ContextFrame,
 	type InboundFrame,
 	PROTOCOL_VERSION,
 	type RegisterFrame,
@@ -71,6 +72,11 @@ let heartbeatSeq = 0;
 let missedPongs = 0;
 let retryCount = 0;
 let windowId: string | null = null;
+// Signature of the last context frame pushed to the daemon, so the heartbeat can
+// re-send context ONLY when the active project/document actually changed (e.g.
+// the user switched tabs in the UI). Reset on each new connection so a reconnect
+// always re-pushes. Empty string = nothing sent yet.
+let lastContextSig = '';
 let isConnecting = false;
 let connectionSessionId = 0;
 // Whether we've already shown the "Connected" toast for the current connected
@@ -308,8 +314,9 @@ function tryConnectToPort(port: number, sessionId: number): Promise<boolean> {
 							if ((msg as { service?: string }).service === SERVICE_ID) {
 								handshakeVerified = true;
 								windowId = crypto.randomUUID();
+								lastContextSig = '';
 								sendRegister();
-								void sendContext();
+								void sendContext(true);
 								if (!connectionAnnounced) {
 									connectionAnnounced = true;
 									eda.sys_Message.showToastMessage(
@@ -361,12 +368,28 @@ function sendRegister(): void {
 	sendFrame(frame);
 }
 
-async function sendContext(): Promise<void> {
+// contextSig fingerprints the project/document fields that matter for routing,
+// so the heartbeat can skip re-sending an unchanged context.
+function contextSig(frame: ContextFrame): string {
+	return [frame.projectUuid, frame.documentUuid, frame.documentType, frame.tabId].join('|');
+}
+
+// sendContext pushes the current project/document context to the daemon. With
+// force=true (on connect) it always sends; otherwise (on heartbeat) it sends
+// only when the context changed since the last push — so `easyeda daemon health`
+// reflects a UI tab-switch within one heartbeat (~3s) without flooding the
+// socket every tick.
+async function sendContext(force = false): Promise<void> {
 	if (!windowId) {
 		return;
 	}
 	try {
 		const frame = await buildContextFrame(windowId);
+		const sig = contextSig(frame);
+		if (!force && sig === lastContextSig) {
+			return;
+		}
+		lastContextSig = sig;
 		sendFrame(frame);
 	}
 	catch (err) {
@@ -439,7 +462,13 @@ function startHeartbeat(sessionId: number): void {
 		}
 		catch {
 			reconnect('heartbeat send failed (socket gone)');
+			return;
 		}
+
+		// Piggyback a context refresh on the heartbeat: re-read the active
+		// project/document and push it only if it changed, so `daemon health`
+		// tracks a UI tab-switch within one interval without a per-action call.
+		void sendContext();
 	}, HEARTBEAT_INTERVAL_MS);
 }
 

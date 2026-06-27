@@ -4,6 +4,16 @@ All notable changes to the **EasyEDA Agent Connector** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); versions
 follow [SemVer](https://semver.org/).
 
+## [0.5.7] - 2026-06-27
+### Added
+- **Heartbeat-carried context.** The connector now re-reads the active
+  project/document on each heartbeat (~3s) and pushes it to the daemon only when
+  it changed. `easyeda daemon health` (and project routing) now reflect a UI
+  tab-switch within one interval — previously context refreshed only on connect
+  or as a side effect of running an action, so it lagged the UI until the next
+  command. The initial post-connect push is unconditional; reconnects reset the
+  change-detection signature so they always re-push.
+
 ## [0.5.6] - 2026-06-27
 ### Changed
 - **Rebuild to pair with the daemon's live-context + `doc` work.** No connector
