@@ -506,6 +506,46 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		sch.AddCommand(c)
 	}
 
+	// ── no-connect ──────────────────────────────────────────────────────────
+	// schematic.pin.set_no_connect
+	{
+		var designator string
+		var pins []string
+		var clear bool
+		c := &cobra.Command{
+			Use:   "no-connect",
+			Short: "Mark (or clear) a pin's no-connect flag (非连接标识)",
+			Args:  cobra.NoArgs,
+			Example: `  easyeda sch no-connect --designator U1 --pin 23
+  easyeda sch no-connect --designator U1 --pin 23,24,25
+  easyeda sch no-connect --designator U1 --pin 23 --clear`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				if designator == "" {
+					return fmt.Errorf("--designator is required")
+				}
+				if len(pins) == 0 {
+					return fmt.Errorf("--pin is required (one or more pin numbers)")
+				}
+				anyPins := make([]any, len(pins))
+				for i, p := range pins {
+					anyPins[i] = p
+				}
+				payload := map[string]any{
+					"designator": designator,
+					"pins":       anyPins,
+				}
+				if clear {
+					payload["noConnected"] = false
+				}
+				return dispatch(cfg, "schematic.pin.set_no_connect", window, payload, stdout, stderr)
+			},
+		}
+		c.Flags().StringVar(&designator, "designator", "", "component designator, e.g. U1 (required)")
+		c.Flags().StringSliceVar(&pins, "pin", nil, "pin number(s); repeat the flag or comma-separate (required)")
+		c.Flags().BoolVar(&clear, "clear", false, "clear the no-connect flag instead of setting it")
+		sch.AddCommand(c)
+	}
+
 	// ── select ────────────────────────────────────────────────────────────
 	// schematic.select
 	{

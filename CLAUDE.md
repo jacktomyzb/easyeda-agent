@@ -21,6 +21,14 @@ skill ──▶ Go CLI/daemon ──WebSocket──▶ connector .eext ──▶
 
 详见 [`docs/cli-design.md`](docs/cli-design.md)。核心约束：所有明确的功能模块必须以 **Cobra 子命令**方式暴露（`easyeda sch`、`easyeda pcb`、`easyeda bom` …），`--help` 自描述，新功能先设计命令接口再写实现，Skill 描述与子命令签名保持同步。开发闭环：`debug.exec_js` → typed action → Cobra 子命令。
 
+## 首要准则 — 固定测试用例（端到端验收）
+
+**每次做端到端测试，都必须把 [`docs/test-case-esp32-blink.md`](docs/test-case-esp32-blink.md)
+（ESP32-S3 最小系统点灯板）用 `easyeda-design-flow` 流程脊柱完整跑一遍**——放置→编组→布线
+→`sch layout-lint`→DRC→save，不是只测单点。这是 agent 画原理图能力的回归基准：layout-lint /
+autosave / design-flow / 连接器 任何改动后都重跑此用例。验收标准见该文档（8 件齐、0 overlap、
+0 fatal、5 网络连通、已落盘）。测试工程用 `--project ceshi`，测完清理还原。
+
 ## Notes
 
 reply as chiense! reply as chiense! reply as chiense!

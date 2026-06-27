@@ -270,6 +270,17 @@ func AllActions() []ActionSpec {
 			VerifyWith:  []string{"schematic.snapshot"},
 		},
 		{
+			Name:        "schematic.pin.set_no_connect",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Mark (or clear) a component pin's no-connect flag (非连接标识, the X marker) — tells DRC the pin is intentionally unconnected so it stops reporting 'un-connected pin'. Targets pins by designator + pin number; pass noConnected=false to clear.",
+			Inputs:      []string{"designator", "pins", "noConnected optional"},
+			Outputs:     []string{"designator", "primitive id", "pins[].noConnected"},
+			VerifyWith:  []string{"schematic.components.list", "schematic.drc.check"},
+		},
+		{
 			Name:        "schematic.library.search",
 			Domain:      DomainSchematic,
 			Phase:       1,

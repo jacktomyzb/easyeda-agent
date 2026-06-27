@@ -79,7 +79,7 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
 | `board.copy` | Duplicate a board (schematic + PCB). Mutates. |
 | `board.delete` | Delete a board by name (confirmation-gated, no undo). Mutates. |
 
-### Draw / edit (8 actions, all mutate)
+### Draw / edit (9 actions, all mutate)
 
 | Action | What |
 |---|---|
@@ -91,6 +91,7 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
 | `schematic.wire.create` | Create a wire polyline (optional net/color/width/lineType). |
 | `schematic.netflag.create` | Power / ground / analog-ground / protective-ground / net-port (IN/OUT/BI) / short-circuit flag. |
 | `schematic.power.connect_pin` | Composite: draw a stub wire out of a pin **and** place a netflag/netport at its far end in one call. Structurally prevents the "netflag overlaps pin" DRC fatal and orients the flag body outward along the stub (顺着导线方向). Default direction inferred from kind, default offset 30u. |
+| `schematic.pin.set_no_connect` | Mark (or clear) a pin's no-connect flag (非连接标识, the X marker) so DRC stops reporting intentionally-floating pins as "un-connected pin". Targets pins by designator + pin number(s); `noConnected=false` clears. A pin state (`pin.setState_NoConnected`), not a standalone primitive. |
 
 ### Library search (1 action)
 

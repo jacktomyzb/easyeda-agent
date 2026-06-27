@@ -829,6 +829,100 @@ const schematicNetflagCreate: Handler = async (payload) => {
 	};
 };
 
+// ─── No-connect flag (非连接标识) ───────────────────────────────────────
+//
+// A no-connect mark is NOT a standalone primitive — it is a PIN STATE.
+// `pin.setState_NoConnected(true)` both renders the X marker on the pin and
+// tells DRC the pin is intentionally unconnected (so it stops reporting the
+// "un-connected pin" error). `setState_NoConnected` is the only @public mutator
+// on a component pin besides pinNumber. Pins are reachable ONLY via
+// getAllPinsByPrimitiveId(component primitiveId), so we resolve the component by
+// designator first, then the pin(s) by pin number — how an engineer names them
+// ("U1 pin 23 is NC"). Pass noConnected=false to clear the mark.
+const schematicPinSetNoConnect: Handler = async (payload) => {
+	const designator = requireString(payload, 'designator');
+	const rawPins = payload.pins;
+	if (
+		!Array.isArray(rawPins)
+		|| rawPins.length === 0
+		|| !rawPins.every(p => typeof p === 'string' || typeof p === 'number')
+	) {
+		throw new ActionError(
+			ErrorCodes.MISSING_PAYLOAD_FIELD,
+			'Missing required field "pins" (non-empty array of pin numbers).',
+		);
+	}
+	const wantPins = rawPins.map(String);
+	// Default to setting the flag; only an explicit false clears it.
+	const value = optionalBoolean(payload, 'noConnected') === false ? false : true;
+
+	let components;
+	try {
+		components = await eda.sch_PrimitiveComponent.getAll(undefined, true);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read schematic components.');
+	}
+	const target = (components ?? []).find(c => c.getState_Designator() === designator);
+	if (!target) {
+		throw new ActionError(
+			ErrorCodes.EDA_CALL_FAILED,
+			`No component with designator "${designator}" on the schematic.`,
+		);
+	}
+	const cid = target.getState_PrimitiveId();
+
+	let pins;
+	try {
+		pins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(cid);
+	}
+	catch (err) {
+		throw edaError(err, `Failed to read pins of "${designator}".`);
+	}
+	const byNumber = new Map((pins ?? []).map(p => [p.getState_PinNumber(), p]));
+
+	const missing = wantPins.filter(n => !byNumber.has(n));
+	if (missing.length) {
+		throw new ActionError(
+			ErrorCodes.EDA_CALL_FAILED,
+			`"${designator}" has no pin(s): ${missing.join(', ')}. Available: ${[...byNumber.keys()].join(', ')}.`,
+		);
+	}
+
+	for (const n of wantPins) {
+		try {
+			byNumber.get(n)!.setState_NoConnected(value);
+		}
+		catch (err) {
+			throw edaError(err, `Failed to set no-connect on ${designator} pin ${n}.`);
+		}
+	}
+
+	// Re-pull fresh to confirm the STORED state — an immediate getState off the
+	// just-mutated handle can echo the input (same trap as createNetFlag rotation).
+	let confirmed: Array<{ pin: string; noConnected: boolean | null }>;
+	try {
+		const fresh = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(cid);
+		const freshByNumber = new Map((fresh ?? []).map(p => [p.getState_PinNumber(), p]));
+		confirmed = wantPins.map(n => ({
+			pin: n,
+			noConnected: freshByNumber.get(n)?.getState_NoConnected() ?? null,
+		}));
+	}
+	catch {
+		confirmed = wantPins.map(n => ({ pin: n, noConnected: value }));
+	}
+
+	return {
+		result: {
+			designator,
+			primitiveId: cid,
+			noConnected: value,
+			pins: confirmed,
+		},
+	};
+};
+
 // ─── Select ───────────────────────────────────────────────────────────
 
 const schematicSelect: Handler = async (payload) => {
@@ -2240,6 +2334,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.component.delete': schematicComponentDelete,
 	'schematic.wire.create': schematicWireCreate,
 	'schematic.netflag.create': schematicNetflagCreate,
+	'schematic.pin.set_no_connect': schematicPinSetNoConnect,
 	'schematic.select': schematicSelect,
 	'schematic.snapshot': schematicSnapshot,
 	'schematic.drc.check': schematicDrcCheck,

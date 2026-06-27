@@ -45,6 +45,7 @@ Run `easyeda actions` for the authoritative machine-readable list.
 - `schematic.wire.create` — 创建导线折线
 - `schematic.netflag.create` — 创建电源/地/网络端口/短路 flag
 - `schematic.power.connect_pin` — 复合操作：从 pin 拉导线 + 在末端放 flag（防止 flag-on-pin DRC fatal）
+- `schematic.pin.set_no_connect` — 给引脚打/清「非连接标识」(NC, X 标记)，告诉 DRC 该脚是故意悬空。按 `--designator` + `--pin`（可多个）定位；`--clear` 清除。CLI：`easyeda sch no-connect --designator U1 --pin 23,24`
 - `schematic.save` — 保存原理图（需确认）
 
 ## Library
