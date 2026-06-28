@@ -5,6 +5,10 @@ planned. Ground truth for the action catalog is `make actions`
 (`internal/protocol/actions.go`); the connector's handler map is
 `extension/src/actions.ts`.
 
+> **生态调研 & 可吸收能力清单**:`eda.*` 暴露 86 个命名空间,我们覆盖了一部分。
+> [`ecosystem-survey.md`](ecosystem-survey.md) 系统对比了官方开源扩展用到的 API、我们的盲区,
+> 以及一份带优先级的可吸收功能清单(A1–A9),是下一阶段 roadmap 的主要输入。
+
 **22 typed actions** total — 16 in the `schematic` domain, 2 in `artifact`
 (netlist/BOM export), and one each in `system`, `project`, `document`, `debug`.
 21 are dispatched to the connector; `system.health` is answered by the daemon
