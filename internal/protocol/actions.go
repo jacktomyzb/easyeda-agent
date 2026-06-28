@@ -733,9 +733,9 @@ func AllActions() []ActionSpec {
 			Mutates:      true,
 			NeedsWindow:  true,
 			NeedsConfirm: true,
-			Description:  "Set the board outline from a closed polygon of points (mil, y-up). Replaces any existing outline. Each segment is LOCKED on create — an unlocked line on the board-outline layer is wiped by the UI '清除布线 / clear routing' command (observed: the whole outline vanished), so locking makes it immune to clear-routing and accidental drag. The agent generates the points for the desired shape (rectangle/rounded-rect/circle/instrument); curves are approximated by line segments. Reports whether all components fall inside.",
-			Inputs:       []string{"points ([[x,y],...] mil)", "replace optional (default true)", "lineWidth optional"},
-			Outputs:      []string{"segments", "zoomed", "bbox", "allInside", "outside"},
+			Description:  "Set the board outline from a closed polygon of points (mil, y-up). Creates ONE pcb_PrimitivePolyline (类型=板框) on the Board Outline Layer (11) — the REAL board-outline object, not loose lines. Loose pcb_PrimitiveLine on layer 11 are merely wires sitting there: EasyEDA does NOT treat them as the boundary — DRC ignores them for enclosure and the UI '清除布线 / clear routing' deletes them (observed: the whole outline vanished). The polyline is created LOCKED so layout/routing can't move or wipe it. Replaces any existing outline (polyline + legacy lines/arcs). The agent generates the points for the desired shape (rectangle/rounded-rect/circle/instrument); curves are approximated by segments. Reports outlineId + whether all components fall inside.",
+			Inputs:       []string{"points ([[x,y],...] mil)", "replace optional (default true)", "lineWidth optional (default 10)"},
+			Outputs:      []string{"outlineId", "segments", "zoomed", "bbox", "allInside", "outside"},
 			VerifyWith:   []string{"pcb.outline.get"},
 		},
 		{
@@ -743,8 +743,8 @@ func AllActions() []ActionSpec {
 			Domain:      DomainPcb,
 			Phase:       2,
 			NeedsWindow: true,
-			Description: "Read the current board outline (segment/arc counts + bounding box).",
-			Outputs:     []string{"segments", "arcs", "bbox"},
+			Description: "Read the current board outline: outline (polyline 类型=板框 count) + legacy segment/arc counts + bounding box (from the polyline's rendered extent).",
+			Outputs:     []string{"outline", "segments", "arcs", "bbox"},
 		},
 		{
 			Name:         "pcb.outline.clear",

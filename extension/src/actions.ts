@@ -3166,14 +3166,38 @@ const pcbOutlineSet: Handler = async (payload) => {
 		points.push([p[0], p[1]]);
 	}
 	const replace = optionalBoolean(payload, 'replace') !== false;
-	const lineWidth = optionalNumber(payload, 'lineWidth') ?? 6;
+	const lineWidth = optionalNumber(payload, 'lineWidth') ?? 10;
 
 	try {
+		// THE board outline is ONE `pcb_PrimitivePolyline` (类型=板框) on layer 11 — NOT
+		// a set of individual `pcb_PrimitiveLine`s. A loose line on the outline layer is
+		// just a wire that happens to sit there: EasyEDA does NOT treat it as the board
+		// boundary — DRC ignores it for enclosure, and the UI "清除布线 / clear routing"
+		// deletes it (observed: the whole outline vanished). The polyline IS the board-
+		// outline object (matches a UI-drawn 板框, verified against its IPCB_Polygon).
+		// Build the closed-polygon source [x0,y0,'L',x1,y1,…,x0,y0] (same path format as
+		// pcbPourCreate), then createPolygon → the IPCB_Polygon that create() requires.
+		const src: Array<number | string> = [points[0][0], points[0][1], 'L'];
+		for (let i = 1; i < points.length; i++) src.push(points[i][0], points[i][1]);
+		src.push(points[0][0], points[0][1]);
+		const poly = eda.pcb_MathPolygon.createPolygon(src as unknown as TPCB_PolygonSourceArray);
+		if (!poly) {
+			throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Failed to build outline polygon (createPolygon returned undefined — points must form a valid closed polygon).');
+		}
+
 		if (replace) {
-			const oldLines = await eda.pcb_PrimitiveLine.getAll(undefined, BOARD_OUTLINE_LAYER);
-			if (oldLines.length) {
-				await eda.pcb_PrimitiveLine.delete(oldLines.map(l => l.getState_PrimitiveId()));
+			// Remove any existing outline on layer 11: the proper polyline form AND
+			// legacy individual lines/arcs (older builds drew the outline as lines).
+			try {
+				const oldPl = await eda.pcb_PrimitivePolyline.getAll(undefined, BOARD_OUTLINE_LAYER);
+				if (oldPl.length) await eda.pcb_PrimitivePolyline.delete(oldPl.map(p => p.getState_PrimitiveId()));
 			}
+			catch { /* best-effort */ }
+			try {
+				const oldLines = await eda.pcb_PrimitiveLine.getAll(undefined, BOARD_OUTLINE_LAYER);
+				if (oldLines.length) await eda.pcb_PrimitiveLine.delete(oldLines.map(l => l.getState_PrimitiveId()));
+			}
+			catch { /* best-effort */ }
 			try {
 				const oldArcs = await eda.pcb_PrimitiveArc.getAll(undefined, BOARD_OUTLINE_LAYER);
 				if (oldArcs.length) await eda.pcb_PrimitiveArc.delete(oldArcs.map(a => a.getState_PrimitiveId()));
@@ -3181,21 +3205,14 @@ const pcbOutlineSet: Handler = async (payload) => {
 			catch { /* arcs best-effort */ }
 		}
 
-		let segments = 0;
-		for (let i = 0; i < points.length; i++) {
-			const a = points[i];
-			const b = points[(i + 1) % points.length];
-			const ln = await eda.pcb_PrimitiveLine.create('', BOARD_OUTLINE_LAYER, a[0], a[1], b[0], b[1], lineWidth);
-			if (!ln) continue;
-			segments++;
-			// LOCK each outline segment. An unlocked line on the board-outline layer is
-			// treated as an ordinary primitive and gets wiped by the UI "清除布线 / clear
-			// routing" command (observed: the whole board outline vanished). Locking it
-			// makes the outline immune to clear-routing and accidental drag/delete — a
-			// board outline should never move during layout/routing anyway.
-			try { await eda.pcb_PrimitiveLine.modify(ln.getState_PrimitiveId(), { primitiveLock: true }); }
-			catch { /* lock is best-effort; the segment is still created */ }
+		// Create the outline polyline LOCKED — a board outline must not move during
+		// layout/routing and must survive clear-routing.
+		const outline = await eda.pcb_PrimitivePolyline.create('', BOARD_OUTLINE_LAYER, poly, lineWidth, true);
+		if (!outline) {
+			throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Board outline creation returned no primitive (check points/layer).');
 		}
+		const outlineId = outline.getState_PrimitiveId();
+		const segments = points.length;
 
 		let zoomed = false;
 		try { zoomed = await eda.pcb_Document.zoomToBoardOutline(); }
@@ -3222,17 +3239,19 @@ const pcbOutlineSet: Handler = async (payload) => {
 		}
 		catch { /* enclosure check is best-effort */ }
 
-		return { result: { segments, zoomed, bbox, allInside: outside.length === 0, outside } };
+		return { result: { outlineId, segments, zoomed, bbox, allInside: outside.length === 0, outside } };
 	}
 	catch (err) {
 		throw edaError(err, 'Failed to set board outline.');
 	}
 };
 
-/** Read the current board outline: segment/arc counts + bounding box. */
+/** Read the current board outline: the polyline (类型=板框) + its bounding box,
+ * plus any legacy line/arc segments for backward compatibility. */
 const pcbOutlineGet: Handler = async () => {
-	let lines;
+	let polylines, lines;
 	try {
+		polylines = await eda.pcb_PrimitivePolyline.getAll(undefined, BOARD_OUTLINE_LAYER);
 		lines = await eda.pcb_PrimitiveLine.getAll(undefined, BOARD_OUTLINE_LAYER);
 	}
 	catch (err) {
@@ -3242,25 +3261,37 @@ const pcbOutlineGet: Handler = async () => {
 	try { arcCount = (await eda.pcb_PrimitiveArc.getAll(undefined, BOARD_OUTLINE_LAYER)).length; }
 	catch { /* best-effort */ }
 
+	// The real outline is a polyline; its rendered bbox is the board extent. Fall
+	// back to legacy line endpoints when no polyline exists.
 	let bbox: Record<string, number> | null = null;
-	if (lines.length) {
+	if (polylines.length) {
+		try { bbox = (await eda.pcb_Primitive.getPrimitivesBBox(polylines.map(p => p.getState_PrimitiveId()))) ?? null; }
+		catch { /* bbox best-effort */ }
+	}
+	else if (lines.length) {
 		let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 		for (const l of lines) {
-			const pts: Array<[number, number]> = [[l.getState_StartX(), l.getState_StartY()], [l.getState_EndX(), l.getState_EndY()]];
-			for (const [x, y] of pts) {
+			for (const [x, y] of [[l.getState_StartX(), l.getState_StartY()], [l.getState_EndX(), l.getState_EndY()]] as Array<[number, number]>) {
 				minX = Math.min(minX, x); maxX = Math.max(maxX, x);
 				minY = Math.min(minY, y); maxY = Math.max(maxY, y);
 			}
 		}
 		bbox = { minX, maxX, minY, maxY };
 	}
-	return { result: { segments: lines.length, arcs: arcCount, bbox } };
+	// `outline` = the canonical polyline-based board outline; `segments`/`arcs` keep
+	// reporting legacy line/arc counts so old boards still read sensibly.
+	return { result: { outline: polylines.length, segments: lines.length, arcs: arcCount, bbox } };
 };
 
 /** Remove the current board outline (all primitives on the BOARD_OUTLINE layer). */
 const pcbOutlineClear: Handler = async () => {
 	let removed = 0;
 	try {
+		const polylines = await eda.pcb_PrimitivePolyline.getAll(undefined, BOARD_OUTLINE_LAYER);
+		if (polylines.length) {
+			await eda.pcb_PrimitivePolyline.delete(polylines.map(p => p.getState_PrimitiveId()));
+			removed += polylines.length;
+		}
 		const lines = await eda.pcb_PrimitiveLine.getAll(undefined, BOARD_OUTLINE_LAYER);
 		if (lines.length) {
 			await eda.pcb_PrimitiveLine.delete(lines.map(l => l.getState_PrimitiveId()));

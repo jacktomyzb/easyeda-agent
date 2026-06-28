@@ -51,13 +51,19 @@ follow [SemVer](https://semver.org/).
   edits were protected from (`saveActionForDocType` now maps `pcb`→`pcb.save`).
 
 ### Fixed
-- **`pcb.outline.set` now LOCKS each board-outline segment.** An unlocked line on
-  the board-outline layer (11) is treated as an ordinary primitive and gets wiped by
-  the UI "清除布线 / clear routing" command — the entire board outline silently
-  vanished mid-layout (observed live). Each segment is now created and immediately
-  `primitiveLock`ed, so the outline survives clear-routing and accidental drag/delete
-  (verified live: a locked outline survived a UI clear-routing that previously
-  deleted it). A board outline should never move during layout/routing anyway.
+- **`pcb.outline.set` now creates the REAL board-outline object (类型=板框), not loose
+  lines.** Root cause of "the outline vanished when I cleared routing" + "DRC doesn't
+  flag out-of-board": the outline was drawn as N separate `pcb_PrimitiveLine`s on
+  layer 11. A loose line on the board-outline layer is just a wire that happens to sit
+  there — EasyEDA does NOT treat it as the board boundary (DRC ignores it for
+  enclosure, the UI "清除布线 / clear routing" deletes it). Compared a UI-drawn 板框
+  against ours: the real outline is ONE `pcb_PrimitivePolyline` whose `polygon` is an
+  `IPCB_Polygon`. Fix: build the closed-polygon source `[x0,y0,'L',…,x0,y0]` →
+  `eda.pcb_MathPolygon.createPolygon` → `eda.pcb_PrimitivePolyline.create('', 11,
+  polygon, lineWidth, /*lock*/true)` — one locked polyline. `pcb.outline.get/clear`
+  updated to read/delete the polyline (bbox from its rendered extent; legacy lines
+  still handled). Default lineWidth 10mil. Returns `outlineId`. Create flow verified
+  live (createPolygon + polyline produced a 类型=板框 object matching the UI's).
 - **`view region` + `schematic.snapshot --no-fit` now reliably captures the
   requested local region (issue #20).** Three coordinated fixes: (1) the snapshot
   handler now waits for the canvas to repaint (two `requestAnimationFrame`s with a
