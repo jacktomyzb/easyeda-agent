@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); versions
 follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.5.18] - 2026-06-28
 ### Added
 - **PCB routing roadmap R1 (copper pour) + R2 (rip-up/list)** from
   `docs/ecosystem-survey.md §7` — 8 new actions, d.ts-grounded + adversarially reviewed:
