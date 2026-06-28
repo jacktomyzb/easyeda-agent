@@ -176,11 +176,10 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
 
 ## Verified end-to-end (this session)
 
-Both boards were drawn **entirely from real LCSC / 立创 library parts** (search →
+The board was drawn **entirely from real LCSC / 立创 library parts** (search →
 place by uuid → wire → flag), and lint-clean:
 
-- a minimal **ESP32-S3-WROOM-1** system board, and
-- a **USB-C + AMS1117-3.3** power board.
+- a minimal **ESP32-S3-WROOM-1** system board.
 
 This proves the library-first workflow (place real parts, then wire) end to end,
 not just hand-drawn custom symbols.
