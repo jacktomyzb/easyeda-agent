@@ -156,6 +156,24 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
 
 ### Tooling layer
 
+- **Go-side CLI planners (pure geometry over real bboxes)** — deterministic,
+  unit-testable analysis/placement that runs in the daemon's Go process on a
+  single `schematic.components.list` pull, no per-step screenshots:
+  - **`easyeda sch layout-lint`** — pairwise bbox overlap (ERROR) + tight spacing
+    (WARN); non-zero exit gates a workflow.
+  - **`easyeda sch autoconnect`** — pin-aware connect planner: score every
+    (direction × offset) candidate against real geometry, pick the lowest cost,
+    delegate the mutation to `connect_pin` (issue #24).
+  - **`easyeda sch autolayout`** — module-aware **placement** planner (issue #25):
+    reads a `--spec` (page, sheet, modules with zone/core/parts, rules),
+    partitions the canvas into named zones (`left-top`/`center`/`right`/…), places
+    each module's core IC near its zone center, fans peripherals around it with
+    collision retry, and preserves each core pin's fanout channel + the A4
+    title-block keep-out. Same pure-scorer style as autoconnect: identical spec +
+    input → identical coordinates that pass `layout-lint`. `--dry-run` plans
+    without mutating; `--apply` moves parts via `schematic.component.modify` then
+    self-checks overlaps. v1 only **moves already-placed parts** (does not create
+    missing ones).
 - **`skills/easyeda-schematic/scripts`** — a data-only schematic checker (no screenshots): one
   `getAll` + `wire.getAll` pull returns the full layout, then a geometry/union-find
   pass finds connectivity and orientation problems with exact coordinates (13

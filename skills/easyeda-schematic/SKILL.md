@@ -154,6 +154,60 @@ guessed box can't corrupt scoring). **Prefer `sch autoconnect`
 over hand-picking `sch connect --direction/--offset`** for power/ground/netport
 stubs; `sch connect` stays for when you deliberately override the geometry.
 
+## Module-aware autolayout — place parts by module zone
+
+Where `autoconnect` is pin-level, **`sch autolayout` is module-level placement**:
+it reads a `--spec` (page, sheet, modules with `zone`/`core`/`parts`, rules),
+pulls the real geometry (anchors + bboxes + core pins + sheet bbox), partitions
+the usable canvas into named zones (`left-top` / `left-bottom` / `center` /
+`right` / `right-top` / `right-bottom` / …), places each module's **core IC near
+its zone center**, fans the **peripherals around the core** with collision retry,
+and keeps each core pin's **fanout channel** and the **A4 title-block** clear.
+Same pure-scorer style as autoconnect: identical spec + input → identical
+coordinates that pass `sch layout-lint`.
+
+```bash
+# preview proposed coordinates + warnings, mutate nothing (default)
+easyeda sch autolayout --spec p1-layout.json --dry-run
+
+# move parts via schematic.component.modify, then self-check overlaps
+easyeda sch autolayout --spec p1-layout.json --apply
+
+# structured report
+easyeda sch autolayout --spec p1-layout.json --json
+```
+
+Spec JSON (`--spec`):
+
+```json
+{
+  "page": "P1_MCU_USB_STORAGE", "sheet": "A4",
+  "modules": [
+    {"name":"USB_HUB","zone":"left-top","core":"U10","parts":["J2","U10","X1","C30","R15"]},
+    {"name":"MCU","zone":"center","core":"U1","parts":["U1","C18","C19","R6"]},
+    {"name":"SD_NAND","zone":"right","core":"U8","parts":["U8","C28","R10"]}
+  ],
+  "rules": {"avoidTitleBlock":true,"preservePinFanout":true,
+            "moduleGap":80,"routeChannelGap":40,
+            "preferVerticalPeripheralPlacement":true}
+}
+```
+
+The result reports each `placement` (designator / x / y / rotation / module), any
+`warnings` (e.g. a peripheral forced into a fanout lane, or a spec part not yet
+placed), and a `validation` summary (`partOverlaps` / `titleBlockHits` /
+`fanoutKeepoutHits`). Notes:
+
+- **v1 moves already-placed parts only** — it does NOT create missing parts; a
+  spec part absent from the page is warned + skipped. Place the parts first
+  (library-first), then `autolayout` arranges them.
+- A **missing core** is a hard error for that module (clear diagnostic).
+- When the **sheet bbox isn't exposed**, the title-block keep-out is reported as
+  **provisional** and not geometrically enforced.
+- `autolayout` solves **module placement, not routing** — follow it with
+  `sch autoconnect` (power/ground/netport) + wiring, then `sch layout-lint` /
+  `sch drc` to gate.
+
 ## Actions
 
 Run `easyeda actions` for the current machine-readable action list.
