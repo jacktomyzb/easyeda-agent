@@ -114,6 +114,45 @@ above doesn't scale. Pipeline (proven on box-v2/110 parts):
 > (long calls die to the heartbeat); heavy-retry + incremental `sch save` per chunk;
 > re-pull fresh pids each chunk.
 
+## Pin-aware autoconnect — let the planner pick direction/offset
+
+`connect_pin` (`sch connect`) keeps the connection **safe** (pin → short wire →
+flag/netport, never a netflag on a bare pin), but it still makes YOU pick
+`--direction` and `--offset`, so layout quality depends on judgment. **`sch
+autoconnect` removes that judgment**: it pulls the real geometry (part bboxes,
+pin coords, existing flag/port/label bboxes, title-block keep-out), scores every
+`up/down/left/right × offset` candidate with a deterministic cost function (part
+overlap / title-block / pin-crossing / flag-collision / through-part penalties,
+shortest-offset + outward-side + kind-default bonuses), picks the lowest-cost
+one, and delegates the mutation to `connect_pin`. Same schematic state + spec →
+same selection (deterministic).
+
+```bash
+# single pin by designator:pin (number OR name)
+easyeda sch autoconnect --pin U1:41 --kind gnd --net GND
+easyeda sch autoconnect --pin U1:3V3 --kind power --net +3V3
+
+# explicit coordinates (compat with existing flows)
+easyeda sch autoconnect --x 720 --y 670 --kind gnd --net GND
+
+# preview the plan + rejected options WITHOUT mutating
+easyeda sch autoconnect --pin U1:41 --kind gnd --net GND --dry-run --json
+
+# batch spec — clustered pins auto-stagger so labels don't stack
+easyeda sch autoconnect --spec p1-connect.json
+```
+
+Spec JSON (`--spec`): `{"connections":[{"pin":"U1:41","kind":"gnd","net":"GND"},
+{"pin":"U1:3V3","kind":"power","net":"+3V3"}], "rules":{"avoidTitleBlock":true,
+"avoidPinFanout":true,"staggerLabels":true,"offsetRange":[18,80],"offsetStep":6,
+"minLabelGap":12}}`. Each result reports the `selected` candidate (direction /
+offset / endPoint / score), the `rejected` alternatives with reasons, and the
+`wirePrimitiveId` / `flagPrimitiveId`. When the sheet bbox isn't exposed, the
+title-block keep-out is reported as **provisional** and not geometrically
+enforced (so a guessed box can't corrupt scoring). **Prefer `sch autoconnect`
+over hand-picking `sch connect --direction/--offset`** for power/ground/netport
+stubs; `sch connect` stays for when you deliberately override the geometry.
+
 ## Actions
 
 Run `easyeda actions` for the current machine-readable action list.

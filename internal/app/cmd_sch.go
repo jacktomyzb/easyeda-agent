@@ -834,6 +834,12 @@ Exits non-zero when any overlap is found, so it can gate a workflow.`,
 		sch.AddCommand(c)
 	}
 
+	// ── autoconnect ───────────────────────────────────────────────────────
+	// Pin-aware deterministic connect planner: pick direction/offset by scoring
+	// real geometry, then delegate to schematic.power.connect_pin. Scorer is pure
+	// (cmd_sch_autoconnect.go); orchestration in cmd_sch_autoconnect_run.go.
+	sch.AddCommand(newAutoconnectCmd(cfg, &window, stdout, stderr))
+
 	// ── netlist ───────────────────────────────────────────────────────────
 	// schematic.export.netlist
 	{

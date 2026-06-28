@@ -53,6 +53,7 @@ S0 预分析 → S1 分页💾 → S2 模块编组 → S3 按组摆放💾 → S
 ### S4 — 通道布线(留距离,别压元件)
 - **做什么**:在组**摆放并通过 layout-lint 之后**再布线——信号走元件间的**空通道**,不要让导线压在元件或外围上。
 - **怎么做**:布线/flag/去耦规则见 conventions 的 `auto-layout-sop.md`(信号=本地正交线、flag 仅电源地、绝不穿引脚)。
+- **电源/地/netport stub 用 `easyeda sch autoconnect`**(别再手猜 `connect --direction/--offset`):它按真实 bbox/引脚/已有 flag 几何打分,确定性选 direction+offset 再委托 `connect_pin` 落地,批量 `--spec` 还会自动错开标签。先 `--dry-run` 看计划,满意再落地。
 - **💾 过门后**:`easyeda sch save` 存盘,再进入 S5。
 
 ### S5 — 校验门(机械真值,不是肉眼)
