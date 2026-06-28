@@ -201,6 +201,67 @@ eda.pcb_PrimitiveVia.getAll() + via.getState_Net()            // 每网过孔数
 
 ---
 
+## 7. PCB 布线能力支持矩阵(2026-06-28 深度调研)
+
+> 起因:EasyEDA「布线(U)」菜单内置很多工具,排查我们到底支持哪些。方法:对权威类型定义
+> `pro-api-types@0.2.63`(21302 行)**全命名空间**核实每个菜单项有无 `eda.*` API,并对抗式验证。
+> 结论先行:**整张交互式布线菜单 0 个「逐线交互」API。** 不存在 `pcb_Routing`/`Route`/`Track`/`Trace`
+> 命名空间;`pcb_SelectControl` 只有选择/取鼠标坐标,无布线方法。能驱动布线的只有**批量/文件式**。
+
+### 7.1 「布线」菜单逐项对照
+
+| 菜单项 | 有 `eda.*` API? | 我们支持? | 说明 |
+|---|---|---|---|
+| 单路布线(交互避障) | ❌ 无逐线 API | 〜 间接 | 只有底层 `pcb_PrimitiveLine.create`(我们已包 `pcb track`),给两端点画线,**无 push/避障** |
+| 多路布线 | ❌ | ❌ | 无 |
+| 差分对布线(布线动作) | ❌ | ❌ | 差分对只有**定义** API(见 7.3),无布线动作 |
+| 拉伸导线 | ❌ | ❌ | 只有几何式 `pcb_PrimitiveLine.modify`(改端点),无交互拉伸 |
+| 优化选中导线 | ❌ | ❌ | `optimization` 仅是 `autoRouting` 的参数枚举,非独立命令 |
+| 等长调节(蛇形) | ❌ | 〜 读 | 无生成蛇形/调节 API;`getNetLength` 仅读长、`pcb report` 算 spread |
+| 差分对等长调节 | ❌ | 〜 读 | 同上,只能读 skew(`pcb report`) |
+| 扇出布线 | ❌ | ❌ | 全 d.ts 无 fanout/breakout/escape |
+| 移除回路 | ❌ | ❌ | 无 removeLoop |
+| 布线模式 / 布线拐角 | ❌ 交互无 | ❌ | `cornerStyle`(45/90)仅作 `autoRouting` 入参(枚举 line 4244) |
+| 自动布线… | ⚠️ `autoRouting()` @alpha(line 4590) | ❌ | **3.2.148 实测 undefined**;可限定 `RoutingNets:'selected'|'selectedComponents'|string[]` |
+| 清除布线 | ✅ `clearRouting('all'\|'net'\|'connection')` @alpha(4567) | ❌ 未包 | 🟢 可快速补 |
+
+### 7.2 程序化布线的唯一可行范式(官方 kirouting 证实)
+
+`eext-kirouting-integration` 没有任何「智能布线器」可调——它的做法,也是我们唯一能走的路:
+**读图元(`*.getAll`)收集问题 → 外部引擎(KiCad 格式 + Rust A*,localhost:8765)→ `pcb_PrimitiveLine.create`/
+`pcb_PrimitiveVia.create` 回写真实走线**;rip-up 是**手撸** `getAll` 按 net 过滤再 `delete`(连 `clearRouting`
+都没用)。即:**智能布线没有 API,要做只能「读图元 + 自带引擎 + 写图元原语」。**
+
+### 7.3 布线/约束 API 全景 vs 我们的覆盖
+
+| 能力族 | API(行号) | 状态 | 我们 |
+|---|---|---|---|
+| **走线/过孔创建** | `pcb_PrimitiveLine.create`(6859)、`pcb_PrimitiveVia.create`(6541) | ✅ | **已包** `pcb track` / `pcb via` |
+| **走线/过孔 改/删/列**(rip-up/reroute/list) | `Line.modify/delete/getAll`(6876/6867/6922)、`Via.*`(6558/6549/6603) | ✅ API 全 | ❌ **只 create,缺改/删/列** 🟢 |
+| **清除布线** | `pcb_Document.clearRouting`(4567)@alpha | ✅ API | ❌ 未包 🟢 |
+| **铺铜 / 填充 / 区域** | `pcb_PrimitivePour.create`(8905)、`Fill.create`(9520)、`Region.create`(8609 含 keepout) | ✅ API 全 | ❌ **未包——真实板最大缺口** 🟠 |
+| **铜弧 / polyline 走线** | `Arc.create`(7191)、`Polyline.create`(9248) | ✅ API | ❌(弧仅板框用) |
+| **网络类 定义** | `createNetClass`/`add/remove/modify/delete/getAll`(4885–4927) | ✅ CRUD 全 @beta | ❌ 写侧未包(读已在 `pcb report`) |
+| **差分对 定义** | `createDifferentialPair`/`modify*/delete/getAll`(4937–4983) | ✅ CRUD 全 @beta | ❌ 写侧未包 |
+| **等长组 定义** | `createEqualLengthNetGroup`/`add/remove/modify/delete/getAll`(4995–5037) | ✅ CRUD 全 @beta | ❌ 写侧未包 |
+| **规则配置 CRUD** | `get/save/rename/delete/setAsDefault/overwriteCurrentRuleConfiguration` + `getNetRules`/`overwriteNetRules`(4727–4833) | ✅ 全 | ❌ 仅 `getCurrentRuleConfiguration`(`pcb drc-rules`) |
+| **飞线/ratsnest** | `startCalculatingRatline`(4415)@public、`getCalculatingRatlineStatus`(4407)、stop(4422) | ✅ | 〜 `import_changes` 内部用 start |
+| **自动布线/布局** | `autoRouting`(4590)/`autoLayout`(4597)@alpha;文件式 import(4375/4384)@beta;导出 `getDsnFile`(6144)/`getAutoRouteJsonFile*`(6166/6175) | ⚠️ @alpha 本 build 不可用 | ❌(A4 阻塞) |
+
+### 7.4 据此可补的布线 roadmap(API 齐全、按价值)
+
+- 🟠 **R1 铺铜** `pcb pour`(`pcb_PrimitivePour.create` + getAll/delete)——真实板必需,目前最大缺口。
+- 🟢 **R2 走线/过孔 rip-up + list + modify** ——补 `Line/Via.modify/delete/getAll`,让布线可迭代(改/删/查),而非只能 create。配 `pcb clear-routing`(`clearRouting`)。
+- 🟢 **R3 布线约束定义** ——`pcb netclass` / `pcb diffpair` / `pcb eqlen` 写侧(create/add/remove/delete),与已有 `pcb report` 读侧配套;是自动布线/等长校验的前置。
+- 🟡 **R4 规则配置写** ——`saveRuleConfiguration`/`setAsDefault` 等,让 agent 能设/切 DRC 规则集。
+- 🔴 **R5 自动布线** ——`autoRouting` 本 build undefined,维持文件式/等平台。
+
+> ⚠️ **重要边界(写进 conventions / design-flow)**:智能布线(单路避障、推挤、等长蛇形、扇出、优化)
+> **无 API,agent 做不了**——这些仍需人在 EasyEDA UI 里完成,或自带外部布线引擎(如 kirouting)。
+> 我们能给的是:铺铜、按坐标布线/过孔、rip-up、约束定义、长度/skew 报告与 DRC 门禁。
+
+---
+
 ## 来源
 
 - [EasyEDA 官方 GitHub 组织](https://github.com/easyeda) — 全部 eext-* 扩展开源

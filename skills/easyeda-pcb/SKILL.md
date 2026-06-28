@@ -88,6 +88,16 @@ segment-by-segment, or use the file-exchange autoroute flow.
 - `pcb.via.create` — a **via** (过孔) at `(x,y)` with `holeDiameter` (drill, default 12
   mil) + `diameter` (outer pad, default 24 mil), optional `net`.
 
+> **Routing boundary (load-bearing — see `docs/ecosystem-survey.md` §7):** EasyEDA's
+> interactive 布线 menu (single/multi/differential routing, stretch, optimize,
+> length-tuning/serpentine, fanout, remove-loops) has **NO `eda.*` API** — the agent
+> cannot do smart/avoiding/push-and-shove routing. The only programmatic routing is:
+> create tracks/vias by coordinate (here), the `@alpha` `autoRouting` (undefined on
+> 3.2.148), or read-primitives → external engine → write (the official kirouting
+> pattern). So route segment-by-segment from known coordinates, or leave smart routing
+> to the human/UI. Copper pour, rip-up, and net-class/diff-pair/equal-length **definitions**
+> have full APIs but aren't wrapped yet (roadmap R1–R3 in the survey).
+
 ### Schematic → PCB sync + component CRUD
 
 - `pcb.import_changes` — **sync components/netlist from the schematic** (从原理图导入变更). The primary way parts arrive on the board: ensures a Board links SCH+PCB, then `importChanges`, then recomputes ratlines. **Mutates the board; confirm first.** Returns `imported:false` (with a reason) for a floating/unlinked PCB.
