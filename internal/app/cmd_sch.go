@@ -840,6 +840,14 @@ Exits non-zero when any overlap is found, so it can gate a workflow.`,
 	// (cmd_sch_autoconnect.go); orchestration in cmd_sch_autoconnect_run.go.
 	sch.AddCommand(newAutoconnectCmd(cfg, &window, stdout, stderr))
 
+	// ── autolayout ──────────────────────────────────────────────────────────
+	// Module-aware deterministic placement planner: partition the canvas into
+	// named zones, place each module's core IC + peripherals with collision
+	// retry, preserve pin-fanout channels + the title-block keep-out, and emit
+	// lint-clean coordinates. Pure planner in cmd_sch_autolayout.go; I/O +
+	// --apply in cmd_sch_autolayout_run.go. See issue #25.
+	sch.AddCommand(newAutolayoutCmd(cfg, &window, stdout, stderr))
+
 	// ── netlist ───────────────────────────────────────────────────────────
 	// schematic.export.netlist
 	{
