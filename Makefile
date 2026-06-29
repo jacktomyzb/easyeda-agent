@@ -1,4 +1,4 @@
-.PHONY: help test fmt actions build install dev-build daemon dev eext eext-fresh connector lint-test release
+.PHONY: help test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test release
 
 DIST := dist
 
@@ -29,6 +29,9 @@ fmt: ## gofmt cmd + internal
 
 actions: ## print the typed action catalog
 	go run ./cmd/easyeda actions
+
+api-index: ## regenerate the embedded eda.* API index (run after bumping pro-api-types)
+	python3 internal/apidoc/gen.py
 
 # Dev version stamp: `git describe` (e.g. v0.5.1-3-g1d7b7c8[-dirty]) so a locally
 # built binary reports a meaningful version via `easyeda -v` instead of "dev".

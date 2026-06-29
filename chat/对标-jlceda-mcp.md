@@ -50,6 +50,10 @@ EDA(mcp-bridge) ↔WS↔ VSCode/Cursor(mcp-hub) ↔MCP↔ Copilot/Cursor/Claude 
    connector CHECK_EPS=0.05 / autoconnect acCoordEps=0.01 / layout round2 / grid_snap round /
    python round-key 全有防护，全仓无裸 `.x===` 相等。小提醒：容差三处不统一(非bug)；
    移植 BFS 进 Go 用 eps-grid 吸附而非裸 round()，避 .5 边界拆点。
-4. 加 `easyeda api search <kw>`（吃官方 api doc）——加速「debug.exec_js→typed action」开发环 + 找盲区。
+4. ~~加 `easyeda api search <kw>`~~ ✅ **已落地(2026-06-29, task #8)**：从我们自己依赖的
+   `@jlceda/pro-api-types` d.ts 生成索引(gen.py, 69 命名空间/1337 方法), go:embed,
+   `easyeda api search/ls/show`(离线, 中文摘要可搜)。立刻见效——`api search 自动布线`
+   挖出 **`importAutoRouteSesFile`/`importAutoRouteJsonFile` 都是 @beta**(非 @alpha),
+   给 task #5 Freerouting 一条比手写 SES 解析更干净的 typed-API 导入路径。
 
 > 透传逃生舱(`api_invoke`)、WS 桥接、自建 connector 我们都已有/同构 → 再次验证方向。

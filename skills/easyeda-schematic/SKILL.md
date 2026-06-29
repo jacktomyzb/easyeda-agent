@@ -339,6 +339,11 @@ Apply this rule when generating any power/ground/port connection — emit the wi
 
 When a needed operation has no typed action:
 
+0. **Discover the underlying `eda.*` method first** — `easyeda api search <kw>`
+   (offline, no daemon) ranks methods of the official API by name/namespace/中文摘要,
+   `easyeda api ls [filter]` lists namespaces, `easyeda api show <ns>` dumps one
+   namespace. Index is embedded from `@jlceda/pro-api-types`. This is the front of
+   the dev loop `api search → debug.exec_js → typed action → Cobra 子命令`.
 1. Decompose it into existing actions if possible.
 2. Otherwise state the missing action name and expected inputs/outputs.
 3. Use `debug.exec_js` (raw `eda.*` JavaScript) only as a temporary, user-confirmed debug escape hatch. Its result must be JSON-serializable — base64-encode any `Blob`/`File` inside the snippet.
