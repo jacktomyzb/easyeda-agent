@@ -1,5 +1,5 @@
 {
-  "_intent": "clean_board with the +3V3 power flag rotated to 90 (body would point left, into the wire) instead of 0 (body up). MUST fire exactly `orientation` and nothing else — this is the positive test for the rule the table validation protects.",
+  "_intent": "clean_board with the +3V3 power flag rotated to 90 (body would point left, into the wire) instead of 180 (body up, post-2026-06-29 y-DOWN vertical fix). MUST fire exactly `orientation` and nothing else — this is the positive test for the rule the table validation protects.",
   "parts": [
     {"pid": "u1", "type": "part", "designator": "U1", "x": 130, "y": 150,
      "pins": [
@@ -15,7 +15,7 @@
   ],
   "flags": [
     {"pid": "f1", "type": "netflag", "net": "+3V3", "x": 100, "y": 230, "rotation": 90},
-    {"pid": "f2", "type": "netflag", "net": "GND",  "x": 160, "y": 70,  "rotation": 0},
+    {"pid": "f2", "type": "netflag", "net": "GND",  "x": 160, "y": 70,  "rotation": 180},
     {"pid": "f3", "type": "netport", "net": "SIG",  "x": 470, "y": 200, "rotation": 180}
   ],
   "wires": [

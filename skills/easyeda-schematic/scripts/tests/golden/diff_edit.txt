@@ -9,7 +9,7 @@
   - [🟠 标识无导线] netflag +5V @(800, 800) 没有 wire 连到它（悬空标识）
 
 ✅ FIXED 本次修复 (1):
-  - [🟡 朝向不顺导线] netflag      +3V3 @(100, 230)  rot= 90 应为   0  (导线朝down, body应朝up, power)
+  - [🟡 朝向不顺导线] netflag      +3V3 @(100, 230)  rot= 90 应为 180  (导线朝down, body应朝up, power)
 
 🔵 PRE-EXISTING 未变 (2):
   - [🟠 悬空引脚] U2.1(IO) @(500, 200) 悬空（无导线/标识）

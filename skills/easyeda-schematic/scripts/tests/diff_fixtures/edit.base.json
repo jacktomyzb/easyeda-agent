@@ -15,7 +15,7 @@
   ],
   "flags": [
     {"pid": "f1", "type": "netflag", "net": "+3V3", "x": 100, "y": 230, "rotation": 90},
-    {"pid": "f2", "type": "netflag", "net": "GND",  "x": 160, "y": 70,  "rotation": 0}
+    {"pid": "f2", "type": "netflag", "net": "GND",  "x": 160, "y": 70,  "rotation": 180}
   ],
   "wires": [
     {"pid": "w1", "net": "+3V3", "line": [100, 200, 100, 230]},

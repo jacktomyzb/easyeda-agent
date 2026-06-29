@@ -1960,10 +1960,15 @@ function defaultDirection(kind: string): Direction {
  * anchors against live getPrimitivesBBox via calibrate.js
  * after importing a new .eext. See schematic-layout-conventions.md §3.5.
  */
-const ROTATION_CYCLE: Direction[] = ['up', 'left', 'down', 'right'];
+// 2026-06-29 VERTICAL FIX (y-DOWN build): cycle reversed to up→right→down→left and
+// power/ground anchors swapped, so a flag's up/down body now renders correctly
+// (left/right numbers are unchanged). Verified via getPrimitivesBBox on real settled
+// flags — a --direction down ground had been rendering its bars TOWARD the pin. Keep
+// byte-identical to orientation.json (rotationCycle + bodyAnchorAtRot0) and orient.py.
+const ROTATION_CYCLE: Direction[] = ['up', 'right', 'down', 'left'];
 const BODY_ANCHOR_AT_ROT0: Record<'power' | 'ground' | 'port', Direction> = {
-	power: 'up',
-	ground: 'down',
+	power: 'down',
+	ground: 'up',
 	port: 'right',
 };
 

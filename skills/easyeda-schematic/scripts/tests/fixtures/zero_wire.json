@@ -14,8 +14,8 @@
      "bbox": [500, 200, 500, 200]}
   ],
   "flags": [
-    {"pid": "f1", "type": "netflag", "net": "+3V3", "x": 100, "y": 230, "rotation": 0},
-    {"pid": "f2", "type": "netflag", "net": "GND",  "x": 160, "y": 70,  "rotation": 0},
+    {"pid": "f1", "type": "netflag", "net": "+3V3", "x": 100, "y": 230, "rotation": 180},
+    {"pid": "f2", "type": "netflag", "net": "GND",  "x": 160, "y": 70,  "rotation": 180},
     {"pid": "f3", "type": "netport", "net": "SIG",  "x": 470, "y": 200, "rotation": 180}
   ],
   "wires": [

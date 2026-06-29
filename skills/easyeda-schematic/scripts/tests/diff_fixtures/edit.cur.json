@@ -1,5 +1,5 @@
 {
-  "_intent": "Edited layout vs edit.base.json: f1 orientation fixed (rot 90->0, FIXED). U2.IO still floating (PRE-EXISTING). New U3 + flag f3 dropped on U3's pin (NEW flag_on_pin + flag_no_wire). Expect: modified=[f1], added=[u3,f3], NEW=2, FIXED=1, PRE-EXISTING=2.",
+  "_intent": "Edited layout vs edit.base.json: f1 orientation fixed (rot 90->180, FIXED — body up is rot 180 post-2026-06-29 y-DOWN vertical fix). U2.IO still floating (PRE-EXISTING). New U3 + flag f3 dropped on U3's pin (NEW flag_on_pin + flag_no_wire). Expect: modified=[f1], added=[u3,f3], NEW=2, FIXED=1, PRE-EXISTING=2.",
   "parts": [
     {"pid": "u1", "type": "part", "designator": "U1", "x": 130, "y": 150,
      "pins": [
@@ -19,8 +19,8 @@
      "bbox": [800, 800, 800, 800]}
   ],
   "flags": [
-    {"pid": "f1", "type": "netflag", "net": "+3V3", "x": 100, "y": 230, "rotation": 0},
-    {"pid": "f2", "type": "netflag", "net": "GND",  "x": 160, "y": 70,  "rotation": 0},
+    {"pid": "f1", "type": "netflag", "net": "+3V3", "x": 100, "y": 230, "rotation": 180},
+    {"pid": "f2", "type": "netflag", "net": "GND",  "x": 160, "y": 70,  "rotation": 180},
     {"pid": "f3", "type": "netflag", "net": "+5V",  "x": 800, "y": 800, "rotation": 0}
   ],
   "wires": [

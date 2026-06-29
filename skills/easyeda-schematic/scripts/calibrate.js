@@ -25,10 +25,13 @@ function tableRot(family, dir) {
 }
 
 const opp = { up: 'down', down: 'up', left: 'right', right: 'left' };
-function dir(f, t) {                                            // y-UP: +y is up
+function dir(f, t) {                                            // y-DOWN build: +y renders LOWER
   const dx = t[0] - f[0], dy = t[1] - f[1];
   if (dx === 0 && dy === 0) return null;
-  return Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'up' : 'down');
+  // FIX 2026-06-29: schematic coords are y-DOWN (larger y = lower on canvas), so
+  // +dy is visually 'down'. The old y-UP reading inverted the vertical body
+  // direction and masked the connect_pin up/down flip now fixed in orientation.json.
+  return Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
 }
 function family(type, net) {
   if (type === 'netport') return 'port';
