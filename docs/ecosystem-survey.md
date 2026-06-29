@@ -284,6 +284,50 @@ eda.pcb_PrimitiveVia.getAll() + via.getState_Net()            // 每网过孔数
 
 ---
 
+## 8. PCB 自动布线 + keep-out 深挖（2026-06-29，真机 + 官方文档扫描）
+
+接 §7。这次把「能不能产出能用的板」挖到底，结论硬：
+
+### 8.1 `autoRouting()` 被 @alpha「开发版本」门挡死，且解锁方法无文档
+
+- 真机实测（connector 0.5.24 / EasyEDA 3.2.149）：`PCB_Document` 上 `@public`/`@beta`
+  方法全可用（`importChanges`、`importAutoRouteSesFile`/`JsonFile`、`save`、
+  `startCalculatingRatline`…），**唯独 `@alpha` 的 `autoRouting` / `autoLayout` /
+  `clearRouting` 全 `undefined`**；另一个 `@beta` 的 `pcb_PrimitiveRegion.create` 也可用。
+  → 规律就是 **@beta 能用、@alpha 不能用**。
+- 官方 `stability` 文档（中英文都看了）只说：「开发阶段 API 仅当扩展被设置为
+  **开发版本**时可用」，但 **`stability` / `how-to-start` / `extension-json` /
+  `pro-api-sdk` 仓库全都没写「怎么把扩展设成开发版本」**。EasyEDA UI 里也没找到开关。
+- **结论**：`autoRouting()` 对普通构建 / sideload 的扩展**不可达**，且**无任何文档化的
+  解锁途径**。→ issue **#28**（请实装/GA autoRouting，**或把"开发版本"机制写进文档**）。
+
+### 8.2 `getDsnFile` 丢弃禁止区域（keep-out）
+
+- ESP32-S3-WROOM-1 模块封装**不带**天线 keep-out（`pcb_PrimitiveRegion.getAll()` 初始 0）。
+- `pcb_PrimitiveRegion.create(layer, poly, ruleType[])` 可建（ruleType：NO_COMPONENTS=2 /
+  NO_WIRES=5 / NO_FILLS=6 / NO_POURS=7 / NO_INNER=8 / FOLLOW_RULE=9；layer 可 TOP/BOTTOM/inner
+  或 `MULTI=12` 全层）。
+- **红灯**：在 TOP(1) 和 MULTI(12) 层都建了 keep-out，`getDsnFile` 导出的 DSN **仍 0 keepout**
+  （`(structure)` 段只有 boundary + clear/width rule + layer）。→ 带天线的板，DSN 无 keepout
+  → 外部布线器在天线下走线 → 报废。→ issue **#29**（getDsnFile 应把禁止区域翻成 DSN keepout）。
+
+### 8.3 我方进度（管线已成、引擎/keepout 卡官方）
+
+- Freerouting 文件式往返**已建成 + 真机证明**：`pcb export-dsn`（真 Specctra DSN）/
+  `pcb import-autoroute`（`importAutoRouteSesFile` @beta）/ `pcb snapshot` / `pcb autoroute`
+  编排（引擎可插拔），实测 rip-up→autoroute 出 **83 铜线**、Connection Error 27→2。
+- 但「能用的板」两侧都卡官方：**引擎**（要么自备 Freerouting=GUI 弹窗+自装 Java，要么等
+  #28 原生 API）+ **keepout**（#29）。我们不自备环境，故 autoroute 引擎留给原生 API / 用户自备。
+
+### 8.4 副产物：`api search` 索引有 class 归属 bug
+
+- `gen.py` 把部分方法挂错命名空间（实测 `rebuildCopperRegion` 实际在 `IPCB_PrimitivePour`，
+  却被索引为 `pcb_Net`）。`api search` 个别结果 namespace 不准 → gen.py 的 class 跟踪待修。
+
+> 关联：task #5（管线）/ #11（keep-out，docs/test-case-esp32-pcb.md）/ issue #28 #29。
+
+---
+
 ## 来源
 
 - [EasyEDA 官方 GitHub 组织](https://github.com/easyeda) — 全部 eext-* 扩展开源
