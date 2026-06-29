@@ -50,6 +50,8 @@ type checkSummary struct {
 	MultiNetWires          int `json:"multiNetWires"`
 	WireCrossings          int `json:"wireCrossings"`
 	WireOverPins           int `json:"wireOverPins"`
+	ZeroLengthWires        int `json:"zeroLengthWires"`
+	DanglingWires          int `json:"danglingWires"`
 	Total                  int `json:"total"`
 }
 
@@ -129,8 +131,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d zero-length wire(s), %d dangling wire(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.ZeroLengthWires, s.DanglingWires)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -189,5 +191,8 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 	if s.NetMarkerMismatches > 0 || s.MultiNetWires > 0 {
 		fmt.Fprintln(w, "→ net names: fix mismatched flags/ports/labels before treating schematic DRC as clean")
+	}
+	if s.ZeroLengthWires > 0 || s.DanglingWires > 0 {
+		fmt.Fprintln(w, "→ stray wires: delete the zero-length/dangling segments (sch prim-delete <wirePrimitiveId>)")
 	}
 }

@@ -6,6 +6,24 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.23] - 2026-06-29
+### Added
+- `schematic.check` now reports **stray wires** the SDK DRC and layout-lint both
+  miss: `dangling-wire` (a segment whose vertices touch no pin, net-flag/port/label,
+  or other wire — e.g. a stub left behind when its pin/flag was deleted) and
+  `zero-length-wire`. Each finding carries the `wirePrimitiveId` so it can be
+  removed with `sch prim-delete`. Summary gains `zeroLengthWires` / `danglingWires`.
+
+## [0.5.22] - 2026-06-29
+### Fixed
+- Net-flag/net-port **vertical (up/down) body orientation** on the y-DOWN build:
+  `connect_pin --direction down` ground (and `--direction up` power) flags rendered
+  their body toward the pin instead of away. Root cause was the orientation table's
+  up/down entries being derived in a y-UP frame; `ROTATION_CYCLE` is now
+  `up→right→down→left` with power/ground anchors swapped (left/right unchanged).
+  Verified via `getPrimitivesBBox` on real placed flags + `calibrate.js` (whose own
+  y-frame was fixed). See `orientation.json` _doc.
+
 ## [0.5.20] - 2026-06-29
 ### Fixed
 - `schematic.drc.check` now treats boolean SDK results as first-class normalized

@@ -1371,7 +1371,7 @@ interface CheckPinDetail {
 
 // One reconstructed design-check finding. Reuses the DRC severity buckets.
 interface CheckFinding {
-	type: string; // 'floating-pin' | 'wire-crossing' | 'wire-over-pin' | 'net-marker-mismatch' | 'multi-net-wire'
+	type: string; // 'floating-pin' | 'wire-crossing' | 'wire-over-pin' | 'net-marker-mismatch' | 'multi-net-wire' | 'zero-length-wire' | 'dangling-wire'
 	level: DrcSeverity;
 	designator?: string;
 	primitiveId?: string; // owning component (floating-pin / wire-over-pin)
@@ -1714,6 +1714,73 @@ const schematicCheck: Handler = async (payload) => {
 		}
 	}
 
+	// Rule 4 + 5: stray wires neither the SDK DRC nor layout-lint reports —
+	// zero-length segments and orphaned ("dangling") wires that connect to nothing.
+	// A stub whose pin/flag was deleted leaves a floating empty-net wire that
+	// silently pollutes the page (the ESP32 reference board accumulated 149/204
+	// zero-length wires this way). A wire is dangling when NONE of its vertices
+	// touches a pin, a netflag/netport/netlabel, or a DIFFERENT wire.
+	let zeroLengthWires = 0;
+	let danglingWires = 0;
+	const STRAY_CAP = 50;
+	for (const w of wires ?? []) {
+		let line: Array<number> | Array<Array<number>> | undefined;
+		try { line = w.getState_Line(); }
+		catch { continue; }
+		if (!Array.isArray(line) || line.length === 0) continue;
+		// getState_Line is flat [x1,y1,x2,y2,…] OR nested [[x1,y1],[x2,y2],…].
+		const verts: Array<[number, number]> = [];
+		if (Array.isArray(line[0])) {
+			for (const p of line as Array<Array<number>>) verts.push([p[0], p[1]]);
+		}
+		else {
+			const flat = line as Array<number>;
+			for (let i = 0; i + 1 < flat.length; i += 2) verts.push([flat[i], flat[i + 1]]);
+		}
+		if (verts.length === 0) continue;
+		let wirePid = '';
+		let wnet = '';
+		try { wirePid = String(w.getState_PrimitiveId?.() ?? ''); }
+		catch { /* optional */ }
+		try { wnet = String(w.getState_Net?.() ?? ''); }
+		catch { /* optional */ }
+
+		// Zero-length: every vertex coincides with the first (within eps).
+		const isZero = verts.every(v => Math.hypot(v[0] - verts[0][0], v[1] - verts[0][1]) <= CHECK_EPS);
+		if (isZero) {
+			zeroLengthWires++;
+			if (findings.filter(f => f.type === 'zero-length-wire').length < STRAY_CAP) {
+				findings.push({
+					type: 'zero-length-wire',
+					level: 'warn',
+					wirePrimitiveId: wirePid || undefined,
+					at: { x: verts[0][0], y: verts[0][1] },
+					message: '零长度导线(首尾坐标相同,不连接任何东西,应删除)',
+				});
+			}
+			continue;
+		}
+
+		// Dangling: no vertex touches a pin, a marker, or another wire's segment.
+		const connected = verts.some(v =>
+			allPins.some(p => Math.hypot(v[0] - p.x, v[1] - p.y) <= COINCIDE_TOL)
+			|| connectionMarkers.some(m => Math.hypot(v[0] - m.x, v[1] - m.y) <= COINCIDE_TOL)
+			|| wireSegs.some(ws => ws.wirePrimitiveId !== wirePid
+				&& pointOnSegment(v[0], v[1], ws.seg[0], ws.seg[1], ws.seg[2], ws.seg[3])));
+		if (!connected) {
+			danglingWires++;
+			if (findings.filter(f => f.type === 'dangling-wire').length < STRAY_CAP) {
+				findings.push({
+					type: 'dangling-wire',
+					level: 'warn',
+					wirePrimitiveId: wirePid || undefined,
+					at: { x: verts[0][0], y: verts[0][1] },
+					message: `悬挂导线(两端不接任何引脚/标识/导线${wnet ? '' : '、空网名'},孤立残留)`,
+				});
+			}
+		}
+	}
+
 	const summary = {
 		floatingPins: floatingTotal,
 		componentsWithFloating,
@@ -1721,6 +1788,8 @@ const schematicCheck: Handler = async (payload) => {
 		multiNetWires,
 		wireCrossings: crossingTotal,
 		wireOverPins: overPinTotal,
+		zeroLengthWires,
+		danglingWires,
 		total: findings.length,
 	};
 	return { result: { passed: findings.length === 0, summary, findings } };
