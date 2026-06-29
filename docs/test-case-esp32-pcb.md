@@ -1,0 +1,59 @@
+# 固定测试用例 — ESP32-S3 最小系统板 **PCB 侧**
+
+> **PCB 侧的回归基准**，与原理图侧 [`test-case-esp32-blink.md`](test-case-esp32-blink.md)
+> 对应。每次做 PCB 端到端测试，都要把这个用例用 PCB 流程脊柱完整跑一遍——
+> import → 布局 → **禁止区域(天线/板边)** → export-dsn → 自动布线 → **铺铜** → DRC。
+> 这是 agent 画 PCB 能力的「冒烟 + 验收」基准；#5(Freerouting)/#11(keep-out) 任何改动后重跑。
+
+## 为什么是它
+
+承接原理图侧同一块 ESP32-S3 最小系统板（8 件、5 网络）。它足够小、可重复，又同时压到
+PCB 的真实难点：**带集成天线的模块(U1)的 keep-out**、板框、布局、自动布线往返、铺铜与
+禁止区域/板边的避让、DRC 归零。**小到能反复跑，大到是真约束，不是玩具。**
+
+## 前置条件
+
+- 原理图侧用例已建（8 件齐、连通、DRC 0 fatal）。
+- 一个 **Board** 把该原理图与一块 PCB 绑定（`board.create` / `board list` 确认）。
+- 测试工程用 `ceshi`（一次性，可清空重来）。
+
+## 跑测流程（PCB 流程脊柱 + 约束）
+
+| 阶段 | 动作 | 关键约束 |
+|---|---|---|
+| **P0 同步** | `pcb import-changes`（原理图→PCB，= 菜单「更新/转换原理图到PCB」） | 8 件落到 PCB，飞线生成 |
+| **P1 板框+禁区** | 板框：客户规格优先，否则贴合器件（`pcb outline-set`）。**禁止区域**：U1 天线下 + 板边 clearance（`pcb region create`，ruleType=禁铜/禁布线/禁过孔 — **action 待补 #11**） | **天线 keep-out 必须就位** |
+| **P2 布局** | 器件摆位（人/UI 主导；agent 给粗 seed `pcb arrange` + `move/align/grid-snap`） | 无重叠（DRC Safe Spacing=0）；去耦贴电源脚；天线区净空 |
+| **P3 导出 DSN** | `pcb export-dsn` | ⚠️ **导出的 DSN 必须含 keepout**（天线/板边）——否则布线器会在天线下走线 |
+| **P4 自动布线** | 外部 Freerouting 跑 DSN → SES（`pcb autoroute` 编排，或手动）→ `pcb import-autoroute route.ses` | 布线避开所有 keepout |
+| **P5 铺铜** | `pcb pour`（GND 灌铜） | **避让禁止区域 + 板边间距**；`rebuildCopperRegion` 重灌 |
+| **P6 校验门** | `pcb drc` | 0 fatal；无 Connection Error（全布通）；keep-out 被尊重 |
+
+## 验收标准（全过才算通过）
+
+- [ ] **P0** 8 件全部从原理图同步到 PCB（`pcb list` = 8，位号齐）
+- [ ] **P1** 板框贴合（非默认巨框）；**U1 天线 keep-out 区域存在**；板边 clearance 禁区存在
+- [ ] **P2** 布局无重叠（`pcb drc` 中 Safe Spacing/Clearance 误差 = 0）；天线区无器件/铜
+- [ ] **P3** `pcb export-dsn` 产出 DSN，且 **keepout 条目 > 0**（天线/板边都进了 DSN）
+- [ ] **P4** 5 个网络全部布通（`pcb drc` 中 **Connection Error = 0 / No Connection = 0**）；无走线穿越天线 keep-out
+- [ ] **P5** GND 铺铜完成，且**避让天线禁区 + 板边**（铺铜不进 keep-out）
+- [ ] **P6** `pcb drc` → **0 fatal**；keep-out / clearance / netlist 全过
+- [ ] 跑测在干净工程上做；**测完清理还原**（除非要留存复核）
+
+## 当前状态（2026-06-29）
+
+实事求是记录哪些已通、哪些是缺口/手动：
+
+- ✅ **P0 import-changes** 已验证（菜单「更新原理图到PCB」= `pcb.import_changes`，真机跑通）。
+- ✅ **P3 export-dsn** 已验证（导出真 Specctra DSN）。
+- ✅ **P4 写回原语**：`pcb.import_autoroute`（`importAutoRouteSesFile` @beta）+ `snapshot` 已封（connector 0.5.24，Phase A）。
+- 🟡 **P2 布局**：`pcb arrange` 只是粗聚类种子，**无真自动布局器**（`autoLayout` @alpha）→ 布局以人/UI 为主，agent 给 seed + move/align。
+- 🔴 **P1/P3 keep-out（#11）**：禁止区域 action **未封**；且实测 **当前 DSN keepout = 0** —— 天线 keep-out 没进 DSN，**P4 布线会在天线下走线**。这是 #5 产出「能用的板」的**前提红灯**，必须先解决。
+- 🟡 **P4 自动布线引擎**：走外部 Freerouting（`easyeda-pcb-router` 或标准 Freerouting CLI）；一键 `pcb autoroute` 编排为 Phase B。
+- 🟡 **P5 铺铜避让**：`pcb.pour.*` 已有，pour↔keepout↔板边避让待验证（#11）。
+
+## 备注
+
+- 关联任务：#5（Freerouting 往返主链）、#11（禁止区域/天线/铺铜约束 = 本用例 P1/P3/P5 的能力前提）。
+- `ceshi` 一次性，可清空（见项目 memory）。
+- 真机判据优先 `pcb list`/`pcb drc`/DSN 内容，`pcb snapshot` 仅供肉眼看布局（stale frame 坑）。

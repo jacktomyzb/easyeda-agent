@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -802,6 +803,100 @@ plane. fill = solid (default) | grid | grid45.`,
 			},
 		}
 		c.Flags().BoolVar(&fit, "fit", true, "zoom-to-fit before capture (nudges a redraw)")
+		pcb.AddCommand(c)
+	}
+	// ── autoroute: one-command Freerouting round-trip ────────────────────────
+	// export DSN → run an external Freerouting engine → import the routed SES → DRC.
+	// The engine is external (Freerouting needs Java 17+); decoupled via a command
+	// template so any router works. Without one configured it exports + stops
+	// (graceful degradation → route manually, then `pcb import-autoroute`).
+	{
+		var routerCmd string
+		var keep bool
+		c := &cobra.Command{
+			Use:   "autoroute",
+			Short: "Auto-route the active PCB via an external Freerouting engine (DSN→route→SES→import→DRC)",
+			Long: `One-command Freerouting round-trip: export the PCB as a Specctra DSN, run an
+external Freerouting engine on it, import the routed SES, then DRC.
+
+The router is external (Freerouting needs Java 17+). Provide its command via
+--router or the FREEROUTING_CMD env var, with {in}/{out} placeholders:
+
+  easyeda pcb autoroute --router 'java -jar /path/freerouting.jar -de {in} -do {out}'
+
+Without a router configured, autoroute exports the DSN and stops — route it
+yourself, then run 'easyeda pcb import-autoroute <file.ses>'.
+
+PREREQUISITE (see docs/test-case-esp32-pcb.md): keep-out zones (antenna / board
+edge) MUST be in the DSN, else the router will route under the antenna. Verify the
+exported DSN contains keepout entries before trusting the result.`,
+			Args: cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				// 1. Export DSN, capture the persisted file path.
+				res, err := dispatchCapture(cfg, "pcb.export.dsn", window, map[string]any{}, stdout)
+				if err != nil {
+					return err
+				}
+				dsnPath := ""
+				for _, a := range res.Artifacts {
+					if a.Path != "" {
+						dsnPath = a.Path
+						break
+					}
+				}
+				if dsnPath == "" {
+					return fmt.Errorf("export-dsn returned no file (PCB empty or no nets? run `pcb import-changes` first)")
+				}
+				fmt.Fprintf(stderr, "DSN exported: %s\n", dsnPath)
+
+				tmpl := routerCmd
+				if tmpl == "" {
+					tmpl = os.Getenv("FREEROUTING_CMD")
+				}
+				if tmpl == "" {
+					fmt.Fprintf(stderr, "no --router / FREEROUTING_CMD set — DSN exported, stopping.\n"+
+						"  route it externally (Freerouting), then: easyeda pcb import-autoroute <file.ses>\n")
+					return nil
+				}
+
+				// 2. Run the external router: {in}=DSN, {out}=SES.
+				sesPath := strings.TrimSuffix(dsnPath, ".dsn") + ".ses"
+				runStr := strings.NewReplacer("{in}", dsnPath, "{out}", sesPath).Replace(tmpl)
+				fmt.Fprintf(stderr, "routing: %s\n", runStr)
+				rc := exec.Command("sh", "-c", runStr)
+				rc.Stdout = stderr
+				rc.Stderr = stderr
+				if err := rc.Run(); err != nil {
+					return fmt.Errorf("external router failed: %w", err)
+				}
+				if _, err := os.Stat(sesPath); err != nil {
+					return fmt.Errorf("router produced no SES at %s (check the command's {out})", sesPath)
+				}
+				if !keep {
+					defer func() { _ = os.Remove(sesPath) }()
+				}
+
+				// 3. Import the routed SES.
+				data, err := os.ReadFile(sesPath)
+				if err != nil {
+					return fmt.Errorf("read SES: %w", err)
+				}
+				fmt.Fprintf(stderr, "importing SES (%d bytes) → tracks/vias\n", len(data))
+				if err := dispatch(cfg, "pcb.import_autoroute", window, map[string]any{
+					"fileBase64": base64.StdEncoding.EncodeToString(data),
+					"format":     "ses",
+					"fileName":   filepath.Base(sesPath),
+				}, stdout, stderr); err != nil {
+					return err
+				}
+
+				// 4. DRC the result.
+				fmt.Fprintln(stderr, "--- DRC after routing ---")
+				return dispatch(cfg, "pcb.drc.check", window, nil, stdout, stderr)
+			},
+		}
+		c.Flags().StringVar(&routerCmd, "router", "", "external router command with {in}/{out} (or FREEROUTING_CMD env)")
+		c.Flags().BoolVar(&keep, "keep", false, "keep the intermediate SES file")
 		pcb.AddCommand(c)
 	}
 

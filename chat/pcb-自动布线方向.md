@@ -134,3 +134,27 @@ pcb_ManufactureData.getDsnFile('design.dsn')   → 导出 Specctra DSN（Freerou
 | `sch_ManufactureData.getNetlistFile` | function ✅（#1 A7 源） |
 
 **结论：Freerouting 路全打通，#5 可开工**（DSN 导出 action + SES 解析器 + autoroute 编排）。
+
+---
+
+## 2026-06-29 再追加：真实约束（禁止区域 / 天线 keep-out / 铺铜配合）—— #5 前提
+
+用户提出：带天线器件(ESP32-S3-WROOM-1 集成天线)、铺铜、禁止区域的配合，必须计入。
+api search + 验 DSN 摸清现状（→ task #11）：
+
+| 约束 | eda 现状 | 缺口 |
+|---|---|---|
+| 禁止区域 | `pcb_Net.create(layer, polygon, ruleType[], …)` 建 Region；`convertToRegion`默认禁止区域；`pcb_Drc.getRegionRules` | **没封 action** → 加 `pcb.region.create/list`(ruleType=禁铜/禁布线/禁过孔) |
+| 天线 keep-out | ESP32 模块封装本应自带 | ⚠️ **导出 DSN 里 keepout=0** → 封装没带 或 getDsnFile 不翻禁止区域 |
+| 铺铜配合 | `pcb.pour.*`(R1)；`rebuildCopperRegion` 应自动避让 | 需验证 pour 真避让 keep-out + 板边间距 |
+
+### 红灯
+当前 `getDsnFile` 导出的 DSN **0 个 keepout**。若禁止区域不进 DSN，**Freerouting 会在天线下走线 → 板报废**。
+所以 keep-out→DSN 是 #5 产出「能用的板」的前提，不是可选项。
+
+### #5 完整链路（含约束）
+```
+populate(import_changes) → [布局: 人/UI, agent 给粗 seed] → 禁止区域(天线/板边)就位
+  → pcb.export.dsn(必须含 keepout) → Freerouting(避开 keepout) → pcb.import_autoroute(SES)
+  → 铺铜(pour, 避让 keepout+板边) → DRC 归零
+```
