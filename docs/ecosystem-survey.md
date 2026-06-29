@@ -326,6 +326,33 @@ eda.pcb_PrimitiveVia.getAll() + via.getState_Net()            // 每网过孔数
 
 > 关联：task #5（管线）/ #11（keep-out，docs/test-case-esp32-pcb.md）/ issue #28 #29。
 
+### 8.5 重大转向：自研启发式可行（社区扩展实证），推翻「不可行」结论
+
+> ⚠️ **这条推翻了 §7 / §8.1 的「PCB 自动布线/布局不可行、卡官方 @alpha / 外部引擎」判断。**
+
+第三方社区扩展 **「PCB自动化工具」**（V1.0，2025.9–2026.1，跑在 V2.2.42 / V3.2.x；
+用户下载的说明书）提供 9 个工具：**短线自动布线 / 模块自动扇出打孔 / 整版全自动模块化布局
+（主芯片+去耦电容聚类）/ 自动局部铺铜+45°·圆弧导角 / 群组草图布线 / 管脚扇出打孔 /
+布局导出导入(plctxt.txt，含 ALLEGRO 互通) / 检查多余线段 / 检查90度·锐角**。
+
+- **怎么实现的**：用**标准图元 API + 自研算法**（`pcb_PrimitiveLine.create` / `Via.create` /
+  `PrimitivePour` / `PrimitiveComponent.modify`），**不靠 `autoRouting()`/`autoLayout()`**
+  （那俩 @alpha/undefined 它们也用不了）。→ 用我们已有的 @beta/@public 原语就能做。
+- 它们也撞到同样的 API 缺口（草图线无网络、读不到单网鼠线、DRC 推挤不可行）——印证我们的发现。
+
+**两档策略（定调）**：
+1. **启发式档**（短线直连、扇出、模块聚类布局、局部铺铜+导角、走线审核）——**自研更好**：
+   无现成库、是 agent 强项、放 **Go daemon**（读状态→算几何→发 create/modify 动作；air 热重载、
+   改算法不重导）。
+2. **迷宫布线档**（任意距离/拥塞/推挤/等长）——**外包 Freerouting**（开源事实标准；现已有
+   CLI + API + MCP，headless 可避 1.9 GUI 弹窗；我们文件式路径已对接）。别自研。
+
+**外部库**：完整布线=Freerouting；布局/短线/扇出/铺铜=无现成库（bespoke 启发式，自研）；
+OrthoRoute(GPU/FPGA 小众)、Quilter.ai(商业 RL 云,非库)。
+
+**明天起点**：daemon 里做「模块聚类布局」第一版——`pcb arrange`(已有粗聚类) 的升级，
+主芯片+去耦电容就近，纯几何启发式、真机可验、不依赖外部。见 task #13。
+
 ---
 
 ## 来源
