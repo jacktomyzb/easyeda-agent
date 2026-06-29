@@ -636,6 +636,35 @@ func AllActions() []ActionSpec {
 			Description: "Save the active PCB document to disk (eda.pcb_Document.save). The PCB counterpart to schematic.save — PCB edits are in-memory until saved. Also the action the daemon's debounced autosave fires for a PCB window.",
 			Outputs:     []string{"saved"},
 		},
+		// ─── Freerouting round-trip (export DSN → external router → import SES) ──
+		{
+			Name:        "pcb.export.dsn",
+			Domain:      DomainPcb,
+			Phase:       2,
+			NeedsWindow: true,
+			Description: "Export the active PCB as a Specctra DSN file (eda.pcb_ManufactureData.getDsnFile) — the input an external autorouter (Freerouting / easyeda-pcb-router) consumes. Read-only. Returns null if the PCB is empty or has no nets (run pcb.import_changes first). The autoroute round-trip: export.dsn → route externally → import_autoroute the SES.",
+			Inputs:      []string{"fileName optional"},
+			Outputs:     []string{"artifact id", "file path", "file name", "size"},
+		},
+		{
+			Name:        "pcb.import_autoroute",
+			Domain:      DomainPcb,
+			Phase:       2,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Import a routed-result file from an external autorouter into the active PCB: format='ses' (Specctra Session, default; eda.pcb_Document.importAutoRouteSesFile) or 'json' (eda.pcb_Document.importAutoRouteJsonFile). File passed as base64 (fileBase64). The write side of the DSN→route→SES round-trip; recomputes ratlines after. Both APIs are @beta.",
+			Inputs:      []string{"fileBase64", "format optional (ses|json, default ses)", "fileName optional"},
+			Outputs:     []string{"imported", "format"},
+		},
+		{
+			Name:        "pcb.snapshot",
+			Domain:      DomainPcb,
+			Phase:       2,
+			NeedsWindow: true,
+			Description: "Capture the active PCB canvas as a PNG artifact (eda.dmt_EditorControl.getCurrentRenderedAreaImage; fit-to-all by default, pass fit=false to keep viewport). The PCB counterpart to schematic.snapshot. WARNING: EasyEDA may return a STALE frame after API edits — judge layout/DRC by data (pcb list / pcb drc), screenshot for a human eyeball only.",
+			Inputs:      []string{"fit optional (default true)", "tabId optional"},
+			Outputs:     []string{"artifact id", "file path", "fitted", "sha256", "capturedAt"},
+		},
 		// ─── PCB routing: list + rip-up (iterate/clear copper routing) ────
 		{
 			Name:        "pcb.line.list",

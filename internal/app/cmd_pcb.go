@@ -1,9 +1,13 @@
 package app
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -727,6 +731,77 @@ plane. fill = solid (default) | grid | grid45.`,
 			},
 		}
 		c.Flags().StringVar(&net, "net", "", "filter by net name")
+		pcb.AddCommand(c)
+	}
+
+	// ── Freerouting round-trip: export-dsn / import-autoroute / snapshot ──────
+	// The file-based autoroute workflow (the paradigm EasyEDA's own routing
+	// extensions use): `pcb export-dsn` → run Freerouting on the DSN → `pcb
+	// import-autoroute route.ses`. No autoRouting() typed API (it is @alpha /
+	// undefined this build); these wrap the @beta getDsnFile / importAutoRoute*.
+	{
+		var fileName string
+		c := &cobra.Command{
+			Use:   "export-dsn",
+			Short: "Export the active PCB as a Specctra DSN (autorouter input)",
+			Args:  cobra.NoArgs,
+			Example: `  easyeda pcb export-dsn
+  easyeda pcb export-dsn --name board.dsn`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				payload := map[string]any{}
+				if fileName != "" {
+					payload["fileName"] = fileName
+				}
+				return dispatch(cfg, "pcb.export.dsn", window, payload, stdout, stderr)
+			},
+		}
+		c.Flags().StringVar(&fileName, "name", "", "DSN file name (default design.dsn)")
+		pcb.AddCommand(c)
+	}
+	{
+		var format string
+		c := &cobra.Command{
+			Use:   "import-autoroute <file>",
+			Short: "Import a routed result (Specctra .ses / autoroute .json) into the active PCB",
+			Args:  cobra.ExactArgs(1),
+			Example: `  easyeda pcb import-autoroute design.ses
+  easyeda pcb import-autoroute route.json --format json`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				data, err := os.ReadFile(args[0])
+				if err != nil {
+					return fmt.Errorf("read routed file: %w", err)
+				}
+				if format == "" {
+					if strings.HasSuffix(strings.ToLower(args[0]), ".json") {
+						format = "json"
+					} else {
+						format = "ses"
+					}
+				}
+				payload := map[string]any{
+					"fileBase64": base64.StdEncoding.EncodeToString(data),
+					"format":     format,
+					"fileName":   filepath.Base(args[0]),
+				}
+				return dispatch(cfg, "pcb.import_autoroute", window, payload, stdout, stderr)
+			},
+		}
+		c.Flags().StringVar(&format, "format", "", "ses | json (default: inferred from extension)")
+		pcb.AddCommand(c)
+	}
+	{
+		var fit bool
+		c := &cobra.Command{
+			Use:   "snapshot",
+			Short: "Capture the active PCB canvas as a PNG artifact",
+			Args:  cobra.NoArgs,
+			Example: `  easyeda pcb snapshot
+  easyeda pcb snapshot --fit=false`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return dispatch(cfg, "pcb.snapshot", window, map[string]any{"fit": fit}, stdout, stderr)
+			},
+		}
+		c.Flags().BoolVar(&fit, "fit", true, "zoom-to-fit before capture (nudges a redraw)")
 		pcb.AddCommand(c)
 	}
 

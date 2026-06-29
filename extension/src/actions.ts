@@ -2624,6 +2624,111 @@ const pcbImportChanges: Handler = async (payload) => {
 	};
 };
 
+// ─── Freerouting round-trip (task #5) ───────────────────────────────────
+// EasyEDA's own routing extensions (eext-freerouting/kirouting) do NOT call the
+// @alpha pcb_Document.autoRouting; they round-trip a Specctra DSN to an external
+// engine and import the routed SES. We mirror that with typed actions: export the
+// DSN, hand it to easyeda-pcb-router (Freerouting headless), import the SES.
+
+/** Export the PCB as a Specctra DSN (the autorouter input). Read-only. */
+const pcbExportDsn: Handler = async (payload) => {
+	const fileName = optionalString(payload, 'fileName') ?? 'design.dsn';
+	let file;
+	try {
+		file = await eda.pcb_ManufactureData.getDsnFile(fileName);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to export DSN.');
+	}
+	if (!file) {
+		throw new ActionError(
+			ErrorCodes.EDA_CALL_FAILED,
+			'DSN export returned no file — the PCB may be empty or have no nets (run pcb.import_changes first).',
+		);
+	}
+	const artifact = await blobToArtifact(file, 'pcb_dsn', file.name || fileName, 'application/octet-stream');
+	return { result: { artifactId: artifact.id, fileName: file.name || fileName, size: file.size }, artifacts: [artifact] };
+};
+
+/**
+ * Import a routed-result file from the autorouter. `format: 'ses'` (Specctra
+ * Session, default) or `'json'` (EasyEDA autoroute JSON). The file arrives as
+ * base64 (the connector can't read the daemon's disk). Mutates the PCB.
+ */
+const pcbImportAutoroute: Handler = async (payload) => {
+	const format = (optionalString(payload, 'format') ?? 'ses').toLowerCase();
+	const base64 = requireString(payload, 'fileBase64');
+	const fileName = optionalString(payload, 'fileName')
+		?? (format === 'json' ? 'route.json' : 'route.ses');
+	let file: File;
+	try {
+		const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+		file = new File([bytes], fileName);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to decode the routed file (expected base64 in fileBase64).');
+	}
+	let imported;
+	try {
+		imported = format === 'json'
+			? await eda.pcb_Document.importAutoRouteJsonFile(file)
+			: await eda.pcb_Document.importAutoRouteSesFile(file);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to import the autoroute result file.');
+	}
+	if (imported) {
+		try { await eda.pcb_Document.startCalculatingRatline(); }
+		catch { /* best-effort ratline refresh */ }
+	}
+	return {
+		result: {
+			imported: Boolean(imported),
+			format,
+			reason: imported ? null : 'importAutoRoute* returned false — wrong format, stale DSN, or net/layer mismatch.',
+		},
+	};
+};
+
+/**
+ * Capture the active PCB canvas as a PNG artifact. Reuses the canvas-agnostic
+ * `dmt_EditorControl.getCurrentRenderedAreaImage`, so it mirrors schematic.snapshot
+ * for the PCB. Same stale-frame caveat — judge layout/DRC by data, screenshot for
+ * a human eyeball only.
+ */
+const pcbSnapshot: Handler = async (payload) => {
+	const tabId = optionalString(payload, 'tabId');
+	const fit = optionalBoolean(payload, 'fit') !== false;
+	let fitted = false;
+	if (fit) {
+		try { await eda.dmt_EditorControl.zoomToAllPrimitives(); fitted = true; }
+		catch { /* best-effort */ }
+	}
+	await waitForCanvasSettle();
+	let blob;
+	try {
+		blob = await eda.dmt_EditorControl.getCurrentRenderedAreaImage(tabId);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to capture PCB snapshot.');
+	}
+	if (!blob) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'PCB snapshot returned no image.');
+	}
+	const sha256 = await blobSha256(blob);
+	const artifact = await blobToArtifact(blob, 'pcb_snapshot', 'pcb-snapshot.png', 'image/png');
+	return {
+		result: {
+			artifactId: artifact.id,
+			fitted,
+			sha256,
+			capturedAt: new Date().toISOString(),
+			staleHint: 'EasyEDA may not auto-redraw after API edits; judge state by data (pcb list/drc), screenshot for layout only.',
+		},
+		artifacts: [artifact],
+	};
+};
+
 /**
  * Lay out a component on the active PCB: move/rotate/flip-layer/lock or set
  * designator/BOM flags. Mirrors schematic.component.modify against pcb_*.
@@ -3696,6 +3801,9 @@ const HANDLERS: Record<string, Handler> = {
 	'pcb.pour.delete': pcbPourDelete,
 	'pcb.pour.rebuild': pcbPourRebuild,
 	'pcb.save': pcbSave,
+	'pcb.export.dsn': pcbExportDsn,
+	'pcb.import_autoroute': pcbImportAutoroute,
+	'pcb.snapshot': pcbSnapshot,
 	'pcb.outline.set': pcbOutlineSet,
 	'pcb.outline.get': pcbOutlineGet,
 	'pcb.outline.clear': pcbOutlineClear,

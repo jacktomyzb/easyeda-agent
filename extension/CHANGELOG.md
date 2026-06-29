@@ -6,6 +6,16 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.24] - 2026-06-29
+### Added
+- **Freerouting round-trip building blocks** (task #5): `pcb.export.dsn`
+  (`getDsnFile` → Specctra DSN artifact, the autorouter input), `pcb.import_autoroute`
+  (`importAutoRouteSesFile`/`importAutoRouteJsonFile`, base64 in, recomputes ratlines),
+  and `pcb.snapshot` (`getCurrentRenderedAreaImage` for the PCB canvas — the PCB
+  counterpart to `schematic.snapshot`). Enables the file-based autoroute workflow
+  `pcb export-dsn` → run Freerouting → `pcb import-autoroute route.ses` without the
+  @alpha `autoRouting()`. CLI: `easyeda pcb export-dsn / import-autoroute / snapshot`.
+
 ## [0.5.23] - 2026-06-29
 ### Added
 - `schematic.check` now reports **stray wires** the SDK DRC and layout-lint both
