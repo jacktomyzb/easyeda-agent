@@ -56,7 +56,7 @@ type sheetTemplate struct {
 var defaultTitleBlockRatio = titleBlockRatio{WidthFrac: 0.22, HeightFrac: 0.14}
 
 // sheetTemplates is the known sheet → title-block ratio table. Mirrored for
-// humans/skills in skills/easyeda-conventions/references/sheet-templates.json;
+// humans/skills in skills/easyeda-agent/references/sheet-templates.json;
 // this Go table is the runtime authority (the CLI is the interface planners use).
 var sheetTemplates = []sheetTemplate{
 	{Name: "a-series-landscape", Aspect: 1.414, AspectTol: 0.06, TitleBlock: defaultTitleBlockRatio},

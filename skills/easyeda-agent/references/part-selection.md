@@ -18,10 +18,10 @@ top page, so the selector queries base + general and merges.
 
 ## Where it lives
 
-Tool-side (`skills/easyeda-schematic/scripts/parts-select.py`) or daemon-side — **NOT the connector**: the
+Tool-side (`skills/easyeda-agent/scripts/parts-select.py`) or daemon-side — **NOT the connector**: the
 EasyEDA webview can't make these cross-origin fetches; the daemon/tool can.
 
-## Ranking (`skills/easyeda-schematic/scripts/parts-select.py`)
+## Ranking (`skills/easyeda-agent/scripts/parts-select.py`)
 
 Tuple sort — each tier breaks ties of the one above:
 

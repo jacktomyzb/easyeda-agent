@@ -754,7 +754,7 @@ func AllActions() []ActionSpec {
 		// ─── Board outline (板框) — closed polyline on the BOARD_OUTLINE layer ──
 		// Curves are line-segment approximated (native arcs do not commit on the
 		// current build). Shape-generation recipes (rect/rounded-rect/circle/
-		// instrument) live in the easyeda-pcb skill; these actions just render points.
+		// instrument) live in the easyeda-agent skill; these actions just render points.
 		{
 			Name:         "pcb.outline.set",
 			Domain:       DomainPcb,

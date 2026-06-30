@@ -37,12 +37,36 @@ This project moves the system into a better shape:
 
 The action catalog now spans schematic, PCB, document navigation, board binding, artifacts, and diagnostics. The current inventory and roadmap live in [docs/FEATURES.md](docs/FEATURES.md).
 
+## Install Skills
+
+Install the `easyeda` CLI/daemon first, then import the EasyEDA connector URL printed
+by the installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh
+```
+
+The published skill slug is `easyeda-agent` (suffix intentional: it distinguishes this
+community automation layer from official EasyEDA tooling). To install only the skill
+from a registry:
+
+```bash
+# ClawHub
+clawhub install easyeda-agent
+
+# 国内 SkillHub
+skillhub install easyeda-agent --registry https://skillhub.cn
+```
+
+The old split skills (`easyeda-schematic`, `easyeda-pcb`, `easyeda-design-flow`,
+`easyeda-conventions`) have been merged and removed from the repository.
+
 ## Demo Example
 
 A board driven end-to-end through the typed-action + Skill workflow — placed
 **entirely from real LCSC / 立创 library parts** (search → place by uuid → wire →
 flag → DRC), not hand-drawn symbols. Layout follows the
-[auto-layout SOP](skills/easyeda-conventions/references/auto-layout-sop.md) distilled
+[auto-layout SOP](skills/easyeda-agent/references/auto-layout-sop.md) distilled
 from a 嘉立创 reference design: **flags only on power/ground rails; signals are real
 local orthogonal wires; decoupling hugs each IC's VCC pad; multi-page by function.**
 
@@ -67,11 +91,7 @@ internal/daemon/             Local daemon: /health, /eda (connector WS), /action
 internal/protocol/           Typed action protocol shared with connector (actions.go)
 internal/version/            Build/version metadata
 extension/                   EasyEDA connector (.eext) source + build (TypeScript → esbuild)
-skills/easyeda-schematic/scripts/        Data-only schematic linter + rule-trust harness + diff baseline
-skills/easyeda-design-flow/  Whole-board orchestration Skill
-skills/easyeda-schematic/    Schematic operational Skill
-skills/easyeda-pcb/          PCB operational Skill
-skills/easyeda-conventions/  Shared design rules and canonical part data
+skills/easyeda-agent/        Merged public Skill: workflow, references, scripts, canonical data
 docs/                        Architecture, protocol, features/roadmap, conventions, decisions
 ```
 

@@ -1,7 +1,3 @@
----
-name: easyeda-schematic
-description: EasyEDA schematic automation skill. Use when working with EasyEDA schematic pages through the easyeda-agent CLI or daemon, including reading schematic context, listing components, placing or modifying components, creating wires and net flags, selecting primitives, running schematic DRC, saving schematic changes, and exporting BOM or netlist artifacts.
----
 
 # EasyEDA Schematic
 
@@ -27,19 +23,19 @@ Use `easyeda-agent` typed actions. Do not write raw EasyEDA JavaScript unless a 
 
 ## Drawing a schematic — library-first (default)
 
-> **Design conventions live in the sibling [`easyeda-conventions`](../easyeda-conventions/SKILL.md) skill**
+> **Design conventions live in this skill's references**
 > (layout zones, spacing, wire/orientation rules, part-selection criteria, the
 > canonical orientation table + standard-parts library). This operational skill
 > **links** to it — single source, never copy the rules here.
 
-> ⚠️ **整板 / 非平凡设计 → 先走 [`easyeda-design-flow`](../easyeda-design-flow/SKILL.md) 流程脊柱。**
+> ⚠️ **整板 / 非平凡设计 → 先走 [`easyeda-agent`](./design-flow.md) 流程脊柱。**
 > 那里有分阶段 + 硬门禁(预分析 → 分页 → 模块编组 → 按组摆放 → 通道布线 → DRC + layout-lint → 调整闭环),
 > 专治「随手摆导致覆盖、外围乱飞、线压元件」。本 skill 提供它每一步要调用的**具体动作**。
 >
 > ⚠️ **多器件 / 整板设计:先花几分钟摸底,再动手。** 非平凡板子(>~10 件,或要交付/排 PCB)
 > place 前快速读懂设计(器件/电源树/功能分组/幅面)——见
-> [`design-pre-analysis.md`](../easyeda-conventions/references/design-pre-analysis.md)(轻量摸底,不是门禁)。
-> 然后照 [`auto-layout-sop.md`](../easyeda-conventions/references/auto-layout-sop.md)
+> [`design-pre-analysis.md`](./design-pre-analysis.md)(轻量摸底,不是门禁)。
+> 然后照 [`auto-layout-sop.md`](./auto-layout-sop.md)
 > 的 CLI 能力 + 硬坑落坐标,布局**用数据 + 截图自调**(放→读回坐标→`sch layout-lint` 判覆盖/间距→挪→再验)。
 > 小改 / 几个器件直接按下面放置。
 
@@ -49,8 +45,8 @@ part genuinely isn't in the library (a hand-built symbol loses the
 footprint/supplier linkage and is error-prone — prefer a library part, even a
 near-equivalent, first).
 
-0. **Standard parts first.** Check [`standard-parts.json`](../easyeda-conventions/references/standard-parts.json)
-   (in the easyeda-conventions skill) for the category you need (10k 0402, 100nF,
+0. **Standard parts first.** Check [`standard-parts.json`](./standard-parts.json)
+   (in this skill's `references/`) for the category you need (10k 0402, 100nF,
    ESP32-S3, AMS1117, USB-C, …). If it's there, place straight from its
    `{ libraryUuid, deviceUuid }` — deterministic, BOM-ready, with the real LCSC
    C-number. Only search when the category is missing, and ADD the chosen part back
@@ -76,7 +72,7 @@ near-equivalent, first).
 3. **Read pins** (`schematic.components.list` / pin readback) for exact pin
    coordinates before wiring.
 4. **Wire** (reference-validated — see **画线 / flag / 去耦(CLI 级硬规则)** in
-   [`auto-layout-sop.md`](../easyeda-conventions/references/auto-layout-sop.md);
+   [`auto-layout-sop.md`](./auto-layout-sop.md);
    the 嘉立创 ESP32-S3 standard project is **flags only on power/ground rails, every
    signal a real local wire**):
    - **Signals = real local orthogonal wires** (pin→wire→pin). Endpoint on a pin coord
@@ -112,8 +108,8 @@ above doesn't scale. Pipeline (proven on box-v2/110 parts):
 
 > ⚠️ **Layout is NOT optional.** Naive place-at-synthesis-coords + flag-every-pin is
 > electrically valid but **visually scattered** (box-v2: 327 flags, decaps far from
-> ICs). **Follow [`auto-layout-sop.md`](../easyeda-conventions/references/auto-layout-sop.md)**
-> (easyeda-conventions): fit sheet → mains by zone → auxiliaries pin-relative to their
+> ICs). **Follow [`auto-layout-sop.md`](./auto-layout-sop.md)**
+> (`auto-layout-sop.md`): fit sheet → mains by zone → auxiliaries pin-relative to their
 > owner IC → fine-tune. And **write resolved parts back into `standard-parts.json`** in
 > the same change (so the next board doesn't re-search non-deterministically).
 >
@@ -254,7 +250,7 @@ easyeda doc switch <P2|PCB1|uuid> --project <名字>   # 切换:按页名/PCB名
 
 - `schematic.components.list` — `--include-bbox` 附带每个元件渲染范围 `{minX,minY,maxX,maxY}`(供布局推理);`--include-pins` 附带每脚 `{pinName,pinNumber,x,y,noConnected}`(布线/连通性判断的数据面,布线前读引脚功能名→坐标用它,**不要**再用 `easyeda call schematic.components.list --payload '{"includePins":true}'` 绕过)。两个 flag 可与 `--all-pages` 叠加(输出会显著变大)。
 - **`easyeda sch layout-lint`** — **布局自检**(治覆盖的机械真值)。拉 `components.list --include-bbox`,Go 侧两两几何检查:**bbox 重叠 = ERROR**(命令非零退出,可当门禁)、**间距 < `--min-gap`(默认 2.54mm)= WARN**。`--all-pages`、`--json`。**默认只检真实器件(`componentType == "part"`)**:图框/标题栏(sheet)铺满整页、netflag/netport/netlabel 等非器件原语都会被自动排除,否则它们会与几乎每个器件误报重叠(见 issue #13)。需要把这些也纳入检查时加 `--include-non-parts`;被排除的数量会在报告里以 `skippedNonParts` 透明列出。摆放后跑它判覆盖/间距,比肉眼/截图可靠(截图可能 stale)。是 place→verify→adjust 闭环的输入。
-- **`easyeda sch sheet-geometry`** — **图纸边界 + 标题栏 keep-out**(放置/布线规划器的统一几何源,issue #26)。读 `components.list --include-bbox` 里 `componentType == "sheet"` 的实测 bbox,按**长宽比**匹配已知模板(A 系列横/纵向 ≈ √2),在**右下角**按归一化比例切出标题栏(图框/明细表)子矩形;`schematic.titleblock.get` 的 `showTitleBlock` 隐藏时不输出 keep-out。返回 `{sheet, titleBlock, keepouts[], warnings[]}`,每项带 **provenance**(`known-template-ratio` / `fallback-ratio` / `none`),无法确定时只给 warning、不输出虚假精度。`--json`。规划器消费 `keepouts[]`(`{name,bbox,hard}`)即可,**不要再各处硬编码 A4 坐标**。比例表见 `easyeda-conventions/references/sheet-templates.json`。
+- **`easyeda sch sheet-geometry`** — **图纸边界 + 标题栏 keep-out**(放置/布线规划器的统一几何源,issue #26)。读 `components.list --include-bbox` 里 `componentType == "sheet"` 的实测 bbox,按**长宽比**匹配已知模板(A 系列横/纵向 ≈ √2),在**右下角**按归一化比例切出标题栏(图框/明细表)子矩形;`schematic.titleblock.get` 的 `showTitleBlock` 隐藏时不输出 keep-out。返回 `{sheet, titleBlock, keepouts[], warnings[]}`,每项带 **provenance**(`known-template-ratio` / `fallback-ratio` / `none`),无法确定时只给 warning、不输出虚假精度。`--json`。规划器消费 `keepouts[]`(`{name,bbox,hard}`)即可,**不要再各处硬编码 A4 坐标**。比例表见 `references/sheet-templates.json`。
 - `schematic.component.place`
 - `schematic.component.modify`
 - `schematic.component.delete` — ⚠️ **只删组件,不删导线/总线/图形**。删完 `schematic.components.list` 只剩 A4 sheet 会让你误以为页面已干净,实际残留导线还在(DRC 仍会报)。要真正清页用 `schematic.page.clear`。
@@ -278,7 +274,7 @@ easyeda doc switch <P2|PCB1|uuid> --project <名字>   # 切换:按页名/PCB名
 
 PCB 操作（切到 PCB、读器件/层/网络/Board、从原理图 `import_changes` 同步、布局摆位
 move/rotate/align/distribute/grid_snap/cluster-arrange）在独立的 operational skill
-**[`easyeda-pcb`](../easyeda-pcb/SKILL.md)** —— 见那里(单一真源,勿在此复制)。
+**[`easyeda-agent`](./pcb.md)** —— 见那里(单一真源,勿在此复制)。
 
 ## Bundled Scripts
 
@@ -291,14 +287,14 @@ move/rotate/align/distribute/grid_snap/cluster-arrange）在独立的 operationa
 | `scripts/parts-select.py` | 器件选型辅助工具 |
 
 标准器件库（`standard-parts.json`）、flag 旋转真值表（`orientation.json`）、布局/选型约定都在
-**[easyeda-conventions](../easyeda-conventions/SKILL.md)** skill（单一真源，勿在此复制）。
+**easyeda-agent references** skill（单一真源，勿在此复制）。
 `bom-enrich.py` / `parts-select.py` / `orient.py` 会跨 skill 自动读取这些 canonical 文件。
 
 ## Guardrails
 
 - Confirm before deleting primitives.
 - Confirm before saving unless the user explicitly asked to save.
-- **持久化:`place`/`wire`/`modify` 只改 EasyEDA 内存,不 `schematic.save` 就不落盘** —— 窗口重载 / daemon 重启 / EasyEDA 崩溃会丢掉未保存的改动(实测踩过)。daemon 默认开**防抖 autosave(3s)** 兜底(`daemon start --autosave-debounce`,`0` 关),但防抖窗口内进程挂掉仍会丢最后几笔,所以多步改动仍**分批显式 `sch save`**,别只靠 autosave。整板流程的存盘节奏见 [`easyeda-design-flow`](../easyeda-design-flow/SKILL.md) 的 💾 检查点。
+- **持久化:`place`/`wire`/`modify` 只改 EasyEDA 内存,不 `schematic.save` 就不落盘** —— 窗口重载 / daemon 重启 / EasyEDA 崩溃会丢掉未保存的改动(实测踩过)。daemon 默认开**防抖 autosave(3s)** 兜底(`daemon start --autosave-debounce`,`0` 关),但防抖窗口内进程挂掉仍会丢最后几笔,所以多步改动仍**分批显式 `sch save`**,别只靠 autosave。整板流程的存盘节奏见 [`easyeda-agent`](./design-flow.md) 的 💾 检查点。
 - Confirm before running a generated multi-step mutation plan.
 - Do not claim completion after mutation until verification succeeds or the remaining risk is stated.
 - Treat `File` and `Blob` outputs as artifacts.
@@ -308,13 +304,13 @@ move/rotate/align/distribute/grid_snap/cluster-arrange）在独立的 operationa
 
 ### 原理图
 
-When placing components, follow the easyeda-conventions skill — [schematic-layout-conventions.md](../easyeda-conventions/references/schematic-layout-conventions.md):
+When placing components, follow [schematic-layout-conventions.md](./schematic-layout-conventions.md):
 - Zone map (power left, MCU center, RF/sensors right, big modules in corners)
 - Module spacing rules (80–500 units depending on size + pin count)
 - Wire stub lengths (20–40 units for power, 20–60 for signals)
 - Right-angle-only routing, decoupling caps within 30 units of VCC pins
 
-> **PCB 布局**约定在 [pcb-layout-conventions.md](../easyeda-conventions/references/pcb-layout-conventions.md)，操作流程在 [`easyeda-pcb`](../easyeda-pcb/SKILL.md) skill。
+> **PCB 布局**约定在 [pcb-layout-conventions.md](./pcb-layout-conventions.md)，操作流程在 [`easyeda-agent`](./pcb.md) skill。
 
 ## EasyEDA Electrical Rules (load-bearing — DRC will fatal if ignored)
 

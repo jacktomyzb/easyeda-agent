@@ -174,7 +174,7 @@ func newBomEnrichCmd(stdout, stderr io.Writer) *cobra.Command {
 // findBomEnrichScript resolves the bom-enrich.py script path.
 // Priority:
 //  1. --script flag value (returned as-is)
-//  2. $EASYEDA_SKILLS_DIR/easyeda-schematic/scripts/bom-enrich.py (install layout)
+//  2. $EASYEDA_SKILLS_DIR/easyeda-agent/scripts/bom-enrich.py (install layout)
 //  3. Walk up from the running binary to find skills/.../bom-enrich.py (dev: ./bin/easyeda)
 //  4. Walk up from the working directory (agent run inside the repo/project)
 //  5. PATH lookup for bom-enrich.py
@@ -187,20 +187,27 @@ func findBomEnrichScript(override string) (string, error) {
 		return override, nil
 	}
 
-	const rel = "easyeda-schematic/scripts/bom-enrich.py"
+	rels := []string{
+		"easyeda-agent/scripts/bom-enrich.py",
+		"easyeda-schematic/scripts/bom-enrich.py", // compatibility with pre-merge installs
+	}
 	if skillsDir := os.Getenv("EASYEDA_SKILLS_DIR"); skillsDir != "" {
-		candidate := filepath.Join(skillsDir, filepath.FromSlash(rel))
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
+		for _, rel := range rels {
+			candidate := filepath.Join(skillsDir, filepath.FromSlash(rel))
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate, nil
+			}
 		}
 	}
 
 	// Walk up from a start directory looking for skills/.../bom-enrich.py.
 	walkUp := func(dir string) (string, bool) {
 		for i := 0; i < 8; i++ {
-			candidate := filepath.Join(dir, "skills", filepath.FromSlash(rel))
-			if _, err := os.Stat(candidate); err == nil {
-				return candidate, true
+			for _, rel := range rels {
+				candidate := filepath.Join(dir, "skills", filepath.FromSlash(rel))
+				if _, err := os.Stat(candidate); err == nil {
+					return candidate, true
+				}
 			}
 			parent := filepath.Dir(dir)
 			if parent == dir {

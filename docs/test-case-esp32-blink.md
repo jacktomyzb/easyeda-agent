@@ -1,6 +1,6 @@
 # 固定测试用例 — ESP32-S3 最小系统点灯板
 
-> **项目要求(硬规定):每次做端到端测试,都要把这个用例用 `easyeda-design-flow`
+> **项目要求(硬规定):每次做端到端测试,都要把这个用例用 `easyeda-agent`
 > 流程脊柱完整跑一遍**——放置 → 编组 → 布线 → `sch layout-lint` → DRC → save。
 > 不是只测某个单点功能。这是 agent 画原理图能力的「冒烟 + 验收」基准。
 
@@ -43,7 +43,7 @@ ESP32-S3 最小系统 + 一个点灯 LED 是嵌入式里最经典的「能跑起
 电气意图:上电 3V3 稳定 → EN 经 RC 延时拉高复位 → IO0 上拉=正常 boot →
 固件翻转 GPIO → LED 点灯闪烁。
 
-## 跑测流程(照 `easyeda-design-flow` 的阶段门)
+## 跑测流程(照 `easyeda-agent` 的 `design-flow.md` 阶段门)
 
 1. **S0 预分析** — `easyeda health`;确认 8 件都在 `standard-parts.json`;模块划分:
    电源组(C2/3V3·GND flag)、MCU 组(U1+C1+R1+R2+C3 去耦/复位/strap)、点灯组(R3+LED1)。

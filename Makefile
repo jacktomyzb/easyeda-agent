@@ -22,7 +22,7 @@ test: ## go test ./...
 # (orientation.json derives to its frozenTable; matches the connector) +
 # fixture goldens (known-good board stays clean, known-bad cases still fire).
 lint-test: ## linter rule-trust harness (orientation + fixtures)
-	python3 skills/easyeda-schematic/scripts/tests/run.py
+	python3 skills/easyeda-agent/scripts/tests/run.py
 
 fmt: ## gofmt cmd + internal
 	gofmt -w cmd internal
@@ -107,7 +107,7 @@ eext-fresh: ## bump patch + FRESH uuid (imports as new entry; delete the old one
 # What it does:
 #   • cross-compiles CLI for darwin/linux/windows (amd64 + arm64)
 #   • copies the latest .eext from extension/build/dist/
-#   • tarballs the three skills into skills.tar.gz
+#   • tarballs the merged easyeda-agent skill into skills.tar.gz
 #   • creates a git tag, pushes it, and creates a GitHub Release with all assets
 _LDFLAGS = -s -w -X 'github.com/zhoushoujianwork/easyeda-agent/internal/version.Version=$(VERSION)'
 
@@ -132,7 +132,7 @@ endif
 	 [ -n "$$EEXT" ] || { echo "connector build failed"; exit 1; }; \
 	 cp "$$EEXT" $(DIST)/easyeda-agent-connector.eext && echo "  $$EEXT → connector.eext"
 	@echo "  packaging skills..."
-	tar -czf $(DIST)/skills.tar.gz -C skills easyeda-conventions easyeda-schematic easyeda-pcb
+	tar --exclude='*/__pycache__' --exclude='*.pyc' -czf $(DIST)/skills.tar.gz -C skills easyeda-agent
 	cp install.sh $(DIST)/install.sh
 	@echo "  creating GitHub release..."
 	git tag -a $(VERSION) -m "Release $(VERSION)" 2>/dev/null || echo "  (tag $(VERSION) already exists, reusing)"

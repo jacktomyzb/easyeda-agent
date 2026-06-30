@@ -79,7 +79,6 @@ printf '  2. Install the EasyEDA connector extension:\n'
 printf '       Download: %s/easyeda-agent-connector.eext\n' "$BASE_URL"
 printf '       In EasyEDA Pro: 扩展管理 → 导入扩展 → select the .eext file\n\n'
 printf '  3. In EasyEDA Pro: 设置 → 允许外部交互 (Allow external interaction)\n\n'
-printf '  4. In Claude Code, use the skills:\n'
-printf '       /easyeda-schematic   (schematic design)\n'
-printf '       /easyeda-pcb         (PCB layout)\n\n'
+printf '  4. In Claude Code, use the merged skill:\n'
+printf '       /easyeda-agent       (schematic + PCB workflow)\n\n'
 printf 'Full docs: https://github.com/%s\n' "$REPO"

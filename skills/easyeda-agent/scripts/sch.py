@@ -5,7 +5,7 @@ data-driven self-adjust loop (place → read coords → judge spacing/wire-lengt
 snapshot retrieval) so the AI doesn't re-derive them each time.
 
 Usage (from Bash / a scratch script):
-    import sys; sys.path.insert(0, 'skills/easyeda-schematic/scripts')
+    import sys; sys.path.insert(0, 'skills/easyeda-agent/scripts')
     import sch; sch.PROJECT = 'motobox2026'
     st  = sch.read()                       # page state {parts,wires,flags}
     pid = sch.place(lib, uuid, 300, 400, 'R1')

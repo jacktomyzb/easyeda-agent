@@ -18,7 +18,7 @@ import (
 //
 // Switching the active document to a PCB is done with the generic `easyeda doc
 // switch <name|uuid>` (or `pcb docs` to list boards first) — there is no
-// pcb-specific open. PCB design rules live in the easyeda-pcb / easyeda-conventions
+// pcb-specific open. PCB design rules live in the easyeda-agent skill references
 // skills.
 func newPcbCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	var window string
@@ -340,7 +340,7 @@ schematic and PCB first, then recomputes ratlines.`,
 
 mode=cluster groups by shared local nets; mode=grid packs a flat grid. Each cluster
 is grid-packed into a tidy block with gutters; locked components are skipped. Apply
-the placement priorities in pcb-layout-conventions.md (easyeda-conventions) afterward.`,
+the placement priorities in pcb-layout-conventions.md (easyeda-agent) afterward.`,
 			Args: cobra.NoArgs,
 			Example: `  easyeda pcb arrange
   easyeda pcb arrange --mode grid --cols 8 --pitch 200`,
@@ -395,7 +395,7 @@ the placement priorities in pcb-layout-conventions.md (easyeda-conventions) afte
 			Long: `Set the board outline from a closed polygon of points (mil, y-up).
 
 Replaces any existing outline by default. The agent generates the points for the
-desired shape (rectangle/rounded-rect/circle/instrument) — see the easyeda-pcb skill;
+desired shape (rectangle/rounded-rect/circle/instrument) — see the easyeda-agent skill;
 curves are approximated by line segments. Reports whether all components fall inside.`,
 			Args:    cobra.NoArgs,
 			Example: `  easyeda pcb outline-set --points '[[0,0],[2000,0],[2000,1500],[0,1500]]'`,

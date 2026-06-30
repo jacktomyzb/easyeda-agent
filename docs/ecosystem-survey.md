@@ -190,15 +190,15 @@ eda.pcb_PrimitiveVia.getAll() + via.getState_Net()            // 每网过孔数
 
 | # | 吸收什么 | API | 落到哪 | 难度 |
 |---|---|---|---|---|
-| **A1** | **在线器件搜索**,把 standard-parts.json 从"唯一来源"降级为"缓存层":未命中则在线搜并自动写回 | `lib_Device.search` / `getByLcscIds` | `easyeda-schematic` 放置链 + 新 action `lib.device.search`/`lib.device.by-lcsc`(CLI `easyeda lib …`) + `easyeda-conventions` | **低** |
-| **A2** | **真实走线/过孔图元**,补交互式布线缺口(可先做脚本化逐段布线,甚至自研简易布线器直接回写) | `pcb_PrimitiveLine.create` / `pcb_PrimitiveVia.create` / `.delete` | `easyeda-pcb` + 新 action `pcb.route_segment`/`pcb.place_via`/`pcb.rip_up`(标 `Mutates`) | **低** |
-| **A3** | **PCB 设计报告**:每网长度 / 差分对 skew / 等长偏差(纯读、零风险,design-flow 的天然 DRC 补强) | `pcb_Net.getNetLength` + `pcb_Drc.getAll{NetClasses,DifferentialPairs,EqualLengthNetGroups}` | 新只读 action `pcb.report`(CLI) + `easyeda-design-flow` 门禁 | **低** |
-| **A4** | **直调自动布线**(类型声明 @alpha,但 3.2.148 实测仍 undefined → 暂走文件式) | `pcb_Document.autoRouting(props?)` @alpha → `{routedNets, totalNets}` + `clearRouting` | `easyeda-pcb` 新 action `pcb.auto_route` | **高**(本 build 未暴露,等平台或用文件式) |
-| **A5** | **真实 DRC 规则值**喂 layout-lint / DRC 门禁(用工程真实线宽/间距/板边判定,替代经验猜测) | `pcb_Drc.getCurrentRuleConfiguration()` | `easyeda-pcb` 读上下文 + `easyeda-design-flow` 门禁,只读 action `pcb.drc-rules` | **低-中**(规则 JSON 层级深,键名带空格) |
-| **A6** | **换封装/换符号标准动作**,固化"五步绑定法 + resolveDeviceLibrary"(导入器件 libraryUuid 为空反查) | `lib_Device.modify` + 原始态保存/恢复 | `easyeda-schematic` 新 action `sch.rebind-footprint`/`sch.rebind-symbol` | **中**(需端到端验证,挂 ESP32 回归) |
+| **A1** | **在线器件搜索**,把 standard-parts.json 从"唯一来源"降级为"缓存层":未命中则在线搜并自动写回 | `lib_Device.search` / `getByLcscIds` | `easyeda-agent` schematic flow + 新 action `lib.device.search`/`lib.device.by-lcsc`(CLI `easyeda lib …`) + `standard-parts.json` | **低** |
+| **A2** | **真实走线/过孔图元**,补交互式布线缺口(可先做脚本化逐段布线,甚至自研简易布线器直接回写) | `pcb_PrimitiveLine.create` / `pcb_PrimitiveVia.create` / `.delete` | `easyeda-agent` PCB flow + 新 action `pcb.route_segment`/`pcb.place_via`/`pcb.rip_up`(标 `Mutates`) | **低** |
+| **A3** | **PCB 设计报告**:每网长度 / 差分对 skew / 等长偏差(纯读、零风险,design-flow 的天然 DRC 补强) | `pcb_Net.getNetLength` + `pcb_Drc.getAll{NetClasses,DifferentialPairs,EqualLengthNetGroups}` | 新只读 action `pcb.report`(CLI) + `easyeda-agent` design-flow 门禁 | **低** |
+| **A4** | **直调自动布线**(类型声明 @alpha,但 3.2.148 实测仍 undefined → 暂走文件式) | `pcb_Document.autoRouting(props?)` @alpha → `{routedNets, totalNets}` + `clearRouting` | `easyeda-agent` PCB flow + 新 action `pcb.auto_route` | **高**(本 build 未暴露,等平台或用文件式) |
+| **A5** | **真实 DRC 规则值**喂 layout-lint / DRC 门禁(用工程真实线宽/间距/板边判定,替代经验猜测) | `pcb_Drc.getCurrentRuleConfiguration()` | `easyeda-agent` PCB context + design-flow 门禁,只读 action `pcb.drc-rules` | **低-中**(规则 JSON 层级深,键名带空格) |
+| **A6** | **换封装/换符号标准动作**,固化"五步绑定法 + resolveDeviceLibrary"(导入器件 libraryUuid 为空反查) | `lib_Device.modify` + 原始态保存/恢复 | `easyeda-agent` schematic flow + 新 action `sch.rebind-footprint`/`sch.rebind-symbol` | **中**(需端到端验证,挂 ESP32 回归) |
 | **A7** | **sch check 加 netlist-JSON 交叉校验**:JSON 权威 pin→net 归属 vs 几何"导线触碰引脚"判定对照,降误报漏报 | 复用 `sch_ManufactureData.getNetlistFile()` | `cmd_sch_check.go` floating-pin 规则加一路 JSON 源 | **中**(需摸清网表 JSON pin 命名→坐标映射) |
-| **A8** | **AI 选型升级**:两段式 prompt(关键词→候选→选 idx)+ 降级链,从规则筛选升级为 LLM+库搜索 | (prompt + `lib_Device.search`) | `scripts/parts-select.py` + `easyeda-conventions` part-selection | **低-中** |
-| **A9** | **铺铜/填充**(源码注入),也是泪滴的潜在唯一实现路径 | `sys_FileManager.getDocumentSource/setDocumentSource` + FILL 图元格式 | `easyeda-pcb` 新 action `pcb.copper-fill`;FILL schema 记进 conventions | **中**(绕过 typed API,需吃透源码拼接 + 失败回滚) |
+| **A8** | **AI 选型升级**:两段式 prompt(关键词→候选→选 idx)+ 降级链,从规则筛选升级为 LLM+库搜索 | (prompt + `lib_Device.search`) | `scripts/parts-select.py` + `easyeda-agent` part-selection | **低-中** |
+| **A9** | **铺铜/填充**(源码注入),也是泪滴的潜在唯一实现路径 | `sys_FileManager.getDocumentSource/setDocumentSource` + FILL 图元格式 | `easyeda-agent` PCB flow + 新 action `pcb.copper-fill`;FILL schema 记进 conventions | **中**(绕过 typed API,需吃透源码拼接 + 失败回滚) |
 
 **更长期盲区(列入 roadmap,暂不动手)**:制造输出 `pcb_ManufactureData`(Gerber/贴片/下单——流程脊柱的交付端)、
 拼板 `pnl_Document`、电路仿真 `sch_SimulationEngine`、复用模块 `lib_Cbb`、层叠管理 `pcb_Layer.setTheNumberOfCopperLayers`、

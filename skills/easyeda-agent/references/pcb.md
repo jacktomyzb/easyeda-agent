@@ -1,7 +1,3 @@
----
-name: easyeda-pcb
-description: EasyEDA PCB automation skill. Use when working with EasyEDA PCB documents through the easyeda-agent CLI or daemon — switching to a PCB, reading components/layers/nets/board context, syncing components from the schematic (import changes), and laying out components (move, rotate, flip, align, distribute, grid-snap, and net-cluster auto-arrange). PCB design rules live in the sibling easyeda-conventions skill.
----
 
 # EasyEDA PCB
 
@@ -9,8 +5,8 @@ Drive `easyeda-agent` typed actions. Run `easyeda actions` for the live machine-
 list. Prefer typed actions; only fall back to `debug.exec_js` when a typed action is
 missing **and** the user explicitly accepts a debug path.
 
-> **PCB design rules live in the sibling [`easyeda-conventions`](../easyeda-conventions/SKILL.md)
-> skill** — especially [`pcb-layout-conventions.md`](../easyeda-conventions/references/pcb-layout-conventions.md)
+> **PCB design rules live in this skill's references** — especially
+> [`pcb-layout-conventions.md`](./pcb-layout-conventions.md)
 > (placement priority P0–P7, stackup-conditioned decoupling, thermal/SI/DFM/grid rules,
 > each with a data-detectable check). This operational skill **links** to it — single
 > source, never copy the rules here.
@@ -175,7 +171,7 @@ with margin, then verify `allInside` from the response.
 ## Auto-layout — execute per the conventions
 
 Follow the priority hierarchy in
-[`pcb-layout-conventions.md`](../easyeda-conventions/references/pcb-layout-conventions.md)
+[`pcb-layout-conventions.md`](./pcb-layout-conventions.md)
 (**P0 mechanical/enclosure > P1 safety/isolation > P2 EMI hot-loop + critical decoupling >
 P3 reference-plane/return > P4 thermal keep-out > P5 functional grouping > P6 DFM >
 P7 grid/align/silkscreen** — P7 is cosmetic and never overrides a function-driven position).

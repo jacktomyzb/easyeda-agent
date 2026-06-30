@@ -31,7 +31,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PARTS = os.path.join(
-    HERE, '..', '..', 'easyeda-conventions', 'references', 'standard-parts.json')
+    HERE, '..', 'references', 'standard-parts.json')
 
 KNOWN_VALUE_FLAGS = {'--parts', '--from', '--key', '--desc'}
 KNOWN_BOOL_FLAGS = {'--basic', '--dry-run', '-h', '--help'}

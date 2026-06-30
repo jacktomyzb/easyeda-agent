@@ -11,6 +11,7 @@
 
 | 文件 | 主题 |
 |---|---|
+| [2026-06-30-skill-merge.md](2026-06-30-skill-merge.md) | 将 4 个 EasyEDA 技能合并为单一 `easyeda-agent` 技能的决策记录 |
 | [项目方向评估.md](项目方向评估.md) | 整体态势、roadmap 取舍、高价值前沿在哪 |
 | [pcb-自动布线方向.md](pcb-自动布线方向.md) | 自动布线能不能做、文件式往返 vs 提 issue vs 等 API |
 | [对标-jlceda-mcp.md](对标-jlceda-mcp.md) | 第三方 MCP 路线对标，4 条对已实现部分的改进建议 |

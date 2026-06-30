@@ -16,7 +16,7 @@ skill ──▶ Go CLI/daemon ──WebSocket──▶ connector .eext ──▶
 
 > **本项目是「边开发、边更新 Agent Skill」的联合开发模式。**
 >
-> - **开发和测试的主要对象是 Skill**（操作技能 `skills/easyeda-schematic/`、`skills/easyeda-pcb/`，参考技能 `skills/easyeda-conventions/`）。
+> - **开发和测试的主要对象是 Skill**（唯一对外入口 `skills/easyeda-agent/`）。
 > - Go CLI/daemon（`cmd/easyeda` + `internal/`）和连接器插件（`extension/`）是**为 Skill 服务的基础设施**，而非最终目的。
 > - 每次改动首先问：「Skill 里的工作流、知识、或 guardrail 需要同步更新吗？」——如果需要，先改 Skill，再改底层实现。
 > - 修改底层 action / daemon / 插件后，必须同步更新 Skill 里对应的工具描述、示例、或注意事项。
@@ -28,7 +28,7 @@ skill ──▶ Go CLI/daemon ──WebSocket──▶ connector .eext ──▶
 ## 首要准则 — 固定测试用例（端到端验收）
 
 **每次做端到端测试，都必须把 [`docs/test-case-esp32-blink.md`](docs/test-case-esp32-blink.md)
-（ESP32-S3 最小系统点灯板）用 `easyeda-design-flow` 流程脊柱完整跑一遍**——放置→编组→布线
+（ESP32-S3 最小系统点灯板）用 `easyeda-agent` 的 `design-flow.md` 流程脊柱完整跑一遍**——放置→编组→布线
 →`sch layout-lint`→DRC→save，不是只测单点。这是 agent 画原理图能力的回归基准：layout-lint /
 autosave / design-flow / 连接器 任何改动后都重跑此用例。验收标准见该文档（8 件齐、0 overlap、
 0 fatal、5 网络连通、已落盘）。测试工程用 `--project ceshi`，测完清理还原。
@@ -47,12 +47,9 @@ on `main` by default (user preference). Don't `git checkout -b`; just commit to
 |---|---|
 | `cmd/easyeda` + `internal/{app,daemon,protocol}` | Go CLI + daemon. `internal/protocol/actions.go` = the 20 typed actions. Daemon: `/health`, `/eda` (connector WS), `/action`. |
 | `extension/` | TypeScript connector → esbuild → `.eext`. `src/transport.ts` (port-scan + auto-reconnect), `src/actions.ts` (eda.* handlers + `connect_pin`). |
-| `skills/easyeda-design-flow/` | Orchestration skill — the chief-EDA-engineer **process spine** for a whole board: staged + gated pipeline (pre-analysis → paginate → group → place-by-group → route → DRC + `sch layout-lint` → adjust loop). Sequences/gates only; delegates actions to the operational skills, rules to conventions. |
-| `skills/easyeda-schematic/` | Operational skill (schematic) — typed-action workflow, `scripts/` (lint suite + BOM/parts tools), `sch layout-lint` (bbox overlap/spacing), guardrails. Links to the conventions skill for design rules. |
-| `skills/easyeda-pcb/` | Operational skill (PCB) — switch to a PCB, read components/layers/nets/board, `import_changes` from the schematic, lay out (move/rotate/align/distribute/grid-snap/cluster-arrange). Links to the conventions skill. |
-| `skills/easyeda-conventions/` | Reference skill (no actions) — the EE design truth + canonical data in `references/`: orientation.json, standard-parts.json, schematic/pcb layout conventions, part-selection. See `skills/README.md`. |
+| `skills/easyeda-agent/` | Merged public skill — short `SKILL.md` router plus `references/` for design flow, schematic, PCB, conventions, canonical data, and `scripts/` for lint/BOM/parts/calibration tools. |
 | `docs/FEATURES.md` | Feature-status inventory (20 actions grouped by capability) + roadmap. |
-| `skills/easyeda-schematic/SKILL.md` | The user-facing skill. |
+| `skills/easyeda-agent/SKILL.md` | The user-facing skill. |
 
 ## Dev workflow
 
@@ -89,8 +86,8 @@ make eext         # bump PATCH + build importable .eext, STABLE uuid (update in 
 make eext-fresh   # fallback: bump PATCH + FRESH uuid (imports as a new entry; delete the old one) — for when the installed one won't uninstall
 make connector    # build .eext at the current version/uuid (no bump — same-version dev only)
 
-skills/easyeda-schematic/scripts/lint.sh <project>          # live lint (DIFF if a baseline exists)
-skills/easyeda-schematic/scripts/lint.sh <project> --save   # full lint + record baseline
+skills/easyeda-agent/scripts/lint.sh <project>          # live lint (DIFF if a baseline exists)
+skills/easyeda-agent/scripts/lint.sh <project> --save   # full lint + record baseline
 ```
 
 ## Release workflow
@@ -110,29 +107,29 @@ curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main
 
 ## Skill scripts usage
 
-All tools live in `skills/easyeda-schematic/scripts/`.
+All tools live in `skills/easyeda-agent/scripts/`.
 
 ```bash
 # 原理图 lint
-skills/easyeda-schematic/scripts/lint.sh <project>           # 实时 lint；有 baseline 时只显示 DIFF
-skills/easyeda-schematic/scripts/lint.sh <project> --save    # 全量 lint + 记录 baseline
+skills/easyeda-agent/scripts/lint.sh <project>           # 实时 lint；有 baseline 时只显示 DIFF
+skills/easyeda-agent/scripts/lint.sh <project> --save    # 全量 lint + 记录 baseline
 
 # BOM 补全 LCSC C 号（导出后运行）
-skills/easyeda-schematic/scripts/bom-enrich.py <bom.tsv>             # 输出到 stdout
-skills/easyeda-schematic/scripts/bom-enrich.py <bom.tsv> --out <out> # 写入文件
+skills/easyeda-agent/scripts/bom-enrich.py <bom.tsv>             # 输出到 stdout
+skills/easyeda-agent/scripts/bom-enrich.py <bom.tsv> --out <out> # 写入文件
 
 # 器件选型
-skills/easyeda-schematic/scripts/parts-select.py --help
+skills/easyeda-agent/scripts/parts-select.py --help
 
 # flag 旋转真值表校准（导入新 .eext 后跑一次，需要已连接的 EasyEDA 窗口）
 # 在 EasyEDA 的 debug.exec_js 里粘贴 calibrate.js 内容
-skills/easyeda-schematic/scripts/calibrate.js   # 读 getPrimitivesBBox 实测锚点
+skills/easyeda-agent/scripts/calibrate.js   # 读 getPrimitivesBBox 实测锚点
 
 # lint 规则信任测试
-make lint-test    # = python3 skills/easyeda-schematic/scripts/tests/run.py
+make lint-test    # = python3 skills/easyeda-agent/scripts/tests/run.py
 ```
 
-`skills/easyeda-conventions/references/standard-parts.json` — 标准器件库（libraryUuid + deviceUuid + LCSC C 号）。放置前先查这里；新选型后写回。
+`skills/easyeda-agent/references/standard-parts.json` — 标准器件库（libraryUuid + deviceUuid + LCSC C 号）。放置前先查这里；新选型后写回。
 
 For a connected window, EasyEDA must be open with the project AND have **"允许外部
 交互 / Allow external interaction"** enabled, or the connector's WebSocket never
@@ -156,9 +153,9 @@ reaches the daemon.
   OLD connector code and fights the freshly-imported one over the daemon socket;
   **fully quit and relaunch EasyEDA** to load new connector code.
 - **EasyEDA schematic coords are y-UP** (+y renders upward). The orientation table
-  in `skills/easyeda-conventions/references/orientation.json` is the **stored-rotation** truth (the
+  in `skills/easyeda-agent/references/orientation.json` is the **stored-rotation** truth (the
   value `getState_Rotation` reads back for a correctly-oriented flag), validated
-  read-only against real placed flags by `skills/easyeda-schematic/scripts/calibrate.js`. **`createNetFlag` /
+  read-only against real placed flags by `skills/easyeda-agent/scripts/calibrate.js`. **`createNetFlag` /
   `createNetPort` STORE rotation negated** on the 2026-06 build — confirmed via
   `connect_pin(direction=left)`: it passed `90`, the flag stored `270` and rendered
   pointing **right** (up/down at 0/180 are symmetric, which is why it hid for so
