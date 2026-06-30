@@ -1094,6 +1094,7 @@ exported DSN contains keepout entries before trusting the result.`,
 	// Module-aware heuristic placement (daemon-side; see pcb_autoplace.go).
 	{
 		var noRotate bool
+		var multiGap float64
 		var mainPins int
 		var gap, pitch float64
 		var dryRun bool
@@ -1107,7 +1108,9 @@ chip edge nearest the pad it actually connects to, then packed along that edge s
 nothing overlaps:
   • decoupling caps land by their power pin (3V3/VCC), resistors by their signal pin
   • an LED chains next to its series resistor (shared signal net)
-This is a SEED, not a final layout — verify with 'pcb layout-lint' + 'pcb drc'.
+With 2+ main chips, any that overlap / sit closer than --multi-gap are spread into a
+row (leftmost stays put) before satellites are placed; --multi-gap 0 disables that.
+This is a SEED, not a final layout — verify with 'pcb drc'.
 
   easyeda pcb auto-place --project ceshi --dry-run   # print the plan, move nothing
   easyeda pcb auto-place --project ceshi             # apply it`,
@@ -1137,6 +1140,9 @@ This is a SEED, not a final layout — verify with 'pcb layout-lint' + 'pcb drc'
 				}
 				if noRotate {
 					opt.rotate = false
+				}
+				if cmd.Flags().Changed("multi-gap") {
+					opt.multiGap = multiGap
 				}
 				moves, diags := planAutoPlace(comps, opt)
 
@@ -1179,6 +1185,7 @@ This is a SEED, not a final layout — verify with 'pcb layout-lint' + 'pcb drc'
 		c.Flags().Float64Var(&gap, "gap", 0, "clearance from chip edge to satellite (mil, default 40)")
 		c.Flags().Float64Var(&pitch, "pitch", 0, "spacing between satellites packed on the same edge (mil, default 30)")
 		c.Flags().BoolVar(&noRotate, "no-rotate", false, "do not re-orient satellites (v1 translate-only behavior)")
+		c.Flags().Float64Var(&multiGap, "multi-gap", 0, "min bbox gap between multiple main chips (mil, default 150; 0 disables spacing)")
 		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the placement plan without moving anything")
 		pcb.AddCommand(c)
 	}

@@ -171,9 +171,12 @@ type apOptions struct {
 	gap      float64 // clearance from chip bbox edge to the nearest satellite edge
 	pitch    float64 // spacing between two satellites packed on the same edge
 	rotate   bool    // re-orient 2-pin satellites so their connecting pad faces the chip
+	multiGap float64 // min bbox gap between adjacent main chips (0 = don't space them)
 }
 
-func defaultApOptions() apOptions { return apOptions{mainPins: 8, gap: 40, pitch: 30, rotate: true} }
+func defaultApOptions() apOptions {
+	return apOptions{mainPins: 8, gap: 40, pitch: 30, rotate: true, multiGap: 150}
+}
 
 // assignment is the planner's per-satellite decision before packing: which chip,
 // which edge, and where along that edge it wants to sit (the connecting pad's
@@ -209,6 +212,34 @@ func planAutoPlace(comps []apComp, opt apOptions) ([]apMove, []apDiag) {
 			diags = append(diags, apDiag{comps[s].designator, "no main chip on board (>= mainPins distinct pins) to anchor against"})
 		}
 		return nil, diags
+	}
+
+	var moves []apMove
+
+	// Multi-chip spacing: with ≥2 main chips, spread any that overlap / sit closer
+	// than multiGap into a left-to-right row (leftmost stays put). Satellites are
+	// then placed against the chips' NEW positions, so we run the rest of the
+	// planner on a working copy whose mains are shifted, and emit a move per shifted
+	// main. Single-chip boards (and multiGap=0) skip this entirely → unchanged v1.1.
+	if opt.multiGap > 0 && len(mains) > 1 {
+		shifts := spaceMains(comps, mains, opt.multiGap)
+		work := make([]apComp, len(comps))
+		copy(work, comps)
+		for mi, m := range mains {
+			dx := shifts[mi]
+			if dx == 0 {
+				continue
+			}
+			work[m] = shiftComp(comps[m], dx)
+			moves = append(moves, apMove{
+				ID:         comps[m].id,
+				Designator: comps[m].designator,
+				NewX:       round2(work[m].x),
+				NewY:       round2(work[m].y),
+				Via:        "chip-spacing",
+			})
+		}
+		comps = work
 	}
 
 	// Per-main net→pads index: ALL pads on each net (a chip repeats GND/VCC many
@@ -338,7 +369,6 @@ func planAutoPlace(comps []apComp, opt apOptions) ([]apMove, []apDiag) {
 		}
 	}
 
-	var moves []apMove
 	// Deterministic group order.
 	var keys []key
 	for k := range groups {
@@ -443,6 +473,50 @@ func edgeFor(chip apComp, pad apPad) (apEdge, float64) {
 
 func compHasLocalNet(c apComp, net string) bool {
 	return slices.Contains(c.localNets(), net)
+}
+
+// spaceMains returns a per-main horizontal shift (dx) that lays the chips out
+// left-to-right with at least multiGap between adjacent bboxes. The leftmost chip
+// stays put; each subsequent chip is pushed right only if it overlaps / is closer
+// than multiGap to the previous one (already-roomy chips get dx=0). Returned slice
+// is indexed by position in `mains`.
+func spaceMains(comps []apComp, mains []int, multiGap float64) []float64 {
+	shifts := make([]float64, len(mains))
+	order := make([]int, len(mains))
+	for i := range mains {
+		order[i] = i
+	}
+	sort.Slice(order, func(a, b int) bool {
+		return comps[mains[order[a]]].minX < comps[mains[order[b]]].minX
+	})
+	prevRight := math.Inf(-1)
+	for _, mi := range order {
+		c := comps[mains[mi]]
+		left := c.minX
+		if prevRight > math.Inf(-1) { // every chip after the leftmost
+			if required := prevRight + multiGap; left < required {
+				shifts[mi] = required - left
+				left = required
+			}
+		}
+		prevRight = left + c.width()
+	}
+	return shifts
+}
+
+// shiftComp returns a copy of c translated by dx (anchor, bbox, and every pad),
+// so the planner can reason/route against a chip's spaced-out position.
+func shiftComp(c apComp, dx float64) apComp {
+	out := c
+	out.x += dx
+	out.minX += dx
+	out.maxX += dx
+	out.pads = make([]apPad, len(c.pads))
+	for i, p := range c.pads {
+		p.x += dx
+		out.pads[i] = p
+	}
+	return out
 }
 
 // nearestPad returns the pad in pads closest to (px,py).

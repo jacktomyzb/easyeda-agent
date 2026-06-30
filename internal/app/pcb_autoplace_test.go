@@ -198,3 +198,53 @@ func TestPlanAutoPlace_RotatesSatellite(t *testing.T) {
 		t.Error("expected at least one re-oriented (SetRot) satellite on the ceshi board")
 	}
 }
+
+// Two 8-pin chips that overlap should be spread into a row with >= multiGap
+// between bboxes; the leftmost stays put, the other gets a "chip-spacing" move.
+func twoChipBoard() []apComp {
+	mk8 := func(id, des string, cx float64) apComp {
+		pads := []apPad{
+			p("1", "", cx, 0), p("2", "", cx, 0), p("3", "", cx, 0), p("4", "", cx, 0),
+			p("5", "", cx, 0), p("6", "", cx, 0), p("7", "", cx, 0), p("8", "", cx, 0),
+		}
+		return mkComp(id, des, cx, 0, 400, 400, pads)
+	}
+	return []apComp{
+		mk8("u1", "U1", 0),   // bbox x ∈ [-200, 200]
+		mk8("u2", "U2", 100), // bbox x ∈ [-100, 300] — overlaps U1
+	}
+}
+
+func TestPlanAutoPlace_MultiChipSpacing(t *testing.T) {
+	opt := defaultApOptions() // multiGap = 150
+	moves, _ := planAutoPlace(twoChipBoard(), opt)
+
+	var u2 *apMove
+	for i := range moves {
+		if moves[i].Designator == "U2" {
+			u2 = &moves[i]
+		}
+		if moves[i].Designator == "U1" {
+			t.Errorf("leftmost chip U1 should not move, got %+v", moves[i])
+		}
+	}
+	if u2 == nil {
+		t.Fatal("U2 (overlapping chip) should get a chip-spacing move")
+	}
+	if u2.Via != "chip-spacing" {
+		t.Errorf("U2 move via=%q, want chip-spacing", u2.Via)
+	}
+	// U1 right edge = 200; U2 half-width = 200, so U2 center must be ≥ 200+150+200.
+	if got, want := u2.NewX, 200.0+opt.multiGap+200.0; got < want-0.01 {
+		t.Errorf("U2 newX=%.0f, want ≥ %.0f (U1.right + multiGap + half)", got, want)
+	}
+
+	// multiGap=0 disables spacing → no chip moves.
+	opt.multiGap = 0
+	moves0, _ := planAutoPlace(twoChipBoard(), opt)
+	for _, m := range moves0 {
+		if m.Via == "chip-spacing" {
+			t.Errorf("multiGap=0 should not space chips, got %+v", m)
+		}
+	}
+}
