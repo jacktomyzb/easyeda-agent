@@ -62,6 +62,9 @@ ESP32-S3 最小系统 + 一个点灯 LED 是嵌入式里最经典的「能跑起
 - [ ] `easyeda sch layout-lint` → **0 overlap**(WARN 间距可接受但要解释)
 - [ ] `easyeda sch drc` → **0 fatal**;无关键悬空网络
 - [ ] 5 个功能网络(3V3/GND/EN/IO0/BLINK)连通正确
+- [x] **一调用全快照** `easyeda sch read`(#7，2026-06-30 真机验证)：单次返回 components(每脚带权威 net) +
+  nets(net→所连 pin + degree + 电源地标志) + floatingPins + check。ceshi 实测 15 件/6 网，连通与本用例
+  网表完全一致(3V3 deg5、GND deg7、EN/IO0/BLINK/LED_A 信号网)，电源地 isGlobal 标志正确。读电路状态优先用它。
 - [ ] 已落盘(autosave 触发 或 显式 `sch save`,audit 里有 `schematic.save ok=true`)
 - [ ] 跑测在干净工程上做;**测完清理**(`sch prim-delete` 全删)还原,除非要留存复核
 
