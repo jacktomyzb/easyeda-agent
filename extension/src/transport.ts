@@ -66,7 +66,11 @@ const STORAGE_KEY_AUTO_CONNECT = 'autoConnectEnabled';
 let currentPort: number | null = null;
 let handshakeVerified = false;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
-let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let watchdogStarted = false;
+let watchdogWorker: Worker | null = null;
+// Set by an explicit stop() so the always-on watchdog does NOT immediately
+// reconnect behind the user's back; cleared by start()/reconnect().
+let suspended = false;
 let heartbeatPending = false;
 let heartbeatSeq = 0;
 let missedPongs = 0;
@@ -148,6 +152,7 @@ function cancelConnectionFlow(resetRetryCount = true): void {
 export function reconnect(): void {
 	eda.sys_Message.showToastMessage(eda.sys_I18n.text('Reconnecting...'));
 	connectionAnnounced = false;
+	suspended = false;
 	cancelConnectionFlow();
 	void scanAndConnect();
 }
@@ -159,6 +164,7 @@ export function reconnect(): void {
  */
 export function stop(showToast = true): void {
 	connectionAnnounced = false;
+	suspended = true; // keep the watchdog from auto-reconnecting after an explicit stop
 	cancelConnectionFlow();
 	if (showToast) {
 		eda.sys_Message.showToastMessage(eda.sys_I18n.text('Connection stopped'));
@@ -169,9 +175,9 @@ export function stop(showToast = true): void {
  * Start the connection flow if auto-connect is enabled.
  */
 export function start(): void {
-	const storedValue = eda.sys_Storage.getExtensionUserConfig(STORAGE_KEY_AUTO_CONNECT);
-	const autoConnectEnabled = storedValue !== false;
-	if (autoConnectEnabled) {
+	suspended = false;
+	startWatchdog(); // always-on background-immune reconnect driver
+	if (autoConnectEnabled()) {
 		void scanAndConnect();
 	}
 }
@@ -422,63 +428,121 @@ function diag(msg: string): void {
 
 // ─── Heartbeat ────────────────────────────────────────────────────────
 
-function startHeartbeat(sessionId: number): void {
-	stopHeartbeat();
-	heartbeatTimer = setInterval(() => {
-		if (!isConnectionSessionActive(sessionId)) {
-			stopHeartbeat();
-			return;
-		}
-		if (!handshakeVerified) {
-			return;
-		}
-
-		const reconnect = (reason: string): void => {
-			diag(`${reason}, session=${sessionId} -> reconnect`);
-			cancelConnectionFlow();
-			void scanAndConnect();
-		};
-
-		// Liveness check BEFORE sending the next ping: if the previous ping is
-		// still unanswered, count it as a miss. Only reconnect once we've missed
-		// MAX_MISSED_PONGS in a row — a single lagged pong is not a dead socket.
-		if (heartbeatPending) {
-			missedPongs += 1;
-			if (missedPongs >= MAX_MISSED_PONGS) {
-				reconnect(`liveness lost: ${missedPongs} pings unanswered`);
-				return;
-			}
-		}
-		else {
-			missedPongs = 0;
-		}
-
-		heartbeatPending = true;
-		heartbeatSeq += 1;
-		try {
-			// Send directly (not via sendFrame) so a throw — which means the
-			// underlying socket is gone — becomes an immediate reconnect signal.
-			eda.sys_WebSocket.send(WS_ID, JSON.stringify({ type: 'ping', id: `hb-${heartbeatSeq}` }));
-		}
-		catch {
-			reconnect('heartbeat send failed (socket gone)');
-			return;
-		}
-
-		// Piggyback a context refresh on the heartbeat: re-read the active
-		// project/document and push it only if it changed, so `daemon health`
-		// tracks a UI tab-switch within one interval without a per-action call.
-		void sendContext();
-	}, HEARTBEAT_INTERVAL_MS);
+// startHeartbeat just (re)arms the liveness state on a fresh connection — the
+// actual pinging is driven by the watchdog ticker (see startWatchdog), which is
+// worker-backed so it keeps firing even when EasyEDA's window is backgrounded and
+// the main thread's setInterval is frozen (the old nudge-to-reconnect bug).
+function startHeartbeat(_sessionId: number): void {
+	heartbeatPending = false;
+	missedPongs = 0;
 }
 
 function stopHeartbeat(): void {
-	if (heartbeatTimer) {
-		clearInterval(heartbeatTimer);
-		heartbeatTimer = null;
-	}
 	heartbeatPending = false;
 	missedPongs = 0;
+}
+
+// heartbeatTick runs one liveness round on the live connection: count a miss if
+// the previous ping is still unanswered, reconnect after MAX_MISSED_PONGS, else
+// send the next ping (+ piggyback a context refresh). Called by the watchdog.
+function heartbeatTick(): void {
+	if (!handshakeVerified) {
+		return;
+	}
+	const reconnectNow = (reason: string): void => {
+		diag(`${reason} -> reconnect`);
+		cancelConnectionFlow();
+		void scanAndConnect();
+	};
+
+	// Liveness check BEFORE sending the next ping: a still-pending ping is a miss.
+	// Only reconnect after MAX_MISSED_PONGS in a row — one lagged pong isn't death.
+	if (heartbeatPending) {
+		missedPongs += 1;
+		if (missedPongs >= MAX_MISSED_PONGS) {
+			reconnectNow(`liveness lost: ${missedPongs} pings unanswered`);
+			return;
+		}
+	}
+	else {
+		missedPongs = 0;
+	}
+
+	heartbeatPending = true;
+	heartbeatSeq += 1;
+	try {
+		// Send directly (not via sendFrame) so a throw — the socket is gone —
+		// becomes an immediate reconnect signal.
+		eda.sys_WebSocket.send(WS_ID, JSON.stringify({ type: 'ping', id: `hb-${heartbeatSeq}` }));
+	}
+	catch {
+		reconnectNow('heartbeat send failed (socket gone)');
+		return;
+	}
+	void sendContext();
+}
+
+// ─── Watchdog ─────────────────────────────────────────────────────────
+// One always-on ticker drives BOTH the heartbeat (when connected) and reconnect
+// retries (when not). It runs in a Web Worker because a worker's timer keeps
+// firing while the EasyEDA window is backgrounded, whereas the main thread's
+// setInterval is throttled/frozen — that freeze was why a daemon restart used to
+// need a manual window "nudge" to reconnect. If the webview blocks workers
+// (CSP/blob), we fall back to a main-thread interval plus focus/online listeners.
+
+function autoConnectEnabled(): boolean {
+	return eda.sys_Storage.getExtensionUserConfig(STORAGE_KEY_AUTO_CONNECT) !== false;
+}
+
+function watchdogTick(): void {
+	if (isConnecting) {
+		return; // a connect attempt is already in flight
+	}
+	if (handshakeVerified) {
+		heartbeatTick();
+	}
+	else if (!suspended && autoConnectEnabled()) {
+		void scanAndConnect();
+	}
+}
+
+function startWatchdog(): void {
+	if (watchdogStarted) {
+		return;
+	}
+	watchdogStarted = true;
+	const tick = (): void => {
+		try {
+			watchdogTick();
+		}
+		catch { /* never let a tick throw kill the loop */ }
+	};
+	try {
+		// Inline blob worker: it only owns a timer and posts a tick — all eda.* work
+		// stays on the main thread (eda.* is main-thread only).
+		const code = `setInterval(function(){postMessage(0);}, ${HEARTBEAT_INTERVAL_MS});`;
+		const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+		watchdogWorker = new Worker(url);
+		watchdogWorker.onmessage = tick;
+		diag('watchdog: worker ticker started');
+	}
+	catch {
+		diag('watchdog: worker unavailable — main-thread interval (throttled when backgrounded)');
+		setInterval(tick, HEARTBEAT_INTERVAL_MS);
+	}
+	// Belt-and-suspenders: recover immediately on window focus / network up — the
+	// main path for the setInterval-fallback case, and faster recovery generally.
+	const wake = (): void => {
+		if (!handshakeVerified && !isConnecting && !suspended && autoConnectEnabled()) {
+			void scanAndConnect();
+		}
+	};
+	try {
+		globalThis.addEventListener?.('focus', wake);
+		globalThis.addEventListener?.('online', wake);
+		globalThis.addEventListener?.('visibilitychange', wake);
+	}
+	catch { /* no addEventListener in this host — ignore */ }
 }
 
 // ─── Retry ────────────────────────────────────────────────────────────

@@ -6,6 +6,17 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.28] - 2026-06-30
+### Fixed
+- **Auto-reconnect no longer needs a window "nudge".** The heartbeat/reconnect loop
+  ran on a main-thread `setInterval`, which EasyEDA's webview freezes when the
+  window is backgrounded — so after a daemon restart (e.g. `make dev` rebuild) the
+  connector stayed dead until the user focused the window. A new **watchdog** drives
+  both the heartbeat and reconnect from a **Web Worker** timer (which keeps firing
+  while backgrounded); it falls back to a main-thread interval + `focus`/`online`
+  listeners if the webview blocks workers. An explicit Stop now sets a `suspended`
+  flag so the always-on watchdog doesn't reconnect behind the user's back.
+
 ## [0.5.27] - 2026-06-30
 ### Added
 - **Net-bound filled region** (task #17): `pcb.fill.create` / `pcb.fill.list` /
