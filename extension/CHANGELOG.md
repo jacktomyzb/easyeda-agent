@@ -6,6 +6,17 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.26] - 2026-06-30
+### Added
+- **DSN keep-out injection** (task #17): `pcb.export.dsn` now splices keep-out
+  regions (禁止区域) back into the exported DSN by default — `getDsnFile` DROPS
+  `pcb_PrimitiveRegion`, so a raw export had `keepout = 0` and Freerouting would
+  route under the antenna. Each routing region (no-wires/no-fills/no-pours) becomes
+  a Specctra `(keepout (polygon …))` in the `(structure)` section. Transform is a
+  verified pure translation (1:1 mil, no flip; offset = DSN-boundary-min −
+  outline-bbox-min). Result reports `keepouts = N`. CLI `easyeda pcb export-dsn`
+  gains `--raw` for the unmodified export.
+
 ## [0.5.25] - 2026-06-30
 ### Added
 - **PCB keep-out / rule regions** (task #11): `pcb.region.create` / `pcb.region.list`

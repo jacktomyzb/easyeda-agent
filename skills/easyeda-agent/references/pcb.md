@@ -124,9 +124,10 @@ convention as pour (connector builds the polygon).
   removes components, NOT regions — use `region delete`).
 
 > **ESP32-S3-WROOM-1 ships with NO antenna keep-out** — you must create it (test-case
-> P1). **`getDsnFile` drops regions** (DSN `(structure)` keeps boundary + rules only),
-> so handing keep-out to external Freerouting needs a separate DSN-injection step
-> (follow-up task) — the heuristic `route-short` + keep-out-respecting `pour` don't.
+> P1). **`getDsnFile` drops regions**, but `pcb export-dsn` now **re-injects** them as
+> Specctra `(keepout (polygon …))` by default (reports `keepouts=N`; `--raw` to skip),
+> so external Freerouting no longer routes under the antenna. Transform is a verified
+> pure translation (1:1 mil, no flip).
 
 > **Routing boundary (load-bearing — see `docs/ecosystem-survey.md` §7):** EasyEDA's
 > interactive 布线 menu (single/multi/differential **routing**, stretch, optimize,
@@ -162,10 +163,9 @@ v1 (`route-short` / `pour`) is mechanically correct but coarse. Planned quality 
   keep-out `pcb region` (which has NO net param). A net-bound **填充区域** (e.g. a 3V3 power-plane
   patch, RF ground, thermal copper) needs a different path — likely `pcb pour` on an odd polygon, or
   `eda.pcb_Net.convertToRegion`. Plan: a `pcb fill` action once the net-binding API is pinned down. (task #11)
-- **DSN keep-out injection (Freerouting maze tier)** — `getDsnFile` drops `pcb_PrimitiveRegion`
-  keep-out, so an exported DSN has `keepout = 0` → Freerouting would route under the antenna.
-  Plan: after `pcb export-dsn`, read regions and inject `(keepout (polygon …))` into the DSN
-  `(structure)` section (needs a real DSN in hand to calibrate unit/coordinate transform). (follow-up)
+- ✅ **DSN keep-out injection** (task #17, done) — `pcb export-dsn` re-injects `pcb_PrimitiveRegion`
+  keep-out as `(keepout (polygon …))` into the DSN `(structure)` (getDsnFile drops them). Default on;
+  `--raw` skips. End-to-end Freerouting *honor* check is part of the #5 maze-tier toolchain.
 
 ### Board outline (板框)
 

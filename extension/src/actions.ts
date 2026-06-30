@@ -2630,9 +2630,116 @@ const pcbImportChanges: Handler = async (payload) => {
 // engine and import the routed SES. We mirror that with typed actions: export the
 // DSN, hand it to easyeda-pcb-router (Freerouting headless), import the SES.
 
-/** Export the PCB as a Specctra DSN (the autorouter input). Read-only. */
+// ── DSN keep-out injection ───────────────────────────────────────────
+// `getDsnFile` drops `pcb_PrimitiveRegion` keep-out (the DSN (structure) keeps
+// only boundary + rules + layers), so an exported DSN has zero keepout and an
+// external router (Freerouting) would route under the antenna. We splice the
+// regions back in as Specctra `(keepout (polygon …))`.
+//
+// Transform EasyEDA→DSN is a PURE TRANSLATION, 1:1 mil, no flip (verified against
+// pad coordinates): dsn = easyeda + offset, where offset = DSN-boundary-min −
+// outline-bbox-min. (The bbox includes the outline's half-linewidth, so the offset
+// can be off by ≤ that — negligible for a keep-out, which carries margin anyway.)
+
+const DSN_RESOLUTION = 1000; // (resolution mil 1000) → keep ≤3 decimals
+
+function dsnRound(v: number): number {
+	return Math.round(v * DSN_RESOLUTION) / DSN_RESOLUTION;
+}
+
+// vertsFromPolygonSource walks a [x0,y0,'L',x1,y1,…] source array, collecting the
+// number pairs and skipping command tokens ('L'/'A'/…). Arc commands degrade to
+// their control points (fine for a margin-carrying keep-out).
+function vertsFromPolygonSource(src: unknown): Array<[number, number]> {
+	if (!Array.isArray(src)) return [];
+	const nums: number[] = [];
+	for (const t of src) if (typeof t === 'number') nums.push(t);
+	const verts: Array<[number, number]> = [];
+	for (let i = 0; i + 1 < nums.length; i += 2) verts.push([nums[i], nums[i + 1]]);
+	return verts;
+}
+
+// parseDsnBoundaryMin reads the min corner of `(boundary (path <layer> <w> x y …))`.
+function parseDsnBoundaryMin(dsn: string): { x: number; y: number } | null {
+	const m = dsn.match(/\(\s*boundary\s*\(\s*path\s+\S+\s+[\d.eE+-]+((?:\s+[\d.eE+-]+)+)\s*\)/);
+	if (!m) return null;
+	const nums = m[1].trim().split(/\s+/).map(Number).filter(n => !Number.isNaN(n));
+	let minX = Infinity, minY = Infinity;
+	for (let i = 0; i + 1 < nums.length; i += 2) {
+		minX = Math.min(minX, nums[i]);
+		minY = Math.min(minY, nums[i + 1]);
+	}
+	return Number.isFinite(minX) && Number.isFinite(minY) ? { x: minX, y: minY } : null;
+}
+
+function dsnLayerName(layer: number): string {
+	if (layer === 1) return 'TopLayer';
+	if (layer === 2) return 'BottomLayer';
+	return 'signal'; // MULTI / inner → all signal layers
+}
+
+// spliceIntoStructure inserts `block` just before the matching close paren of the
+// top-level `(structure …)` form.
+function spliceIntoStructure(dsn: string, block: string): string {
+	const start = dsn.indexOf('(structure');
+	if (start < 0) return dsn;
+	let depth = 0;
+	for (let i = start; i < dsn.length; i++) {
+		if (dsn[i] === '(') depth++;
+		else if (dsn[i] === ')') {
+			depth--;
+			if (depth === 0) return dsn.slice(0, i) + block + '\n  ' + dsn.slice(i);
+		}
+	}
+	return dsn;
+}
+
+// injectRegionKeepouts splices every keep-out region (one carrying no-wires/
+// no-pours/no-fills — the rules that matter to a router) into the DSN. Pure
+// placement regions (no-components only) are skipped (autorouters don't place).
+async function injectRegionKeepouts(dsn: string): Promise<{ text: string; count: number }> {
+	const regions = await eda.pcb_PrimitiveRegion.getAll();
+	if (!regions || !regions.length) return { text: dsn, count: 0 };
+
+	const boundaryMin = parseDsnBoundaryMin(dsn);
+	let bboxMin = { x: 0, y: 0 };
+	try {
+		const polys = await eda.pcb_PrimitivePolyline.getAll(undefined, BOARD_OUTLINE_LAYER);
+		if (polys.length) {
+			const bb = await eda.pcb_Primitive.getPrimitivesBBox(polys.map(p => p.getState_PrimitiveId()));
+			if (bb) bboxMin = { x: bb.minX, y: bb.minY };
+		}
+	}
+	catch { /* outline bbox best-effort → offset falls back to boundary min */ }
+	const offX = (boundaryMin ? boundaryMin.x : 0) - bboxMin.x;
+	const offY = (boundaryMin ? boundaryMin.y : 0) - bboxMin.y;
+
+	const routingRules = new Set([5, 6, 7]); // no-wires / no-fills / no-pours
+	const clauses: string[] = [];
+	for (const r of regions) {
+		const rules = (r.getState_RuleType() ?? []) as unknown as number[];
+		if (!rules.some(v => routingRules.has(v))) continue; // placement-only → skip
+		const cp = r.getState_ComplexPolygon() as unknown as { getSource?: () => unknown; polygon?: unknown };
+		const src = typeof cp?.getSource === 'function' ? cp.getSource() : cp?.polygon;
+		const verts = vertsFromPolygonSource(src);
+		if (verts.length < 3) continue;
+		const coords = verts.map(([x, y]) => `${dsnRound(x + offX)} ${dsnRound(y + offY)}`).join(' ');
+		const name = r.getState_RegionName() || `region_keepout_${clauses.length + 1}`;
+		clauses.push(`    (keepout "${name}" (polygon ${dsnLayerName(r.getState_Layer())} 0 ${coords}))`);
+	}
+	if (!clauses.length) return { text: dsn, count: 0 };
+	return { text: spliceIntoStructure(dsn, '\n' + clauses.join('\n')), count: clauses.length };
+}
+
+/**
+ * Export the PCB as a Specctra DSN (the autorouter input). Read-only. By default
+ * splices `pcb_PrimitiveRegion` keep-out back into the DSN (`getDsnFile` drops it,
+ * so the router would otherwise route under the antenna) — pass
+ * `injectKeepout:false` for the raw EasyEDA export.
+ */
 const pcbExportDsn: Handler = async (payload) => {
 	const fileName = optionalString(payload, 'fileName') ?? 'design.dsn';
+	const inject = payload.injectKeepout !== false; // default true
 	let file;
 	try {
 		file = await eda.pcb_ManufactureData.getDsnFile(fileName);
@@ -2646,8 +2753,20 @@ const pcbExportDsn: Handler = async (payload) => {
 			'DSN export returned no file — the PCB may be empty or have no nets (run pcb.import_changes first).',
 		);
 	}
-	const artifact = await blobToArtifact(file, 'pcb_dsn', file.name || fileName, 'application/octet-stream');
-	return { result: { artifactId: artifact.id, fileName: file.name || fileName, size: file.size }, artifacts: [artifact] };
+
+	let text = await file.text();
+	let keepouts = 0;
+	if (inject) {
+		try {
+			const injected = await injectRegionKeepouts(text);
+			text = injected.text;
+			keepouts = injected.count;
+		}
+		catch { /* injection is best-effort — never break the export over it */ }
+	}
+	const outFile = new File([text], file.name || fileName, { type: 'text/plain' });
+	const artifact = await blobToArtifact(outFile, 'pcb_dsn', file.name || fileName, 'text/plain');
+	return { result: { artifactId: artifact.id, fileName: file.name || fileName, size: outFile.size, keepouts }, artifacts: [artifact] };
 };
 
 /**

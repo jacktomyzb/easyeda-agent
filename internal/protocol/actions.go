@@ -642,9 +642,9 @@ func AllActions() []ActionSpec {
 			Domain:      DomainPcb,
 			Phase:       2,
 			NeedsWindow: true,
-			Description: "Export the active PCB as a Specctra DSN file (eda.pcb_ManufactureData.getDsnFile) — the input an external autorouter (Freerouting / easyeda-pcb-router) consumes. Read-only. Returns null if the PCB is empty or has no nets (run pcb.import_changes first). The autoroute round-trip: export.dsn → route externally → import_autoroute the SES.",
-			Inputs:      []string{"fileName optional"},
-			Outputs:     []string{"artifact id", "file path", "file name", "size"},
+			Description: "Export the active PCB as a Specctra DSN file (eda.pcb_ManufactureData.getDsnFile) — the input an external autorouter (Freerouting / easyeda-pcb-router) consumes. Read-only. Returns null if the PCB is empty or has no nets (run pcb.import_changes first). By DEFAULT it injects keep-out regions (禁止区域) into the DSN — getDsnFile DROPS pcb_PrimitiveRegion, so a raw export has 0 keepout and the router would route under the antenna; the injected DSN reports keepouts=N. Pass injectKeepout=false for the raw export. The autoroute round-trip: export.dsn → route externally → import_autoroute the SES.",
+			Inputs:      []string{"fileName optional", "injectKeepout optional (default true)"},
+			Outputs:     []string{"artifact id", "file path", "file name", "size", "keepouts (injected count)"},
 		},
 		{
 			Name:        "pcb.import_autoroute",

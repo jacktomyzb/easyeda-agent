@@ -742,21 +742,33 @@ plane. fill = solid (default) | grid | grid45.`,
 	// undefined this build); these wrap the @beta getDsnFile / importAutoRoute*.
 	{
 		var fileName string
+		var noKeepout bool
 		c := &cobra.Command{
 			Use:   "export-dsn",
 			Short: "Export the active PCB as a Specctra DSN (autorouter input)",
-			Args:  cobra.NoArgs,
+			Long: `Export the active PCB as a Specctra DSN (the external-autorouter input).
+
+By default it splices keep-out regions (禁止区域) back into the DSN: EasyEDA's
+getDsnFile DROPS pcb_PrimitiveRegion, so a raw export has zero keepout and an
+external router (Freerouting) would route under the antenna. The result reports
+` + "`keepouts`" + ` = how many were injected. Pass --raw for the unmodified EasyEDA export.`,
+			Args: cobra.NoArgs,
 			Example: `  easyeda pcb export-dsn
-  easyeda pcb export-dsn --name board.dsn`,
+  easyeda pcb export-dsn --name board.dsn
+  easyeda pcb export-dsn --raw          # unmodified EasyEDA export (no keepout)`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				payload := map[string]any{}
 				if fileName != "" {
 					payload["fileName"] = fileName
 				}
+				if noKeepout {
+					payload["injectKeepout"] = false
+				}
 				return dispatch(cfg, "pcb.export.dsn", window, payload, stdout, stderr)
 			},
 		}
 		c.Flags().StringVar(&fileName, "name", "", "DSN file name (default design.dsn)")
+		c.Flags().BoolVar(&noKeepout, "raw", false, "raw EasyEDA export — do NOT inject keep-out regions")
 		pcb.AddCommand(c)
 	}
 	{
