@@ -23,18 +23,19 @@ type pcbRules struct {
 	source           string  // "live" | "fallback"
 }
 
-// defaultPcbRules is the JLCPCB fabrication baseline — a sane seed when the live
-// rule is missing or a path can't be read. Values track the canonical reference
-// skills/easyeda-agent/references/fab-rules-jlcpcb.json ("recommended" column) and
-// converge with ceshi's live rule (clear 6 / signal 10 / power 20 / min 5 /
-// via 0.3–0.6mm / copper-to-edge 8mil). NOTE: power is DELIBERATELY wider than
-// signal (current capacity) — the board's DRC rule only gives a uniform default +
-// a minimum; the signal/power split is a design convention from the fab reference,
-// not a manufacturing rule.
+// defaultPcbRules is the daemon's fallback baseline — a sane seed when the live
+// rule is missing or a path can't be read. Values are the DOUBLE-LAYER row of the
+// canonical reference skills/easyeda-agent/references/fab-rules-jlcpcb.json
+// ("boardTypeRulesLive", a real JLCEDA export): clear 6 (track↔pad) / signal 10 /
+// min 5 / via 0.3mm(12mil)/0.6mm(24mil) / copper-to-edge 10 — the real 2-layer
+// default, verified to match ceshi's live rule. NOTE: power is DELIBERATELY wider
+// than signal (current capacity) — the board rule only gives a uniform default +
+// a minimum; the signal/power split is a design convention (fab reference), not a
+// manufacturing rule.
 func defaultPcbRules() pcbRules {
 	return pcbRules{
 		clearanceMil: 6, trackWidthMil: 10, powerWidthMil: 20, trackWidthMinMil: 5,
-		viaDrillMil: 12, viaDiameterMil: 24, copperToEdgeMil: 8, source: "fallback",
+		viaDrillMil: 12, viaDiameterMil: 24, copperToEdgeMil: 10, source: "fallback",
 	}
 }
 
