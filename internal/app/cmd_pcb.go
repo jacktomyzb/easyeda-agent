@@ -1737,6 +1737,46 @@ x0,y0,x1,y1, or --ref <designator> (+ --margin to expand). Inspect / remove with
 		pcb.AddCommand(c)
 	}
 
+	// ── layout-lint (布局质量 + 可布性预测) ──────────────────────────────────
+	// PCB sibling of `sch layout-lint`: overlap / off-board / tight-spacing PLUS a
+	// routability score from the ratsnest (signal-net MST length + cross-net
+	// crossings). Run BEFORE routing to catch a placement that won't route; exits
+	// non-zero on overlap/off-board so it can gate the flow. Core in pcb_layoutlint.go.
+	{
+		var minGap float64
+		var asJSON bool
+		c := &cobra.Command{
+			Use:   "layout-lint",
+			Short: "Score PCB placement quality + predict routability (ratsnest crossings)",
+			Long: `Check the PCB placement and predict how hard it will be to route — run this
+BEFORE routing (or after auto-place) to catch a bad layout early.
+
+Pulls every footprint's rendered bbox + pads (pcb.components.list) and computes:
+
+  • overlap          — two footprint bboxes intersect                → ERROR (score 0)
+  • off-board        — a footprint extends outside the board outline → ERROR
+  • tight spacing    — bbox gap below --min-gap                      → WARN
+  • ratsnest         — per signal-net minimum spanning tree (power/GND
+                       excluded — they're poured, not routed)
+  • crossings        — cross-net ratline segments that geometrically
+                       cross → the single-layer routability killer   → WARN
+
+Yields a 0-100 routability score + verdict (easy/moderate/hard/very-hard). Fewer
+crossings + shorter ratsnest = more routable. --min-gap defaults to the board's
+live track-to-pad clearance. Exits non-zero on any overlap/off-board (gate-able).`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda pcb layout-lint
+  easyeda pcb layout-lint --json
+  easyeda pcb layout-lint --min-gap 8`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runPcbLayoutLint(cfg, window, minGap, asJSON, stdout, stderr)
+			},
+		}
+		c.Flags().Float64Var(&minGap, "min-gap", 0, "min gap between footprint bboxes in mil (closer = WARN; default = board clearance)")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
+		pcb.AddCommand(c)
+	}
+
 	return pcb
 }
 
