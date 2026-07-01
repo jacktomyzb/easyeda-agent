@@ -1365,7 +1365,7 @@ This is a SEED, not a final layout — verify with 'pcb drc'.
 	// Short-trace self-routing (daemon-side; see pcb_shortroute.go).
 	{
 		var maxLen, width, signalWidth, powerWidth, roundRadius float64
-		var dryRun, routeGnd bool
+		var dryRun, routeGnd, noAvoid bool
 		var corner string
 		c := &cobra.Command{
 			Use:   "route-short",
@@ -1376,8 +1376,11 @@ Per net it builds a minimum spanning tree over the pads and routes each hop that
 is short enough (<= --max-len, Manhattan) as an L-shaped track on the pads'
 shared layer. Skips: GND (poured, unless --route-gnd), already-routed nets,
 cross-layer hops (need a via), and over-long hops (left for the maze tier).
-No obstacle avoidance in v1 — run AFTER 'pcb auto-place' (hops are then short and
-clear) and verify with 'pcb drc'.
+Obstacle-aware (v2): each hop picks the L orientation (horizontal- vs vertical-
+first) that crosses the fewest already-placed other-net tracks + other-net pads,
+which removes most of the naive tangle; --no-avoid restores the v1 horizontal-
+first behavior. Still NOT a maze router (no push-shove / vias / rip-up) — run
+AFTER 'pcb auto-place' (hops are then short and clear) and verify with 'pcb drc'.
 
 Track width is by net class: power/ground nets (VCC/VDD/3V3/GND…) get --width-power
 (default 20 mil), signals get --width-signal (default 10 mil). A single --width
@@ -1434,6 +1437,8 @@ emits a chord-approximated fillet (native arcs do not commit on this build).
 				}
 				opt.corner = corner
 				opt.skipGnd = !routeGnd
+				opt.avoid = !noAvoid
+				opt.clearance = rules.clearanceMil
 				segs, diags := planShortRoutes(comps, routed, opt)
 
 				// 3. Draw (unless --dry-run), one line.create per segment.
@@ -1459,6 +1464,7 @@ emits a chord-approximated fillet (native arcs do not commit on this build).
 					"dryRun":   dryRun,
 					"segments": len(segs),
 					"drawn":    drawn,
+					"avoid":    opt.avoid,
 					"rules":    map[string]any{"source": rules.source, "clearanceMil": rules.clearanceMil, "trackWidthMil": rules.trackWidthMil, "signalWidth": opt.signalWidth, "powerWidth": opt.powerWidth},
 					"routes":   segs,
 					"skipped":  diags,
@@ -1475,6 +1481,7 @@ emits a chord-approximated fillet (native arcs do not commit on this build).
 		c.Flags().Float64Var(&powerWidth, "width-power", 0, "power/ground-net track width (mil, default 20)")
 		c.Flags().StringVar(&corner, "corner", "90", "corner style: 90 (L), 45 (chamfer), round (chord fillet)")
 		c.Flags().Float64Var(&roundRadius, "round-radius", 0, "max fillet radius for --corner round (mil, default 20)")
+		c.Flags().BoolVar(&noAvoid, "no-avoid", false, "disable obstacle-aware L-orientation (v1 naive horizontal-first)")
 		c.Flags().BoolVar(&routeGnd, "route-gnd", false, "also route GND (default skip — GND is poured)")
 		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the routing plan without drawing anything")
 		pcb.AddCommand(c)

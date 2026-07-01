@@ -57,12 +57,15 @@ type rtOptions struct {
 	skipGnd     bool    // skip GND nets (normally a copper pour, not routed)
 	corner      string  // corner style: "90" (L), "45" (chamfer), "round" (chord fillet)
 	roundRadius float64 // max fillet radius for corner=="round" (mil)
+	avoid       bool    // obstacle-aware L-orientation selection (#23)
+	clearance   float64 // safe-spacing clearance (mil) — a track must stay this far from other-net pads
 }
 
 func defaultRtOptions() rtOptions {
 	return rtOptions{
 		maxLen: 1000, width: 0, signalWidth: 10, powerWidth: 20,
 		skipGnd: true, corner: "90", roundRadius: 20,
+		avoid: true, clearance: 6,
 	}
 }
 
@@ -85,9 +88,11 @@ func (o rtOptions) widthFor(net string) float64 {
 // diagnostics for every net/hop deliberately left unrouted.
 func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOptions) ([]rtSeg, []rtNetDiag) {
 	byNet := map[string][]rtPad{}
+	var obPads []obPad // every pad (with net) = an obstacle for other nets' tracks
 	for _, c := range comps {
 		for _, pd := range c.pads {
 			net := strings.TrimSpace(pd.net)
+			obPads = append(obPads, obPad{net: net, x: pd.x, y: pd.y})
 			if net == "" {
 				continue
 			}
@@ -128,7 +133,11 @@ func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOption
 				diags = append(diags, rtNetDiag{net, fmt.Sprintf("%s too long (%.0f > %.0f mil) — maze tier", hop, mlen, opt.maxLen)})
 				continue
 			}
-			segs = append(segs, routeHop(net, a, b, w, opt)...)
+			// Obstacle-aware: pick the L orientation that hits the fewest other-net
+			// obstacles (already-placed segments + other-net pads). Falls back to the
+			// naive H-first L when --no-avoid or when nothing is in the way.
+			hopSegs := routeWithAvoid(net, a, b, w, opt, segs, obPads)
+			segs = append(segs, hopSegs...)
 		}
 	}
 	return segs, diags
@@ -139,17 +148,17 @@ func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOption
 // approximated quarter-circle fillet (native arcs do not commit on this build, so
 // the curve is emitted as short straight segments). Aligned pads always collapse
 // to a single straight run regardless of style.
-func routeHop(net string, a, b rtPad, w float64, opt rtOptions) []rtSeg {
+func routeHop(net string, a, b rtPad, w float64, opt rtOptions, hFirst bool) []rtSeg {
 	if a.x == b.x || a.y == b.y {
 		return appendSeg(nil, net, a.x, a.y, b.x, b.y, a.layer, w)
 	}
 	switch opt.corner {
 	case "45":
-		return lShape45(net, a, b, w)
+		return lShape45(net, a, b, w, hFirst)
 	case "round":
-		return lShapeRound(net, a, b, w, opt.roundRadius)
+		return lShapeRound(net, a, b, w, opt.roundRadius, hFirst)
 	default:
-		return lShape90(net, a, b, w)
+		return lShape90(net, a, b, w, hFirst)
 	}
 }
 
@@ -168,23 +177,34 @@ func sign(v float64) float64 {
 	return 1
 }
 
-// lShape90 is the classic Manhattan L: horizontal-first with a 90° corner at
-// (b.x, a.y).
-func lShape90(net string, a, b rtPad, w float64) []rtSeg {
+// lShape90 is the classic Manhattan L. hFirst → horizontal-first, 90° corner at
+// (b.x, a.y); !hFirst → vertical-first, corner at (a.x, b.y). The orientation is
+// what obstacle-aware routing picks between (routeWithAvoid).
+func lShape90(net string, a, b rtPad, w float64, hFirst bool) []rtSeg {
 	cx, cy := b.x, a.y
+	if !hFirst {
+		cx, cy = a.x, b.y
+	}
 	out := appendSeg(nil, net, a.x, a.y, cx, cy, a.layer, w)
 	return appendSeg(out, net, cx, cy, b.x, b.y, a.layer, w)
 }
 
-// lShape45 cuts the corner with a 45° diagonal: a horizontal run, a diagonal that
-// covers min(|dx|,|dy|) on each axis, then a vertical run. The straight runs
-// collapse to zero (and drop) when |dx|==|dy| → a single clean diagonal.
-func lShape45(net string, a, b rtPad, w float64) []rtSeg {
+// lShape45 cuts the corner with a 45° diagonal: a straight run, a diagonal that
+// covers min(|dx|,|dy|) on each axis, then the other straight run. hFirst runs
+// horizontal-first; !hFirst vertical-first. Straight runs collapse to zero (and
+// drop) when |dx|==|dy| → a single clean diagonal.
+func lShape45(net string, a, b rtPad, w float64, hFirst bool) []rtSeg {
 	dx, dy := b.x-a.x, b.y-a.y
 	d := math.Min(math.Abs(dx), math.Abs(dy))
 	sx, sy := sign(dx), sign(dy)
-	p1x, p1y := b.x-sx*d, a.y // end of the horizontal run
-	p2x, p2y := b.x, a.y+sy*d // end of the 45° diagonal
+	var p1x, p1y, p2x, p2y float64
+	if hFirst {
+		p1x, p1y = b.x-sx*d, a.y // end of the horizontal run
+		p2x, p2y = b.x, a.y+sy*d // end of the 45° diagonal
+	} else {
+		p1x, p1y = a.x, b.y-sy*d // end of the vertical run
+		p2x, p2y = a.x+sx*d, b.y // end of the 45° diagonal
+	}
 	out := appendSeg(nil, net, a.x, a.y, p1x, p1y, a.layer, w)
 	out = appendSeg(out, net, p1x, p1y, p2x, p2y, a.layer, w)
 	return appendSeg(out, net, p2x, p2y, b.x, b.y, a.layer, w)
@@ -192,20 +212,28 @@ func lShape45(net string, a, b rtPad, w float64) []rtSeg {
 
 // lShapeRound rounds the 90° corner with a quarter-circle fillet of radius
 // min(|dx|, |dy|, maxR), approximated by roundChords straight chords (native arcs
-// do not commit on this build). Straight runs lead in/out of the fillet.
+// do not commit on this build). hFirst → corner at (b.x,a.y); !hFirst → (a.x,b.y).
 const roundChords = 6
 
-func lShapeRound(net string, a, b rtPad, w, maxR float64) []rtSeg {
+func lShapeRound(net string, a, b rtPad, w, maxR float64, hFirst bool) []rtSeg {
 	dx, dy := b.x-a.x, b.y-a.y
-	cx, cy := b.x, a.y // the sharp corner we are rounding
+	sx, sy := sign(dx), sign(dy)
 	r := math.Min(math.Abs(dx), math.Abs(dy))
 	if maxR > 0 && maxR < r {
 		r = maxR
 	}
-	sx, sy := sign(dx), sign(dy)
-	t1x, t1y := cx-sx*r, cy    // tangent on the horizontal leg
-	t2x, t2y := cx, cy+sy*r    // tangent on the vertical leg
-	ox, oy := cx-sx*r, cy+sy*r // arc center (equidistant r from both tangents)
+	var cx, cy, t1x, t1y, t2x, t2y, ox, oy float64
+	if hFirst {
+		cx, cy = b.x, a.y          // the sharp corner we are rounding
+		t1x, t1y = cx-sx*r, cy     // tangent on the horizontal (incoming) leg
+		t2x, t2y = cx, cy+sy*r     // tangent on the vertical (outgoing) leg
+		ox, oy = cx-sx*r, cy+sy*r  // arc center (equidistant r from both tangents)
+	} else {
+		cx, cy = a.x, b.y          // vertical-first corner
+		t1x, t1y = cx, cy-sy*r     // tangent on the vertical (incoming) leg
+		t2x, t2y = cx+sx*r, cy     // tangent on the horizontal (outgoing) leg
+		ox, oy = cx+sx*r, cy-sy*r
+	}
 
 	out := appendSeg(nil, net, a.x, a.y, t1x, t1y, a.layer, w) // straight in
 	ang1 := math.Atan2(t1y-oy, t1x-ox)
