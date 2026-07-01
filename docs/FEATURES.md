@@ -9,13 +9,22 @@ planned. Ground truth for the action catalog is `make actions`
 > [`ecosystem-survey.md`](ecosystem-survey.md) 系统对比了官方开源扩展用到的 API、我们的盲区,
 > 以及一份带优先级的可吸收功能清单(A1–A9),是下一阶段 roadmap 的主要输入。
 
-**72 typed actions** total — 30 `pcb`, 25 `schematic`, 6 `document`, 6 `board`,
-2 `artifact` (netlist/BOM export), and one each in `system`, `project`, `debug`.
-(PCB now includes routing R1/R2: copper pour create/list/delete/rebuild, track/via
-list, rip-up, clear-routing — see `ecosystem-survey.md` §7.)
+**85 typed actions** total — 42 `pcb`, 28 `schematic`, 6 `board`, 4 `view`,
+2 `document`, and one each in `system`, `project`, `debug`.
 All but `system.health` are dispatched to the connector; `system.health` is
 answered by the daemon itself (daemon/connector liveness, no window required).
 (Run `make actions` for the authoritative list — this prose count can lag.)
+
+> **2026-07-01 — PCB automation pass (tasks #21–#32).** Added, each real-machine
+> verified on the ESP32 regression board: rule-aware `route-short`/`auto-place`/`pour`
+> (reads the live DRC rule); `pcb outline-fit`/`outline-round`; `pcb layout-lint`
+> (routability score); `pcb power-planes` (4-layer GND/power inner planes + via-stitch
+> — drove No-Connection to 0); `pcb stackup` (layer count + inner plane type);
+> `pcb region`/`fill`/`slot` (antenna keep-out & 挖槽); `pcb silk-align` (collision-aware
+> designators); a canonical **JLCPCB fab-rule reference** (real per-board-type exports);
+> and a connector **auto-reconnect wedge fix** (v0.5.31+). Confirmed platform walls:
+> teardrops, controlled-impedance, and the interactive routing menu have no `eda.*`
+> API. See the README "Capabilities" / "Not Yet Supported" sections.
 
 ---
 
