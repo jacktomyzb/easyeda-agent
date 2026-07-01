@@ -52,6 +52,14 @@ const HEARTBEAT_INTERVAL_MS = 3000;
 // after this many pings go unanswered in a row (~9s of true silence).
 const MAX_MISSED_PONGS = 3;
 const CONNECTION_TIMEOUT_MS = 1500;
+// A full 10-port scan (each up to CONNECTION_TIMEOUT_MS + REGISTER_DELAY_MS) settles
+// in well under 20s. If `isConnecting` stays true longer than this many watchdog
+// ticks, the flow is wedged (a session invalidated mid-scan, or a renderer that was
+// suspended while backgrounded, can leak isConnecting=true) — and a wedged
+// isConnecting freezes EVERY reconnect (watchdogTick, scanAndConnect, AND the wake
+// listeners all early-return on it), which is exactly the "only reopening the window
+// fixes it" bug. The watchdog force-resets past this bound.
+const STUCK_CONNECTING_TICKS = 8; // ~24s @ 3s/tick
 // Delay between close() and register() of the same WS id. close() is async and
 // exposes no completion callback; if we re-register before EasyEDA releases the
 // id, register() silently ignores the new url/callback (documented in
@@ -73,6 +81,10 @@ let watchdogWorker: Worker | null = null;
 let suspended = false;
 let heartbeatPending = false;
 let heartbeatSeq = 0;
+// Watchdog tick counter + the tick at which the current connect flow started, so a
+// wedged isConnecting can be detected and force-reset (see STUCK_CONNECTING_TICKS).
+let watchdogTicks = 0;
+let connectingSinceTick = 0;
 let missedPongs = 0;
 let retryCount = 0;
 let windowId: string | null = null;
@@ -495,8 +507,24 @@ function autoConnectEnabled(): boolean {
 }
 
 function watchdogTick(): void {
+	watchdogTicks += 1;
 	if (isConnecting) {
-		return; // a connect attempt is already in flight
+		// Self-heal: a connect flow that hasn't settled in a bounded number of ticks
+		// is wedged (leaked isConnecting=true). Force a clean reset so the fall-through
+		// scan below starts fresh — otherwise every reconnect path stays frozen and
+		// only reopening the window recovers.
+		if (watchdogTicks - connectingSinceTick >= STUCK_CONNECTING_TICKS) {
+			diag(`watchdog: connect flow stuck ${(watchdogTicks - connectingSinceTick) * HEARTBEAT_INTERVAL_MS / 1000}s -> force reset`);
+			cancelConnectionFlow(false); // isConnecting=false, new session, keep retryCount
+			connectingSinceTick = watchdogTicks; // give the fresh scan a full window
+			// fall through to start a new scan this tick
+		}
+		else {
+			return; // a connect attempt is legitimately in flight
+		}
+	}
+	else {
+		connectingSinceTick = watchdogTicks; // advance the baseline while idle/connected
 	}
 	if (handshakeVerified) {
 		heartbeatTick();
@@ -532,10 +560,17 @@ function startWatchdog(): void {
 	}
 	// Belt-and-suspenders: recover immediately on window focus / network up — the
 	// main path for the setInterval-fallback case, and faster recovery generally.
+	// When we come back to the foreground and are NOT verified, force a clean
+	// reconnect even if isConnecting looks true: a renderer suspended while
+	// backgrounded can leave a half-finished connect flow wedged, and the old
+	// `!isConnecting` guard made foregrounding a no-op — so only reopening the whole
+	// window recovered. cancelConnectionFlow() clears the wedge first.
 	const wake = (): void => {
-		if (!handshakeVerified && !isConnecting && !suspended && autoConnectEnabled()) {
-			void scanAndConnect();
+		if (handshakeVerified || suspended || !autoConnectEnabled()) {
+			return;
 		}
+		cancelConnectionFlow(false);
+		void scanAndConnect();
 	};
 	try {
 		globalThis.addEventListener?.('focus', wake);

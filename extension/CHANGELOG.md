@@ -5,6 +5,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); versions
 follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- **Connector auto-reconnect wedge (需要重开窗口才恢复)** — after a daemon restart
+  (dev hot-reload) or a long window-backgrounding, `isConnecting` could leak `true`
+  and freeze EVERY reconnect path at once: the watchdog tick, the port scan, AND the
+  focus/online/visibility wake listeners all early-returned on `isConnecting`, so
+  only fully reopening the EasyEDA window recovered. Now (1) the watchdog
+  force-resets a connect flow still unsettled after ~24s (`STUCK_CONNECTING_TICKS`),
+  and (2) the foreground/online wake forces a clean reconnect *through* a stuck
+  `isConnecting` (`cancelConnectionFlow()` first) instead of being blocked by it.
 
 ## [0.5.30] - 2026-06-30
 ### Added
