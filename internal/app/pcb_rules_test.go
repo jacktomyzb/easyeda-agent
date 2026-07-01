@@ -62,8 +62,8 @@ func TestParsePcbRules_Live(t *testing.T) {
 	if !near(r.trackWidthMinMil, 5) {
 		t.Errorf("trackWidthMin=%.2f, want ~5mil", r.trackWidthMinMil)
 	}
-	if !near(r.clearanceMil, 4) {
-		t.Errorf("clearance=%.2f, want ~4mil (track-track)", r.clearanceMil)
+	if !near(r.clearanceMil, 6) {
+		t.Errorf("clearance=%.2f, want ~6mil (track-to-pad, the binding rule)", r.clearanceMil)
 	}
 	if !near(r.viaDrillMil, 12) {
 		t.Errorf("viaDrill=%.2f, want ~12mil", r.viaDrillMil)

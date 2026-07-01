@@ -130,13 +130,29 @@ func parsePcbRules(result map[string]any) pcbRules {
 		}
 	}
 
-	// Clearance — Track↔Track from the Safe Spacing triangular matrix (content[0][0]).
+	// Clearance — from the Safe Spacing triangular matrix (row/col = object types:
+	// Track, SMD Pad, TH Pad, …). Use the BINDING routing clearance = the max of
+	// Track↔Track (content[0][0]) and Track↔SMD-Pad (content[1][0]); DRC checks
+	// tracks against OTHER nets' pads at the pad value (6mil on ceshi), which is the
+	// constraint that actually bites when routing near parts — not the smaller
+	// track-track value (4mil).
 	if content, ok := mnav(cfg, "Spacing", "Safe Spacing", "copperThickness1oz", "tables", "1", "content").([]any); ok && len(content) > 0 {
+		var clr float64
 		if row0, ok := content[0].([]any); ok && len(row0) > 0 {
-			if v, ok := asFloatOK(row0[0]); ok && v > 0 {
-				r.clearanceMil = round2(v * mmToMil)
-				got = true
+			if v, ok := asFloatOK(row0[0]); ok && v > clr {
+				clr = v
 			}
+		}
+		if len(content) > 1 {
+			if row1, ok := content[1].([]any); ok && len(row1) > 0 {
+				if v, ok := asFloatOK(row1[0]); ok && v > clr {
+					clr = v // Track↔SMD-Pad
+				}
+			}
+		}
+		if clr > 0 {
+			r.clearanceMil = round2(clr * mmToMil)
+			got = true
 		}
 	}
 
