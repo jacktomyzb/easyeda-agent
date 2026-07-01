@@ -422,6 +422,17 @@ func AllActions() []ActionSpec {
 			VerifyWith:  []string{"pcb.layers.list"},
 		},
 		{
+			Name:        "pcb.silk.align",
+			Domain:      DomainPcb,
+			Phase:       2,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Reposition every component's DESIGNATOR silkscreen to a clean, consistent spot — centered above (side=top, default) or below (side=bottom) the footprint bbox, `offset` mil away. The designator is a component-bound ATTRIBUTE (not a free string, so pcb_PrimitiveString is empty and the component has no per-designator position setter); reached via pcb_PrimitiveAttribute.getAllPrimitiveId(componentId) + .modify(id,{x,y}). Optional `refs` ([designators]) limits to specific parts. Returns aligned/skipped counts + details.",
+			Inputs:      []string{"offset optional (mil, default 40)", "side optional (top|bottom, default top)", "refs optional ([designators])"},
+			Outputs:     []string{"aligned", "skipped", "details", "skippedDetails"},
+			VerifyWith:  []string{"pcb.snapshot"},
+		},
+		{
 			Name:        "pcb.nets.list",
 			Domain:      DomainPcb,
 			Phase:       2,

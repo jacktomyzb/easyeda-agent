@@ -2481,6 +2481,86 @@ const pcbStackupSet: Handler = async (payload) => {
 	return { result: { copperLayerCount, setCount, modified, layers: allLayers } };
 };
 
+// pcb.silk.align — reposition every component's DESIGNATOR silkscreen to a clean,
+// consistent spot (centered above/below the footprint bbox, --offset mil away). The
+// designator is a component-bound attribute (not a free string) — reachable via
+// pcb_PrimitiveAttribute.getAllPrimitiveId(componentId) + .modify(id,{x,y}); no
+// per-designator-position setter exists on the component itself. Verified live: R2's
+// designator moved exactly to the requested (x,y).
+const pcbSilkAlign: Handler = async (payload) => {
+	const offset = optionalNumber(payload, 'offset') ?? 40;
+	const side = (optionalString(payload, 'side') ?? 'top').toLowerCase();
+	const refs = Array.isArray(payload.refs) ? (payload.refs as unknown[]).map(String) : null;
+
+	let comps;
+	try {
+		comps = await eda.pcb_PrimitiveComponent.getAll();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to list components for silk-align.');
+	}
+
+	const aligned: Array<Record<string, unknown>> = [];
+	const skipped: Array<Record<string, unknown>> = [];
+	for (const c of comps ?? []) {
+		const desig = c.getState_Designator?.() ?? '';
+		if (refs && !refs.includes(desig)) {
+			continue;
+		}
+		const cid = c.getState_PrimitiveId();
+
+		// Footprint bbox → center x + top/bottom edge for the target.
+		// (SDK return type is loose here; treat as an optional {minX,minY,maxX,maxY}.)
+		let bbox: { minX?: number; minY?: number; maxX?: number; maxY?: number } | undefined;
+		try {
+			bbox = await eda.pcb_Primitive.getPrimitivesBBox([cid]);
+		}
+		catch { /* fall back to the component anchor below */ }
+
+		// Find the Designator attribute among the component's attributes.
+		let desigAttrId: string | null = null;
+		try {
+			const attrIds = await eda.pcb_PrimitiveAttribute.getAllPrimitiveId(cid);
+			for (const id of attrIds ?? []) {
+				const a = await eda.pcb_PrimitiveAttribute.get(id);
+				if (!a) {
+					continue;
+				}
+				const key = String(a.getState_Key?.() ?? '').toLowerCase();
+				if (key.includes('desig') || a.getState_Value?.() === desig) {
+					desigAttrId = id;
+					break;
+				}
+			}
+		}
+		catch { /* handled as skip below */ }
+		if (!desigAttrId) {
+			skipped.push({ designator: desig, reason: 'no designator attribute found' });
+			continue;
+		}
+
+		let x = c.getState_X();
+		let y = c.getState_Y();
+		if (bbox && bbox.maxX != null && bbox.minX != null) {
+			x = (bbox.minX + bbox.maxX) / 2;
+			y = side === 'bottom' ? (bbox.minY ?? y) - offset : (bbox.maxY ?? y) + offset;
+		}
+		else {
+			y = side === 'bottom' ? y - offset : y + offset;
+		}
+
+		try {
+			const r = await eda.pcb_PrimitiveAttribute.modify(desigAttrId, { x, y });
+			aligned.push({ designator: desig, x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100, ok: !!r });
+		}
+		catch (err) {
+			skipped.push({ designator: desig, reason: `modify failed: ${String(err)}` });
+		}
+	}
+
+	return { result: { aligned: aligned.length, skipped: skipped.length, side, offset, details: aligned, skippedDetails: skipped } };
+};
+
 /**
  * List all nets on the active PCB. `IPCB_NetInfo` ({ net, color, length }) is a
  * plain data object and serializes directly.
@@ -4360,6 +4440,7 @@ const HANDLERS: Record<string, Handler> = {
 	'pcb.components.list': pcbComponentsList,
 	'pcb.layers.list': pcbLayersList,
 	'pcb.stackup.set': pcbStackupSet,
+	'pcb.silk.align': pcbSilkAlign,
 	'pcb.nets.list': pcbNetsList,
 	'pcb.report': pcbReport,
 	'pcb.board.info': pcbBoardInfo,

@@ -6,6 +6,11 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **`pcb.silk.align`** (task #30) — reposition each component's DESIGNATOR silkscreen
+  to a consistent spot (centered above/below the footprint bbox, `offset` mil). The
+  designator is a component-bound attribute (pcb_PrimitiveString is empty), reached
+  via `pcb_PrimitiveAttribute.getAllPrimitiveId(componentId)` + `.modify(id,{x,y})` —
+  the component has no per-designator position setter. CLI: `pcb silk-align`.
 - **`pcb.stackup.set`** (task #26) — configure the board stackup: set the copper
   layer count (2/4/6/…/32 via `setTheNumberOfCopperLayers`) and/or set inner layers'
   type SIGNAL↔PLANE (内电层, via `modifyLayer`). A PLANE inner layer gives GND/power

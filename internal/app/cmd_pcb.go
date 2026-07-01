@@ -1922,6 +1922,44 @@ pcb.outline.set takes a polygon. The board-outline layer renders → verify with
 		pcb.AddCommand(c)
 	}
 
+	// ── silk-align (丝印/位号对齐) ──────────────────────────────────────────
+	// pcb.silk.align — reposition each designator to a consistent spot above/below
+	// its footprint. Designators are component-bound attributes (pcb_PrimitiveAttribute).
+	{
+		var offset float64
+		var side string
+		var refs []string
+		c := &cobra.Command{
+			Use:   "silk-align",
+			Short: "Align component designators (位号) to a consistent spot above/below each footprint",
+			Long: `Reposition every component's DESIGNATOR silkscreen to a clean, consistent place —
+centered above (--side top, default) or below (--side bottom) the footprint bbox,
+--offset mil away. Cleans up the scattered/overlapping designators a fresh import
+leaves. --refs limits to specific parts. Verify with 'pcb snapshot'.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda pcb silk-align
+  easyeda pcb silk-align --side bottom --offset 30
+  easyeda pcb silk-align --refs U1 --refs LED1`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				payload := map[string]any{}
+				if cmd.Flags().Changed("offset") {
+					payload["offset"] = offset
+				}
+				if side != "" {
+					payload["side"] = side
+				}
+				if len(refs) > 0 {
+					payload["refs"] = refs
+				}
+				return dispatch(cfg, "pcb.silk.align", window, payload, stdout, stderr)
+			},
+		}
+		c.Flags().Float64Var(&offset, "offset", 40, "distance from the footprint bbox edge (mil)")
+		c.Flags().StringVar(&side, "side", "top", "which side of the footprint: top | bottom")
+		c.Flags().StringArrayVar(&refs, "refs", nil, "limit to these designators (repeatable); default = all")
+		pcb.AddCommand(c)
+	}
+
 	return pcb
 }
 
