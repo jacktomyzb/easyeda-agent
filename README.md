@@ -203,3 +203,13 @@ plugin channel and the official `eda.*` API. This entire automation layer is bui
 `easyeda-agent` stays a thin, well-behaved community citizen of the official plugin
 system, and every capability here ultimately dispatches to JLC's own `eda.*` calls.
 感谢嘉立创开放的 EDA 插件通道,让我们能做出这样一个好用的自动化插件。 🙏
+
+### Referenced projects & prior art
+
+Built on / inspired by these open projects — thank you:
+
+- [**@jlceda/pro-api-types**](https://www.npmjs.com/package/@jlceda/pro-api-types) — official EasyEDA Pro `eda.*` API type definitions (the connector is type-checked against it).
+- [**Freerouting**](https://github.com/freerouting/freerouting) — the external maze-tier autorouter our `pcb export-dsn` / `import-autoroute` round-trip targets.
+- [**spf13/cobra**](https://github.com/spf13/cobra) (CLI framework) · [**coder/websocket**](https://github.com/coder/websocket) (daemon ↔ connector) · [**esbuild**](https://github.com/evanw/esbuild) (connector bundling).
+- **Official EasyEDA extensions** ([github.com/easyeda](https://github.com/easyeda)) — we study their `eda.*` API usage + algorithms (not their UI) as prior art; the absorb-list lives in [`docs/ecosystem-survey.md`](docs/ecosystem-survey.md). Notably [`eext-run-api-gateway`](https://github.com/easyeda/eext-run-api-gateway) proved the in-editor code channel, and [`eext-export-design-report`](https://github.com/easyeda/eext-export-design-report) informed our design-report reads.
+- Candidate not yet absorbed: [**polyclip-ts**](https://github.com/luizbarboza/polyclip-ts) (polygon boolean) — for a future silkscreen-fill-with-obstacle-avoidance (`docs/ecosystem-survey.md` A10).
