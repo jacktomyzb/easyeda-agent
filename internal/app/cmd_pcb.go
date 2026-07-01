@@ -1498,24 +1498,22 @@ no-pours(7), no-inner-electrical(8), follow-rule(9). Default is a hard keep-out
 		}
 
 		{
-			var pointsJSON, name string
+			var pointsJSON, rectSpec, ref, name string
 			var ruleTypes []string
 			var layer int
-			var width float64
+			var width, margin float64
 			var locked bool
 			c := &cobra.Command{
 				Use:   "create",
-				Short: "Create a keep-out / rule region from a closed polygon",
+				Short: "Create a keep-out / rule region (area via --points | --rect | --ref)",
 				Args:  cobra.NoArgs,
 				Example: `  easyeda pcb region create --points '[[100,100],[400,100],[400,300],[100,300]]'   # default keep-out
-  easyeda pcb region create --points '[...]' --rule no-wires --rule no-pours --layer 1 --name antenna`,
+  easyeda pcb region create --rect 2250,-2420,2700,-2180 --rule no-pours --name antenna
+  easyeda pcb region create --ref U1 --margin 40 --rule no-pours --rule no-components   # keep-out under U1's antenna`,
 				RunE: func(cmd *cobra.Command, args []string) error {
-					if pointsJSON == "" {
-						return fmt.Errorf("--points is required")
-					}
-					var points any
-					if err := json.Unmarshal([]byte(pointsJSON), &points); err != nil {
-						return fmt.Errorf("invalid --points json (expected array): %w", err)
+					points, err := areaPointsFrom(cfg, window, pointsJSON, rectSpec, ref, margin)
+					if err != nil {
+						return err
 					}
 					payload := map[string]any{"points": points}
 					if cmd.Flags().Changed("layer") {
@@ -1536,7 +1534,10 @@ no-pours(7), no-inner-electrical(8), follow-rule(9). Default is a hard keep-out
 					return dispatch(cfg, "pcb.region.create", window, payload, stdout, stderr)
 				},
 			}
-			c.Flags().StringVar(&pointsJSON, "points", "", `JSON array of [x,y] points in mil (required)`)
+			c.Flags().StringVar(&pointsJSON, "points", "", `JSON array of [x,y] points in mil (or use --rect / --ref)`)
+			c.Flags().StringVar(&rectSpec, "rect", "", "axis-aligned rect 'x0,y0,x1,y1' (mil) — shorthand for a rectangular keep-out")
+			c.Flags().StringVar(&ref, "ref", "", "designator of a placed component — keep-out over its bbox (e.g. an antenna module)")
+			c.Flags().Float64Var(&margin, "margin", 0, "expand the --rect/--ref box outward by this many mil (antenna clearance)")
 			c.Flags().StringArrayVar(&ruleTypes, "rule", nil, "rule type (repeatable): no-components|no-wires|no-fills|no-pours|no-inner-electrical|follow-rule (default keep-out)")
 			c.Flags().IntVar(&layer, "layer", 1, "copper layer id (TOP=1, BOTTOM=2; inner via 'easyeda pcb layers')")
 			c.Flags().StringVar(&name, "name", "", "region name")
@@ -1600,23 +1601,21 @@ net (a 3V3/RF-ground patch, thermal copper, odd-shaped plane). Unlike 'pcb pour'
 carries a net. fillMode: solid (default) | mesh | inner.`,
 		}
 		{
-			var pointsJSON, net, fillMode string
+			var pointsJSON, rectSpec, ref, net, fillMode string
 			var layer int
-			var width float64
+			var width, margin float64
 			var locked bool
 			c := &cobra.Command{
 				Use:   "create",
-				Short: "Create a net-bound filled region from a closed polygon",
+				Short: "Create a net-bound filled region (area via --points | --rect | --ref)",
 				Args:  cobra.NoArgs,
 				Example: `  easyeda pcb fill create --points '[[100,100],[400,100],[400,300],[100,300]]' --net 3V3 --layer 1
-  easyeda pcb fill create --points '[...]' --net GND --fill-mode mesh`,
+  easyeda pcb fill create --rect 2150,-1550,2400,-1400 --net GND --fill-mode mesh
+  easyeda pcb fill create --ref U3 --margin 20 --net GND   # copper patch over U3`,
 				RunE: func(cmd *cobra.Command, args []string) error {
-					if pointsJSON == "" {
-						return fmt.Errorf("--points is required")
-					}
-					var points any
-					if err := json.Unmarshal([]byte(pointsJSON), &points); err != nil {
-						return fmt.Errorf("invalid --points json (expected array): %w", err)
+					points, err := areaPointsFrom(cfg, window, pointsJSON, rectSpec, ref, margin)
+					if err != nil {
+						return err
 					}
 					payload := map[string]any{"points": points}
 					if net != "" {
@@ -1637,7 +1636,10 @@ carries a net. fillMode: solid (default) | mesh | inner.`,
 					return dispatch(cfg, "pcb.fill.create", window, payload, stdout, stderr)
 				},
 			}
-			c.Flags().StringVar(&pointsJSON, "points", "", `JSON array of [x,y] points in mil (required)`)
+			c.Flags().StringVar(&pointsJSON, "points", "", `JSON array of [x,y] points in mil (or use --rect / --ref)`)
+			c.Flags().StringVar(&rectSpec, "rect", "", "axis-aligned rect 'x0,y0,x1,y1' (mil)")
+			c.Flags().StringVar(&ref, "ref", "", "designator of a placed component — fill over its bbox")
+			c.Flags().Float64Var(&margin, "margin", 0, "expand the --rect/--ref box outward by this many mil")
 			c.Flags().StringVar(&net, "net", "", "net to bind the fill to (e.g. 3V3, GND)")
 			c.Flags().IntVar(&layer, "layer", 1, "layer id (TOP=1, BOTTOM=2; inner via 'easyeda pcb layers')")
 			c.Flags().StringVar(&fillMode, "fill-mode", "", "fill mode: solid (default) | mesh | inner")

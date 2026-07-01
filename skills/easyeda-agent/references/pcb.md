@@ -124,12 +124,16 @@ It is **NOT net-bound copper** (that's a pour) — `create` takes no net. EasyED
 DRC + copper pour respect it (a pour avoids a `no-pours` region). Same raw-points
 convention as pour (connector builds the polygon).
 
-- `pcb region create` (`pcb.region.create`) — region from a closed `--points` polygon
-  on a `--layer`. `--rule` (repeatable, name or enum number): `no-components(2)` /
+- `pcb region create` (`pcb.region.create`) — specify the area **three ways** (pick one):
+  `--points '[[x,y],…]'` (explicit polygon), `--rect x0,y0,x1,y1` (rectangular
+  shorthand), or **`--ref <designator>`** (the placed component's bbox — e.g. the
+  antenna module). `--margin <mil>` expands the `--rect`/`--ref` box outward (antenna
+  clearance). `--rule` (repeatable, name or enum number): `no-components(2)` /
   `no-wires(5)` / `no-fills(6)` / `no-pours(7)` / `no-inner-electrical(8)` /
   `follow-rule(9)`. **Default** (no `--rule`) is a hard keep-out
   `[no-components, no-wires, no-pours]` — the antenna / board-edge case. `--locked`
   pins it. Verify with `pcb region list` + `pcb drc`.
+  E.g. antenna keep-out under U1: `pcb region create --ref U1 --margin 40 --rule no-pours`.
 - `pcb region list` / `pcb region delete` — inspect / remove (note `pcb delete`
   removes components, NOT regions — use `region delete`).
 
