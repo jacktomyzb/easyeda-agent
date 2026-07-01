@@ -8,6 +8,12 @@
   AI-native automation layer for EasyEDA.
 </p>
 
+<p align="center">
+  <a href="https://github.com/zhoushoujianwork/easyeda-agent"><b>GitHub</b></a> ·
+  <b>Plugin marketplace</b> <em>(coming soon)</em> ·
+  <a href="README.zh-CN.md">中文</a>
+</p>
+
 ![easyeda-agent workflow](docs/assets/easyeda-agent-workflow.svg)
 
 `easyeda-agent` turns the official EasyEDA extension API into a typed, observable, Skill-friendly system. The EasyEDA plugin stays thin: it connects to the local agent and executes approved actions. The Go CLI/daemon owns protocol, state, artifacts, validation, and user-facing workflows.
@@ -73,14 +79,24 @@ local orthogonal wires; decoupling hugs each IC's VCC pad; multi-page by functio
 This is also the project's fixed end-to-end regression case — see
 [docs/test-case-esp32-blink.md](docs/test-case-esp32-blink.md).
 
-> 截图(原理图 + PCB 布局)随后补充。Schematic + PCB-layout screenshots
-> will be added below.
-
 ### ESP32-S3-WROOM-1 minimal system board
-ESP32-S3 module + decoupling + USB-C + 3V3 LDO + boot/reset. Library-first, lint-clean.
 
-<!-- ![sch](docs/assets/demo-esp32s3-sch.png) ![pcb](docs/assets/demo-esp32s3-pcb.png) -->
-*原理图 / PCB 截图:待补充 (TBD)*
+The board below was produced by the agent driving the full PCB flow — **auto-place →
+outline-fit → rule-aware route → 4-layer power planes → collision-aware silk** — then
+verified on the real EasyEDA canvas (DRC 31 → 3 violations, No-Connection → 0):
+
+<p align="center">
+  <img src="docs/assets/demo-esp32-board.png" width="560" alt="ESP32-S3 board the agent produced: 4-layer power planes, rounded outline, aligned designators" />
+</p>
+
+A few individual steps, each a real before/after on the same board:
+
+| `pcb outline-fit` — tighten board to parts (17% → 71% utilization) | `pcb silk-align` — collision-aware designators |
+|---|---|
+| <img src="docs/assets/demo-outline-before.png" width="330" alt="before: oversized board outline"/> → <img src="docs/assets/demo-outline-after.png" width="330" alt="after: outline tightened to parts"/> | <img src="docs/assets/demo-silk-before.png" width="330" alt="before: scattered overlapping designators"/> → produces the aligned designators in the board above |
+
+> A short screen-capture GIF of the end-to-end run will be added here. The images
+> above are real `pcb snapshot` captures from the fixed regression board, not mockups.
 
 ## Repository Layout
 

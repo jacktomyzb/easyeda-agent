@@ -1,0 +1,139 @@
+<p align="center">
+  <img src="docs/assets/easyeda-agent-logo.png" width="96" alt="easyeda-agent logo" />
+</p>
+
+<h1 align="center">easyeda-agent</h1>
+
+<p align="center">
+  面向 EasyEDA(嘉立创EDA专业版)的 AI 原生自动化层
+</p>
+
+<p align="center">
+  <a href="https://github.com/zhoushoujianwork/easyeda-agent"><b>GitHub</b></a> ·
+  <b>插件市场</b> <em>(即将上架)</em> ·
+  <a href="README.md">English</a>
+</p>
+
+![easyeda-agent workflow](docs/assets/easyeda-agent-workflow.svg)
+
+`easyeda-agent` 把官方 EasyEDA 扩展 API 变成一套**有类型、可观测、Skill 友好**的系统。EasyEDA 插件保持极薄——它连到本地 agent、只执行被批准的动作;Go CLI/daemon 掌管协议、状态、产物、校验和面向用户的工作流。
+
+## 为什么做这个
+
+上游 `run-api-gateway` 证明了关键入口:代码能跑在 EasyEDA 内、访问官方 `eda` 对象。但它把「裸 JavaScript 执行」当作主工作流——强大,但对 AI agent 太脆弱。
+
+本项目的连接器是真实可用的:端口扫描 `49620-49629`、校验握手、**自愈重连**、把一套**有类型的动作目录**分发到官方 `eda.*` API。裸 JS 仅作为需二次确认的 `debug.exec_js` 逃生口保留。
+
+- **Skill** 描述专家工作流和护栏;
+- **Go CLI/daemon** 暴露稳定的 typed actions;
+- **EasyEDA 连接器插件** 只做到官方 `eda.*` 的桥接;
+- 产物、截图、DRC 结果、审计日志都是一等输出。
+
+## 工作原理
+
+- Skill 或人跑一条 `easyeda` 命令;
+- Go CLI 校验输入、把 typed action 提交给本地 daemon;
+- daemon 跟踪已连接的 EasyEDA 窗口、经 WebSocket 路由每个动作、记录审计日志/产物/校验结果;
+- 连接器扩展跑在 EasyEDA 内、调用官方 `eda.*` API;
+- 结构化结果回流到 CLI 和 Skill,下一步基于**真实编辑器状态**来规划。
+
+动作目录已覆盖原理图、PCB、文档导航、板级绑定、产物导出、诊断。完整清单与路线图见 [docs/FEATURES.md](docs/FEATURES.md)。
+
+## 安装
+
+先装 `easyeda` CLI/daemon,再按安装器打印的地址导入 EasyEDA 连接器:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh
+```
+
+Skill slug 为 `easyeda-agent`(后缀有意为之,区分于官方 EasyEDA 工具)。只从 registry 装 skill:
+
+```bash
+# ClawHub
+clawhub install easyeda-agent
+
+# 国内 SkillHub
+skillhub install easyeda-agent --registry https://skillhub.cn
+```
+
+> EasyEDA 需开启「**允许外部交互**」,连接器的 WebSocket 才能连到本地 daemon。
+
+## 效果演示
+
+下面这块板由 agent 驱动完整 PCB 流程产出——**自动布局 → 板框贴合 → 规则感知布线 → 4 层电源平面 → 丝印碰撞避让**——并在真实 EasyEDA 画布上验证(DRC 31 → 3、No-Connection 归零):
+
+<p align="center">
+  <img src="docs/assets/demo-esp32-board.png" width="560" alt="ESP32-S3 成品板:4层电源平面 + 圆角板框 + 位号对齐" />
+</p>
+
+几个单步的真机前后对比(同一块板):
+
+| `pcb outline-fit` 板框贴合(利用率 17% → 71%) | `pcb silk-align` 丝印碰撞避让 |
+|---|---|
+| <img src="docs/assets/demo-outline-before.png" width="330" alt="前:板框过大"/> → <img src="docs/assets/demo-outline-after.png" width="330" alt="后:板框贴合器件"/> | <img src="docs/assets/demo-silk-before.png" width="330" alt="前:位号散乱重叠"/> → 对齐后见上方成品板 |
+
+> 端到端跑通的录屏 GIF 随后补充;上面都是回归板的真机 `pcb snapshot`,非 mockup。这也是项目的固定端到端回归用例,见 [docs/test-case-esp32-blink.md](docs/test-case-esp32-blink.md)。
+
+## 能力清单(已支持)
+
+均以 typed CLI 子命令暴露(`easyeda <domain> <verb>`),每项都在固定的 ESP32-S3 回归板上真机验证过。
+
+**原理图**
+- 从立创/LCSC 库按 uuid 放**真实器件**再布线;电源/地**网络标志**用 `connect_pin`(自动补偿旋转存储的坑)。
+- **DRC**(`sch drc`)+ 重建的逐项**设计检查**(`sch check`——悬空引脚、导线交叉、导线压引脚)+ 几何 **layout-lint**(重叠/间距)。
+- 模块感知**自动布局**(放置→校验→调整)、一次调用 **`sch read`**(器件+网络+悬空引脚+检查)、**BOM**/**网表**导出(BOM 自动补 LCSC C 号)。
+
+**PCB — 布局**
+- **`pcb auto-place`** — 模块感知启发式:卫星器件贴到它所连芯片引脚那侧,2 脚器件自动转向,多芯片铺开;**间距规则感知**(由 live DRC clearance 推导)。
+- **`pcb outline-fit`**(板框贴合器件)/ **`pcb outline-round`**(圆角矩形板框)。
+- **`pcb layout-lint`** — 布局质量 + **可布性评分**(飞线 MST + 跨网交叉),布线前预测。
+- **`pcb silk-align`** — 位号**碰撞避让**重排(位号不重叠)。
+- **`pcb add-component`** — 往已有 PCB 加单个器件并连接其焊盘网络(绕过失效的增量 `import_changes`)。
+
+**PCB — 布线与铜**
+- **`pcb route-short`** — 启发式短线布线:每网 MST、**规则感知线宽**(信号 vs 电源)、**障碍感知** L 朝向、**默认跳电源/地网**(它们该铺铜)。
+- **`pcb pour`**(规则感知铜到板边内缩)/ **`pcb pour-fit`** / **`pcb via-stitch`** / **`pcb rip-up`**。
+- **`pcb power-planes`** — 4 层电源分配:GND + 电源各占**专用内平面** + 每焊盘过孔缝合(把回归板的 No-Connection 打到 0)。
+- **`pcb region`**(禁铺铜/天线净空)/ **`pcb fill`** / **`pcb slot`**(挖槽 / MULTI 层板挖空)。
+
+**PCB — 叠层、规则、制造**
+- **`pcb stackup`** — 设铜层数(2/4/6…/32)+ 内层类型(信号↔平面/内电层)。
+- **全链路规则感知** — daemon 读板子 **live DRC 规则**(`pcb drc-rules`)并遵循;缺失时回退到权威 **JLCPCB fab 规则参考**(真实分板型导出)。**`pcb drc`** 跑检查。
+- **`pcb export-dsn`**(Specctra DSN,给外部 Freerouting,带禁布区注入)/ **`pcb import-autoroute`** / **`pcb snapshot`**。
+
+**基础设施**
+- Typed action 协议(`--help` 自描述、`easyeda actions` 目录)+ `debug.exec_js` 原型逃生口。
+- 连接器**自愈重连看门狗**(daemon 重启/窗口后台都能自动回来)+ daemon **防抖自动保存**。
+
+## 暂不支持 / 平台墙
+
+诚实说明边界——有的是路线图,有的是 `eda.*` API 的硬墙(连接器怎么写都够不到):
+
+- **迷宫档自动布线**(密集/任意距离/推挤)—— daemon 只做*短、清晰*的启发式布线。完整布线走外部 **Freerouting**(DSN 往返的构件已就绪);turnkey 集成**暂缓**(需 Java 运行时;等官方 EasyEDA 自动布线器过 `@alpha`)。
+- **泪滴(teardrop)** —— **平台墙**:`eda.*` 无任何创建/应用泪滴的 API(泪滴只作为制造导出的对象类型出现)。请在 UI 里手动应用。
+- **受控阻抗 / 高速** —— **平台墙**:叠层 Er / 介质厚度 / 铜厚 `eda.*` 读不到,算不了阻抗线宽;差分对 / 等长约束对象也不暴露。
+- **交互式布线菜单**(单线/多线/差分*布线*、等长绕蛇、扇出、去环)—— **无 `eda.*` API**,UI 专属。
+- **无编程 undo** —— `eda.*` 没有 undo/redo;回滚靠自建(数据快照 + 反向操作)。
+- **增量 `import_changes`** —— 对 API 新增器件是 no-op(平台限制);首次同步前放完整电路,或用 `pcb add-component`。
+- **丝印密度极限** —— `silk-align` 在有空白处避让标签;比标签本身还密的布局无法完全消重(会报 `unresolvedCollisions`)——请放松布局。
+
+完整动作清单与状态见 [docs/FEATURES.md](docs/FEATURES.md);`eda.*` API 覆盖地图见 [docs/ecosystem-survey.md](docs/ecosystem-survey.md)。
+
+## 仓库结构
+
+```text
+cmd/easyeda/                 CLI 入口(人和 Skill 都用)
+internal/app/                CLI 命令实现
+internal/daemon/             本地 daemon:/health、/eda(连接器 WS)、/action
+internal/protocol/           与连接器共享的 typed action 协议(actions.go)
+extension/                   EasyEDA 连接器(.eext)源码 + 构建(TypeScript → esbuild)
+skills/easyeda-agent/        合并后的公开 Skill:工作流、参考、脚本、规范数据
+docs/                        架构、协议、功能/路线图、规范、决策
+```
+
+## 设计定位
+
+裸 JavaScript 执行对调试仍有用,但不作为主要的 AI 界面。默认界面应该是**有类型的动作**:明确输入、可预测输出、产物处理、校验钩子。
+
+延伸阅读:[功能清单与路线图](docs/FEATURES.md) · [架构](docs/architecture.md) · [协议](docs/protocol.md) · [Skill 设计](docs/skill-design.md)

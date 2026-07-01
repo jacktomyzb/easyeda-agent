@@ -10,6 +10,9 @@ observable actions. This is the community `easyeda-agent` workflow, not an offic
 EasyEDA skill; the suffix is intentional so users can distinguish it from upstream
 EasyEDA tooling.
 
+> **Source & docs:** https://github.com/zhoushoujianwork/easyeda-agent · Plugin
+> marketplace listing coming soon. Install the CLI + connector per the repo README.
+
 ## Core Rules
 
 1. Run `easyeda health` before any window-scoped action.

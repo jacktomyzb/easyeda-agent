@@ -5,6 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); versions
 follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.6.0] - 2026-07-01
+> PCB automation milestone (tasks #21–#32). Connector-side changes below; the bulk
+> of the release is DAEMON-side (Go CLI) PCB automation, summarized under "Daemon".
 ### Added
 - **`pcb.silk.align`** (task #30) — reposition each component's DESIGNATOR silkscreen
   with COLLISION AVOIDANCE: searches candidate slots around each footprint (preferred
@@ -30,6 +34,20 @@ follow [SemVer](https://semver.org/).
   force-resets a connect flow still unsettled after ~24s (`STUCK_CONNECTING_TICKS`),
   and (2) the foreground/online wake forces a clean reconnect *through* a stuck
   `isConnecting` (`cancelConnectionFlow()` first) instead of being blocked by it.
+
+### Daemon (CLI) — PCB automation pass
+All real-machine verified on the ESP32 regression board; each `easyeda pcb …` subcommand:
+- **Rule-aware** `route-short` / `auto-place` / `pour` — read the board's live DRC rule
+  (`pcb drc-rules`) and conform (widths/clearance/via/copper-to-edge) instead of hardcoding;
+  fall back to a canonical **JLCPCB fab-rule reference** (real per-board-type exports). (#22/#32)
+- `route-short` **v2**: obstacle-aware L-orientation, and **skips power/ground nets** by
+  default (they belong in a pour — routing 3V3 as thin tracks was the #1 DRC source). (#23)
+- `pcb outline-fit` (tighten to parts) / `pcb outline-round` (rounded-rect outline). (#21/#29)
+- `pcb layout-lint` — placement quality + **routability score** (ratsnest MST + crossings). (#25)
+- `pcb power-planes` — **4-layer** power distribution: GND + power on dedicated inner planes
+  + via-stitch each pad (drove the regression board's No-Connection to 0). (#26)
+- `pcb region` / `fill` / `slot` — antenna keep-out (禁铺铜) & board cutout (挖槽). (#28)
+- Confirmed platform walls (no `eda.*` API): teardrops, controlled-impedance, interactive routing.
 
 ## [0.5.30] - 2026-06-30
 ### Added
