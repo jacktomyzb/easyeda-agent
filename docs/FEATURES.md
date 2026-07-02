@@ -9,8 +9,8 @@ planned. Ground truth for the action catalog is `make actions`
 > [`ecosystem-survey.md`](ecosystem-survey.md) 系统对比了官方开源扩展用到的 API、我们的盲区,
 > 以及一份带优先级的可吸收功能清单(A1–A9),是下一阶段 roadmap 的主要输入。
 
-**88 typed actions** total — 45 `pcb`, 26 `schematic`, 6 `document`, 6 `board`,
-2 `artifact`, and one each in `system`, `project`, `debug`.
+**90 typed actions** total — 45 `pcb`, 26 `schematic`, 7 `board`, 6 `document`,
+2 `system`, 2 `artifact`, and one each in `project`, `debug`.
 All but `system.health` are dispatched to the connector; `system.health` is
 answered by the daemon itself (daemon/connector liveness, no window required).
 (Run `make actions` for the authoritative list — this prose count can lag.)
@@ -26,7 +26,7 @@ answered by the daemon itself (daemon/connector liveness, no window required).
 > teardrops, controlled-impedance, and the interactive routing menu have no `eda.*`
 > API. See the README "Capabilities" / "Not Yet Supported" sections.
 
-> **2026-07-02 — silkscreen suite + inner-plane fix (v0.6.1→0.6.6).** New/upgraded,
+> **2026-07-02 — silkscreen suite + inner-plane fix + board/notify (v0.6.1→0.7.0).** New/upgraded,
 > real-machine verified: **`pcb silk-add`** (free silkscreen string — board credit /
 > LED polarity marks — with layer/font/stroke/rotation config, JLCPCB-legible defaults);
 > **`pcb silk-set`** (batch-adjust existing silk + an **align-to-reference** shortcut:
@@ -39,6 +39,11 @@ answered by the daemon itself (daemon/connector liveness, no window required).
 > the common customer stackup GND=内电层 / VCC=信号层; and **`pcb check`** gained the
 > per-layer **antenna-keepout** rule + a **silkscreen-flipped** upgrade (catches non-upright
 > designators). Plus a connector **reconnect-toast dedup** (once per outage, not every retry).
+> Two new actions round out the flow: **`easyeda pcb new-board`** (`board.new_pcb` — create a
+> brand-new board + empty PCB page bound to a schematic, the CLI 新建PCB, then `import-changes`
+> to lay it out) and **`easyeda notify`** (`system.notify` — an in-window toast so the flow can
+> announce each stage live); plus **`pcb auto-place --assembly-gap`** (hand-solder clearance floor)
+> and antenna-keepout recognizing a single MULTI-layer keep-out as covering every layer.
 > A recording storyboard for the full flow lives in
 > [`demo-storyboard-esp32-mini.md`](demo-storyboard-esp32-mini.md).
 

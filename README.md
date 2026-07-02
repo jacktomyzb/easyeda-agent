@@ -85,7 +85,8 @@ skillhub install easyeda-agent --registry https://skillhub.cn
 - 模块感知**自动布局**(放置→校验→调整)、一次调用 **`sch read`**(器件+网络+悬空引脚+检查)、**BOM**/**网表**导出(BOM 自动补 LCSC C 号)。
 
 **PCB — 布局**
-- **`pcb auto-place`** — 模块感知启发式:卫星器件贴到它所连芯片引脚那侧,2 脚器件自动转向,多芯片铺开;**间距规则感知**(由 live DRC clearance 推导)。
+- **`pcb new-board`** — 从原理图**新建一块板 + 空 PCB 页**并绑定(CLI 版「新建 PCB / 原理图转 PCB」),再 `pcb import-changes` 从零布局;区别于只做链接的 `board.create`。
+- **`pcb auto-place`** — 模块感知启发式:卫星器件贴到它所连芯片引脚那侧,2 脚器件自动转向,多芯片铺开;**间距规则感知**(由 live DRC clearance 推导),`--assembly-gap` 兜底手焊间距。
 - **`pcb outline-fit`**(板框贴合器件)/ **`pcb outline-round`**(圆角矩形板框)。
 - **`pcb layout-lint`** — 布局质量 + **可布性评分**(飞线 MST + 跨网交叉),布线前预测。
 - **`pcb silk-align`** — 位号**位置感知**避让重排(v2):按局部空隙 + 板上位置 + 拥挤轴给每个位号的 4 个方向打分,**避开别人的焊盘/器件体/禁区/板框/其它标签**;挤死的报告出来而非压到焊盘上。
@@ -105,6 +106,7 @@ skillhub install easyeda-agent --registry https://skillhub.cn
 
 **基础设施**
 - Typed action 协议(`--help` 自描述、`easyeda actions` 目录)+ `debug.exec_js` 原型逃生口。
+- **`easyeda notify`** — 在 EasyEDA 窗口内弹**非阻塞 toast**(info/success/warn/error/question),流程可实时播报每一步(「完成布线,下一步铺铜」)。
 - 连接器**自愈重连看门狗**(daemon 重启/窗口后台都能自动回来)+ daemon **防抖自动保存**。
 
 ## 暂不支持 / 平台墙

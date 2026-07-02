@@ -150,7 +150,8 @@ What the agent can drive today, via typed CLI subcommands (`easyeda <domain> <ve
 - Module-aware **auto-layout** (place → verify → adjust), one-call **`sch read`** (components + nets + floating pins + check), **BOM**/**netlist** export (BOM LCSC-enriched).
 
 **PCB — placement**
-- **`pcb auto-place`** — module-aware heuristic: satellites hug the chip pin they connect to, 2-pin parts re-oriented, multi-chip spread; **spacing is rule-aware** (derived from the live DRC clearance).
+- **`pcb new-board`** — create a **brand-new board + empty PCB page** bound to a schematic (the CLI 新建PCB / schematic-to-PCB), then `pcb import-changes` to lay it out from scratch; distinct from link-only `board.create`.
+- **`pcb auto-place`** — module-aware heuristic: satellites hug the chip pin they connect to, 2-pin parts re-oriented, multi-chip spread; **spacing is rule-aware** (derived from the live DRC clearance), with an `--assembly-gap` hand-solder floor.
 - **`pcb outline-fit`** (tighten board to parts) / **`pcb outline-round`** (rounded-rect board outline).
 - **`pcb layout-lint`** — placement quality + **routability score** (ratsnest MST + cross-net crossings) *before* routing; gate-able.
 - **`pcb silk-align`** — **position-aware** designator placement (v2): ranks each label's 4 sides by local free space + board position + a crowd-axis bonus, and **avoids other parts' pads, bodies, keep-out regions, the outline, and other labels**; a boxed-in part is reported, never shoved onto a pad.
@@ -170,6 +171,7 @@ What the agent can drive today, via typed CLI subcommands (`easyeda <domain> <ve
 
 **Infrastructure**
 - Typed action protocol (self-describing `--help`, `easyeda actions` catalog) with a `debug.exec_js` escape hatch for prototyping.
+- **`easyeda notify`** — a non-blocking **in-window toast** (info/success/warn/error/question) so the flow can announce each stage live ("routing done, next: pour").
 - Connector **auto-reconnect watchdog** (survives daemon restarts / window backgrounding) + daemon **debounced autosave**.
 
 ## Not Yet Supported / Platform Walls
