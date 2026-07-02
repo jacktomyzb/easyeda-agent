@@ -2008,6 +2008,113 @@ dense — loosen placement). Verify with 'pcb snapshot'.`,
 		pcb.AddCommand(c)
 	}
 
+	// pcb.silk.add — create a free silkscreen string (board marking / credit / note).
+	{
+		var text string
+		var x, y, fontSize, lineWidth, rotation float64
+		var layer int
+		c := &cobra.Command{
+			Use:   "silk-add",
+			Short: "Add a free silkscreen string (board marking / credit / note) with config",
+			Long: `Create a FREE silkscreen STRING at (x,y) — a board credit / label / note — with
+full config: --layer (3=top silk default, 4=bottom), --font-size (mil), --line-width
+(stroke mil), --rotation. The defaults (font 40 / stroke 6) are legible + JLCPCB-safe;
+a small font with a thick stroke smears the glyphs together (糊). Returns the new
+primitiveId + rendered bbox — check it fits the board and clears parts. Reposition or
+restyle later with 'pcb silk-set'.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda pcb silk-add --text "auto created by easyeda-agent" --x 1850 --y -2455
+  easyeda pcb silk-add --text "REV A" --x 2400 --y -2455 --font-size 50 --line-width 6
+  easyeda pcb silk-add --text "bottom mark" --x 2000 --y -2000 --layer 4 --rotation 90`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				if text == "" {
+					return fmt.Errorf("--text is required")
+				}
+				payload := map[string]any{"text": text, "x": x, "y": y, "layer": layer}
+				if cmd.Flags().Changed("font-size") {
+					payload["fontSize"] = fontSize
+				}
+				if cmd.Flags().Changed("line-width") {
+					payload["lineWidth"] = lineWidth
+				}
+				if cmd.Flags().Changed("rotation") {
+					payload["rotation"] = rotation
+				}
+				return dispatch(cfg, "pcb.silk.add", window, payload, stdout, stderr)
+			},
+		}
+		c.Flags().StringVar(&text, "text", "", "the silkscreen text (required)")
+		c.Flags().Float64Var(&x, "x", 0, "X position (mil)")
+		c.Flags().Float64Var(&y, "y", 0, "Y position (mil)")
+		c.Flags().IntVar(&layer, "layer", 3, "silk layer: 3=TOP_SILKSCREEN, 4=BOTTOM_SILKSCREEN")
+		c.Flags().Float64Var(&fontSize, "font-size", 40, "font height (mil; ≥~32 for JLCPCB legibility)")
+		c.Flags().Float64Var(&lineWidth, "line-width", 6, "stroke width (mil; JLCPCB min ~6)")
+		c.Flags().Float64Var(&rotation, "rotation", 0, "rotation (deg)")
+		pcb.AddCommand(c)
+	}
+
+	// pcb.silk.set — batch reconfigure existing silk (position / rotation / size / text).
+	{
+		var ids string
+		var x, y, rotation, fontSize, lineWidth float64
+		var text string
+		c := &cobra.Command{
+			Use:   "silk-set",
+			Short: "Batch-adjust existing silk: position / rotation / font-size / line-width / text",
+			Long: `Reconfigure existing silkscreen primitive(s) in ONE batch — component designators
+(位号) and free strings alike. --ids is a JSON array of primitiveIds (from 'pcb
+check --json' or a silk list); set any of --x/--y/--rotation/--font-size/--line-width
+/--text and ONLY those keys change. This is the batch position/orientation/size fixer
+for badly-placed or non-upright silk.
+
+NOTE: rotation via the reliable .modify persists, but a 'pcb snapshot' taken before a
+document reload shows the OLD orientation (stale render) — judge success by 'pcb check'
+/ silk list, not a screenshot.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda pcb silk-set --ids '["ae4510d0d289463ae18"]' --rotation 0
+  easyeda pcb silk-set --ids '["id1","id2"]' --x 2000 --y -2400
+  easyeda pcb silk-set --ids '["id1"]' --font-size 45 --line-width 6`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				if ids == "" {
+					return fmt.Errorf("--ids is required (JSON array of primitiveIds)")
+				}
+				var idList []string
+				if err := json.Unmarshal([]byte(ids), &idList); err != nil {
+					return fmt.Errorf("--ids must be a JSON array of strings: %w", err)
+				}
+				payload := map[string]any{"primitiveIds": idList}
+				for flag, key := range map[string]string{"x": "x", "y": "y", "rotation": "rotation", "font-size": "fontSize", "line-width": "lineWidth"} {
+					if cmd.Flags().Changed(flag) {
+						switch key {
+						case "x":
+							payload[key] = x
+						case "y":
+							payload[key] = y
+						case "rotation":
+							payload[key] = rotation
+						case "fontSize":
+							payload[key] = fontSize
+						case "lineWidth":
+							payload[key] = lineWidth
+						}
+					}
+				}
+				if cmd.Flags().Changed("text") {
+					payload["text"] = text
+				}
+				return dispatch(cfg, "pcb.silk.set", window, payload, stdout, stderr)
+			},
+		}
+		c.Flags().StringVar(&ids, "ids", "", "JSON array of silk primitiveIds to adjust (required)")
+		c.Flags().Float64Var(&x, "x", 0, "new X (mil)")
+		c.Flags().Float64Var(&y, "y", 0, "new Y (mil)")
+		c.Flags().Float64Var(&rotation, "rotation", 0, "new rotation (deg) — 0 = upright")
+		c.Flags().Float64Var(&fontSize, "font-size", 0, "new font height (mil)")
+		c.Flags().Float64Var(&lineWidth, "line-width", 0, "new stroke width (mil)")
+		c.Flags().StringVar(&text, "text", "", "new text (designators: the value)")
+		pcb.AddCommand(c)
+	}
+
 	return pcb
 }
 

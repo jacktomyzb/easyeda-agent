@@ -6,6 +6,18 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-07-02
+### Added
+- **`pcb.silk.add`** — create a FREE silkscreen STRING (board marking / credit / note)
+  at (x,y) with config: layer (3=top / 4=bottom), fontSize, lineWidth, rotation.
+  Legible JLCPCB-safe defaults (font 40 / stroke 6) — a small font with a thick stroke
+  smears the glyphs. Returns primitiveId + rendered bbox.
+- **`pcb.silk.set`** — batch-reconfigure existing silkscreen primitives (designator/
+  value ATTRIBUTES + free STRINGS): primitiveIds[] + any of x/y/rotation/fontSize/
+  lineWidth/text; only the given keys change. Uses the reliable `.modify(id,props)`
+  (setState_Rotation alone does NOT persist). The batch position/orientation/size fixer
+  behind correcting badly-placed or non-upright silk.
+
 ## [0.6.3] - 2026-07-02
 ### Changed
 - **`pcb.region.list`** now emits each region's **`bbox`** (`getPrimitivesBBox`), so

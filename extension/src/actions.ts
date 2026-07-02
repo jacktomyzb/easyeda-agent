@@ -2707,6 +2707,80 @@ const pcbSilkList: Handler = async () => {
 	return { result: { texts, count: texts.length } };
 };
 
+// pcb.silk.add — create a free silkscreen STRING (board marking / credit / note)
+// with full config (layer, font size, stroke width, rotation). Default layer is
+// TOP_SILKSCREEN(3); font 40 mil / stroke 6 mil is a legible JLCPCB-safe default
+// (below ~32 mil height or a stroke that's a large fraction of the height smears).
+const pcbSilkAdd: Handler = async (payload) => {
+	const text = requireString(payload, 'text');
+	const x = requireNumber(payload, 'x');
+	const y = requireNumber(payload, 'y');
+	const layer = (optionalNumber(payload, 'layer') ?? PCB_TOP_SILK) as unknown as TPCB_LayersOfImage;
+	const fontSize = optionalNumber(payload, 'fontSize') ?? 40;
+	const lineWidth = optionalNumber(payload, 'lineWidth') ?? 6;
+	const rotation = optionalNumber(payload, 'rotation') ?? 0;
+	let s;
+	try {
+		s = await eda.pcb_PrimitiveString.create(
+			layer, x, y, text, '', fontSize, lineWidth,
+			0 as unknown as EPCB_PrimitiveStringAlignMode, rotation, false, 0, false, false,
+		);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to create silkscreen string.');
+	}
+	if (!s) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'silkscreen string create returned no primitive.');
+	}
+	const id = s.getState_PrimitiveId();
+	let bbox;
+	try { bbox = await eda.pcb_Primitive.getPrimitivesBBox([id]); }
+	catch { /* bbox optional */ }
+	return { result: { primitiveId: id, layer: Number(layer), x, y, fontSize, lineWidth, rotation, bbox } };
+};
+
+// pcb.silk.set — reconfigure existing silkscreen primitive(s) in one batch:
+// designator/value ATTRIBUTES and free STRINGS. Any of x/y/rotation/fontSize/
+// lineWidth/text may be set; only the provided keys change. Uses the reliable
+// `.modify(id, props)` (setState_* alone does NOT persist for rotation).
+const pcbSilkSet: Handler = async (payload) => {
+	const raw = payload.primitiveIds ?? payload.ids;
+	let ids: Array<string>;
+	if (typeof raw === 'string') ids = [raw];
+	else if (Array.isArray(raw) && raw.every(v => typeof v === 'string')) ids = raw as Array<string>;
+	else throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'Missing "primitiveIds" (string or string[]).');
+
+	const props: Record<string, unknown> = {};
+	for (const k of ['x', 'y', 'rotation', 'fontSize', 'lineWidth', 'text'] as const) {
+		if (payload[k] !== undefined && payload[k] !== null) props[k] = payload[k];
+	}
+	if (Object.keys(props).length === 0) {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'nothing to set — provide at least one of x/y/rotation/fontSize/lineWidth/text.');
+	}
+
+	// route each id to the attribute or string modify (they share primitiveId space).
+	const attrIds = new Set<string>((await eda.pcb_PrimitiveAttribute.getAll() ?? []).map(a => a.getState_PrimitiveId()));
+	const results: Array<Record<string, unknown>> = [];
+	for (const id of ids) {
+		try {
+			if (attrIds.has(id)) {
+				// `text` maps to an attribute's value.
+				const p = { ...props } as Record<string, unknown>;
+				if ('text' in p) { p.value = p.text; delete p.text; }
+				await eda.pcb_PrimitiveAttribute.modify(id, p as never);
+			}
+			else {
+				await eda.pcb_PrimitiveString.modify(id, props as never);
+			}
+			results.push({ primitiveId: id, ok: true });
+		}
+		catch (err) {
+			results.push({ primitiveId: id, ok: false, error: String(err) });
+		}
+	}
+	return { result: { set: props, count: results.length, results } };
+};
+
 /**
  * List all nets on the active PCB. `IPCB_NetInfo` ({ net, color, length }) is a
  * plain data object and serializes directly.
@@ -4595,6 +4669,8 @@ const HANDLERS: Record<string, Handler> = {
 	'pcb.stackup.set': pcbStackupSet,
 	'pcb.silk.align': pcbSilkAlign,
 	'pcb.silk.list': pcbSilkList,
+	'pcb.silk.add': pcbSilkAdd,
+	'pcb.silk.set': pcbSilkSet,
 	'pcb.nets.list': pcbNetsList,
 	'pcb.report': pcbReport,
 	'pcb.board.info': pcbBoardInfo,
