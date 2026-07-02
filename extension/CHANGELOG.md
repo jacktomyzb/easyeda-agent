@@ -30,6 +30,13 @@ UX fix. (Consolidates the dev-loop releases 0.6.1–0.6.7 below.)
   shortcut: center a board credit, align a label to a component/board/fill edge), and the
   read handlers `pcb.silk.list` (text layer/mirror/reverse/rotation) + `pcb.region.list`
   bbox that feed the DFM checks.
+- **`easyeda pcb new-board` (`board.new_pcb`)** — create a brand-new board (板) with a
+  fresh EMPTY PCB page bound to a schematic (CLI equivalent of the UI 新建PCB /
+  原理图转PCB), then `pcb import-changes` to lay it out from scratch. Distinct from
+  `board.create` (link-only). Runs the required 2-step SDK sequence that is otherwise a
+  silent no-op — `createBoard(schematicUuid)` mints a board shell, then
+  `createPcb(boardName)` adds the PCB INTO it — with shell rollback on failure.
+  `--schematic` defaults to the current board's schematic.
 
 ### Changed
 - **`pcb silk-align` → position-aware (v2)** — ranks each designator's 4 sides by local

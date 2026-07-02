@@ -521,6 +521,17 @@ func AllActions() []ActionSpec {
 			VerifyWith:  []string{"board.list"},
 		},
 		{
+			Name:        "board.new_pcb",
+			Domain:      DomainBoard,
+			Phase:       2,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Create a NEW board (板) containing a fresh empty PCB page, bound to a schematic — the 新建PCB / 原理图转PCB flow. Unlike board.create (which only links existing docs), this mints a real new PCB you can switch to and import-changes into. Runs the required 2-step SDK sequence (createBoard shell → createPcb into it) with rollback. Defaults the schematic to the current board's if omitted.",
+			Inputs:      []string{"schematicUuid optional (default = current board's schematic)", "name optional (rename the new board)"},
+			Outputs:     []string{"boardName", "pcbName", "pcbUuid", "schematicUuid"},
+			VerifyWith:  []string{"board.list", "pcb.docs"},
+		},
+		{
 			Name:        "board.rename",
 			Domain:      DomainBoard,
 			Phase:       2,

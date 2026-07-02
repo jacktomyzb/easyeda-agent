@@ -3218,6 +3218,66 @@ const boardDelete: Handler = async (payload) => {
 };
 
 /**
+ * Create a NEW board (板) that CONTAINS a fresh, empty PCB, bound to a schematic —
+ * the programmatic equivalent of the UI's 新建 PCB / 原理图转 PCB. `board.create`
+ * only mints the schematic↔PCB *linkage*; this makes an actual new PCB page you can
+ * switch to and `pcb import-changes` into.
+ *
+ * The SDK needs TWO steps IN ORDER (discovered live — createPcb is a silent no-op on
+ * a board name that doesn't exist yet, which is why every one-shot attempt returned
+ * undefined):
+ *   1. createBoard(schematicUuid) → mints a board *shell* bound to that schematic.
+ *   2. createPcb(boardName)       → adds the PCB INTO that now-existing board.
+ * On step-2 failure we roll back the empty shell so no PCB-less board is left behind.
+ */
+const pcbNewBoard: Handler = async (payload) => {
+	let schematicUuid = optionalString(payload, 'schematicUuid') ?? optionalString(payload, 'schematic');
+	if (!schematicUuid) {
+		// default to the current board's schematic, else the first board in the project.
+		try { schematicUuid = (await eda.dmt_Board.getCurrentBoardInfo())?.schematic?.uuid; }
+		catch { /* none */ }
+		if (!schematicUuid) {
+			try { schematicUuid = (await eda.dmt_Board.getAllBoardsInfo())?.[0]?.schematic?.uuid; }
+			catch { /* none */ }
+		}
+	}
+	if (!schematicUuid) {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'No schematic to bind — pass "schematicUuid" (no current board to infer one from).');
+	}
+
+	let boardName: string | undefined;
+	try { boardName = await eda.dmt_Board.createBoard(schematicUuid); }
+	catch (err) { throw edaError(err, 'Failed to create the board shell.'); }
+	if (!boardName) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'createBoard returned nothing (check the schematicUuid).');
+	}
+
+	let pcbUuid: string | undefined;
+	try { pcbUuid = await eda.dmt_Pcb.createPcb(boardName); }
+	catch (err) {
+		try { await eda.dmt_Board.deleteBoard(boardName); } catch { /* best-effort rollback */ }
+		throw edaError(err, 'Failed to create the PCB in the new board.');
+	}
+	if (!pcbUuid) {
+		try { await eda.dmt_Board.deleteBoard(boardName); } catch { /* best-effort rollback */ }
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'createPcb returned nothing — this EasyEDA build did not create a PCB (SDK no-op).');
+	}
+
+	// optional rename of the new board.
+	const wantName = optionalString(payload, 'name');
+	if (wantName) {
+		try { await eda.dmt_Board.modifyBoardName(boardName, wantName); boardName = wantName; }
+		catch { /* keep the auto name */ }
+	}
+
+	let pcbName: string | undefined;
+	try { pcbName = (await eda.dmt_Pcb.getAllPcbsInfo() ?? []).find((p) => p.uuid === pcbUuid)?.name; }
+	catch { /* best-effort */ }
+
+	return { result: { boardName, pcbName, pcbUuid, schematicUuid } };
+};
+
+/**
  * Sync the schematic netlist/components into the active PCB (从原理图导入变更) —
  * the primary way components arrive on the board. `importChanges` returns false
  * on a floating PCB, so ensure a Board ties the schematic and PCB together
@@ -4879,6 +4939,7 @@ const HANDLERS: Record<string, Handler> = {
 	'board.list': boardList,
 	'board.current': boardCurrent,
 	'board.create': boardCreate,
+	'board.new_pcb': pcbNewBoard,
 	'board.rename': boardRename,
 	'board.copy': boardCopy,
 	'board.delete': boardDelete,

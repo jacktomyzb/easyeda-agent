@@ -73,6 +73,42 @@ cross-fire. The PCB must be the active/foreground document.`,
 		},
 	})
 
+	// ── new-board ─────────────────────────────────────────────────────────
+	// board.new_pcb — create a NEW board (板) with a fresh PCB page from a schematic.
+	{
+		var schematic, name string
+		c := &cobra.Command{
+			Use:   "new-board",
+			Short: "Create a NEW board (板) with a fresh empty PCB page, bound to a schematic",
+			Long: `Create a brand-new board (板) that CONTAINS a fresh, empty PCB page, bound to a
+schematic — the CLI equivalent of the UI's 新建PCB / 原理图转PCB. This is different
+from an existing PCB: you get a clean board to lay out from scratch, still driven by
+the schematic netlist (switch to it, then 'easyeda pcb import-changes').
+
+Under the hood it runs the required 2-step SDK sequence (createBoard shell →
+createPcb into that board — a one-shot createPcb is a silent no-op), with rollback
+if the PCB can't be created. --schematic defaults to the CURRENT board's schematic,
+so in a single-design project you can just run 'easyeda pcb new-board'.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda pcb new-board
+  easyeda pcb new-board --name ESP32-rev2
+  easyeda pcb new-board --schematic de2bc6678317009f --name Proto`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				payload := map[string]any{}
+				if schematic != "" {
+					payload["schematicUuid"] = schematic
+				}
+				if name != "" {
+					payload["name"] = name
+				}
+				return dispatch(cfg, "board.new_pcb", window, payload, stdout, stderr)
+			},
+		}
+		c.Flags().StringVar(&schematic, "schematic", "", "schematic UUID to bind (default = current board's schematic)")
+		c.Flags().StringVar(&name, "name", "", "name for the new board (default = auto, e.g. Board1_1)")
+		pcb.AddCommand(c)
+	}
+
 	// ── list ──────────────────────────────────────────────────────────────
 	// pcb.components.list
 	{
