@@ -16,7 +16,7 @@ func countType(rep pcbCheckReport, typ string) int {
 func TestPcbCheck_DanglingEnd(t *testing.T) {
 	pads := []pcbPadP{{Designator: "R1", Number: "1", Net: "N1", Layer: 1, X: 0, Y: 0}}
 	tracks := []pcbTrack{{ID: "t1", Net: "N1", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10}}
-	rep := analyzePcbCheck(pads, tracks, nil)
+	rep := analyzePcbCheck(pads, tracks, nil, 0)
 	if got := countType(rep, "dangling-end"); got != 1 {
 		t.Fatalf("dangling-end = %d, want 1 (findings: %+v)", got, rep.Findings)
 	}
@@ -33,7 +33,7 @@ func TestPcbCheck_ChainNoDangling(t *testing.T) {
 		{ID: "t1", Net: "N1", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10},
 		{ID: "t2", Net: "N1", Layer: 1, X1: 100, Y1: 0, X2: 200, Y2: 0, Width: 10},
 	}
-	rep := analyzePcbCheck(pads, tracks, nil)
+	rep := analyzePcbCheck(pads, tracks, nil, 0)
 	if !rep.Passed {
 		t.Fatalf("expected clean chain, got findings: %+v", rep.Findings)
 	}
@@ -49,7 +49,7 @@ func TestPcbCheck_AcuteAngle(t *testing.T) {
 		{ID: "t1", Net: "N1", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10},
 		{ID: "t2", Net: "N1", Layer: 1, X1: 0, Y1: 0, X2: 50, Y2: 86.6, Width: 10},
 	}
-	rep := analyzePcbCheck(pads, tracks, nil)
+	rep := analyzePcbCheck(pads, tracks, nil, 0)
 	if got := countType(rep, "acute-angle"); got != 1 {
 		t.Fatalf("acute-angle = %d, want 1 (findings: %+v)", got, rep.Findings)
 	}
@@ -65,7 +65,7 @@ func TestPcbCheck_RightAngleOK(t *testing.T) {
 		{ID: "t1", Net: "N1", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10},
 		{ID: "t2", Net: "N1", Layer: 1, X1: 0, Y1: 0, X2: 0, Y2: 100, Width: 10},
 	}
-	rep := analyzePcbCheck(pads, tracks, nil)
+	rep := analyzePcbCheck(pads, tracks, nil, 0)
 	if got := countType(rep, "acute-angle"); got != 0 {
 		t.Fatalf("acute-angle = %d, want 0 for a 90° corner", got)
 	}
@@ -78,7 +78,7 @@ func TestPcbCheck_OverlappingVia(t *testing.T) {
 		{ID: "v1", Net: "GND", X: 0, Y: 0, Hole: 12, Dia: 24},
 		{ID: "v2", Net: "GND", X: 1, Y: 0, Hole: 12, Dia: 24},
 	}
-	rep := analyzePcbCheck(nil, nil, vias)
+	rep := analyzePcbCheck(nil, nil, vias, 0)
 	if got := countType(rep, "overlapping-via"); got != 1 {
 		t.Fatalf("overlapping-via = %d, want 1", got)
 	}
@@ -92,7 +92,7 @@ func TestPcbCheck_SingleLayerVia(t *testing.T) {
 	pads := []pcbPadP{{Designator: "A", Number: "1", Net: "SIG1", Layer: 1, X: 100, Y: 0}}
 	vias := []pcbViaP{{ID: "v1", Net: "SIG1", X: 0, Y: 0, Hole: 12, Dia: 24}}
 	tracks := []pcbTrack{{ID: "t1", Net: "SIG1", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10}}
-	rep := analyzePcbCheck(pads, tracks, vias)
+	rep := analyzePcbCheck(pads, tracks, vias, 0)
 	if got := countType(rep, "single-layer-via"); got != 1 {
 		t.Fatalf("single-layer-via = %d, want 1 (findings: %+v)", got, rep.Findings)
 	}
@@ -109,7 +109,7 @@ func TestPcbCheck_TwoLayerViaOK(t *testing.T) {
 		{ID: "t1", Net: "SIG1", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10},
 		{ID: "t2", Net: "SIG1", Layer: 2, X1: 0, Y1: 0, X2: 0, Y2: 100, Width: 10},
 	}
-	rep := analyzePcbCheck(pads, tracks, vias)
+	rep := analyzePcbCheck(pads, tracks, vias, 0)
 	if got := countType(rep, "single-layer-via"); got != 0 {
 		t.Fatalf("single-layer-via = %d, want 0 for a real layer transition", got)
 	}
@@ -127,7 +127,7 @@ func TestPcbCheck_WidthMismatch(t *testing.T) {
 		{ID: "t1", Net: "NA", Layer: 1, X1: 0, Y1: 0, X2: -50, Y2: 0, Width: 10},
 		{ID: "t2", Net: "NB", Layer: 1, X1: 100, Y1: 0, X2: 150, Y2: 0, Width: 30},
 	}
-	rep := analyzePcbCheck(pads, tracks, nil)
+	rep := analyzePcbCheck(pads, tracks, nil, 0)
 	if got := countType(rep, "width-mismatch"); got != 1 {
 		t.Fatalf("width-mismatch = %d, want 1 (findings: %+v)", got, rep.Findings)
 	}
@@ -139,9 +139,47 @@ func TestPcbCheck_DuplicateSegment(t *testing.T) {
 		{ID: "t1", Net: "N1", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10},
 		{ID: "t2", Net: "N1", Layer: 1, X1: 50, Y1: 0, X2: 150, Y2: 0, Width: 10},
 	}
-	rep := analyzePcbCheck(nil, tracks, nil)
+	rep := analyzePcbCheck(nil, tracks, nil, 0)
 	if got := countType(rep, "duplicate-segment"); got != 1 {
 		t.Fatalf("duplicate-segment = %d, want 1 (findings: %+v)", got, rep.Findings)
+	}
+}
+
+// Two different-net parallel traces 5 mil apart (need 3×10=30) over 100 mil.
+func TestPcbCheck_ParallelCoupling(t *testing.T) {
+	tracks := []pcbTrack{
+		{ID: "t1", Net: "A", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10},
+		{ID: "t2", Net: "B", Layer: 1, X1: 0, Y1: 5, X2: 100, Y2: 5, Width: 10},
+	}
+	rep := analyzePcbCheck(nil, tracks, nil, 0)
+	if got := countType(rep, "parallel-coupling"); got != 1 {
+		t.Fatalf("parallel-coupling = %d, want 1 (findings: %+v)", got, rep.Findings)
+	}
+}
+
+// Parallel traces far enough apart (50 > 30), same-net pairs, and crossing (not
+// parallel) pairs must NOT be flagged as coupling.
+func TestPcbCheck_CouplingSpacedOK(t *testing.T) {
+	far := []pcbTrack{
+		{ID: "t1", Net: "A", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10},
+		{ID: "t2", Net: "B", Layer: 1, X1: 0, Y1: 50, X2: 100, Y2: 50, Width: 10},
+	}
+	if got := countType(analyzePcbCheck(nil, far, nil, 0), "parallel-coupling"); got != 0 {
+		t.Fatalf("far-apart coupling = %d, want 0", got)
+	}
+	sameNet := []pcbTrack{
+		{ID: "t1", Net: "A", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10},
+		{ID: "t2", Net: "A", Layer: 1, X1: 0, Y1: 5, X2: 100, Y2: 5, Width: 10},
+	}
+	if got := countType(analyzePcbCheck(nil, sameNet, nil, 0), "parallel-coupling"); got != 0 {
+		t.Fatalf("same-net coupling = %d, want 0 (intentional)", got)
+	}
+	crossing := []pcbTrack{
+		{ID: "t1", Net: "A", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10},
+		{ID: "t2", Net: "B", Layer: 1, X1: 50, Y1: -50, X2: 50, Y2: 50, Width: 10},
+	}
+	if got := countType(analyzePcbCheck(nil, crossing, nil, 0), "parallel-coupling"); got != 0 {
+		t.Fatalf("crossing coupling = %d, want 0 (not parallel)", got)
 	}
 }
 
@@ -155,7 +193,7 @@ func TestPcbCheck_CleanBoard(t *testing.T) {
 		{ID: "t1", Net: "NET1", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10},
 		{ID: "t2", Net: "NET1", Layer: 1, X1: 100, Y1: 0, X2: 100, Y2: 100, Width: 10},
 	}
-	rep := analyzePcbCheck(pads, tracks, nil)
+	rep := analyzePcbCheck(pads, tracks, nil, 0)
 	if !rep.Passed || rep.Summary.Total != 0 {
 		t.Fatalf("expected clean board, got %d findings: %+v", rep.Summary.Total, rep.Findings)
 	}

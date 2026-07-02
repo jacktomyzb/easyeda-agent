@@ -1793,21 +1793,23 @@ live track-to-pad clearance. Exits non-zero on any overlap/off-board (gate-able)
 	// (tracks + vias + pads). Read-only. Core in pcb_check.go.
 	{
 		var strict, asJSON bool
+		var couplingW float64
 		c := &cobra.Command{
 			Use:   "check",
-			Short: "DFM audit: acute angles / dangling copper / bad vias / neck-down (reconstructed, read-only)",
+			Short: "DFM audit: acute angles / dangling copper / bad vias / neck-down / 3W coupling (read-only)",
 			Long: `Reconstructed DFM (design-for-manufacture) audit — the manufacturability and
 reliability hazards the native 'pcb drc' does NOT flag. Computed purely from the
 placed copper (pcb.line.list + pcb.via.list + pcb.components.list --include-pads),
 so it needs no extra setup and never mutates the board.
 
 Rules:
-  • dangling-end     — a track end anchored to no pad/via/track  → WARN
-  • acute-angle      — two same-net segments bend <90° (acid trap) → WARN
-  • overlapping-via  — two vias stacked on the same spot          → WARN
-  • single-layer-via — a signal via that changes no layer         → WARN
-  • width-mismatch   — a 2-pin part with asymmetric neck-down     → INFO
-  • duplicate-segment— collinear overlapping (redundant) copper   → WARN
+  • dangling-end      — a track end anchored to no pad/via/track  → WARN
+  • acute-angle       — two same-net segments bend <90° (acid trap) → WARN
+  • overlapping-via   — two vias stacked on the same spot          → WARN
+  • single-layer-via  — a signal via that changes no layer         → WARN
+  • width-mismatch    — a 2-pin part with asymmetric neck-down     → INFO
+  • duplicate-segment — collinear overlapping (redundant) copper   → WARN
+  • parallel-coupling — different-net traces closer than N×W (3W rule) → WARN
 
 Complements 'pcb drc' (rule clearance) and 'pcb layout-lint' (placement/routability).
 Exit code: 0 by default (informational). --strict exits non-zero on any WARN/ERROR
@@ -1815,13 +1817,15 @@ so it can gate the flow. Arcs are out of scope for v1 (line/via/pad only).`,
 			Args: cobra.NoArgs,
 			Example: `  easyeda pcb check
   easyeda pcb check --json
-  easyeda pcb check --strict`,
+  easyeda pcb check --strict
+  easyeda pcb check --coupling-w 2.5`,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return runPcbCheck(cfg, window, strict, asJSON, stdout, stderr)
+				return runPcbCheck(cfg, window, couplingW, strict, asJSON, stdout, stderr)
 			},
 		}
 		c.Flags().BoolVar(&strict, "strict", false, "exit non-zero when there are issues (gate mode)")
 		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
+		c.Flags().Float64Var(&couplingW, "coupling-w", 3.0, "3W-rule factor: flag different-net parallel traces closer than this × trace width")
 		pcb.AddCommand(c)
 	}
 

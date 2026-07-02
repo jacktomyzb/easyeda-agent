@@ -34,6 +34,10 @@ const (
 	pcbWidthTolMil = 1.0  // absolute width tolerance for 2-pin neck-down symmetry
 	pcbWidthTolRel = 0.25 // relative width tolerance (25%)
 	pcbDupOverlap  = 2.0  // collinear same-net overlap longer than this = duplicate copper
+
+	pcbCouplingW       = 3.0  // default 3W factor: center-to-center spacing < this×maxWidth = coupling risk
+	pcbParallelDeg     = 15.0 // two segments within this of parallel/anti-parallel are "parallel"
+	pcbCouplingMinOvlp = 20.0 // parallel overlap must exceed this (mil) to count (ignore incidental)
 )
 
 // pcbTrack is one copper line segment (pcb.line.list).
@@ -92,6 +96,7 @@ type pcbCheckSummary struct {
 	SingleLayerVias   int `json:"singleLayerVias"`
 	WidthMismatches   int `json:"widthMismatches"`
 	DuplicateSegments int `json:"duplicateSegments"`
+	ParallelCoupling  int `json:"parallelCoupling"`
 	Warnings          int `json:"warnings"`
 	Total             int `json:"total"`
 }
@@ -105,9 +110,13 @@ type pcbCheckReport struct {
 	Findings   []pcbCheckFinding `json:"findings"`
 }
 
-// analyzePcbCheck is the pure DFM core over placed primitives.
-func analyzePcbCheck(pads []pcbPadP, tracks []pcbTrack, vias []pcbViaP) pcbCheckReport {
+// analyzePcbCheck is the pure DFM core over placed primitives. couplingW is the
+// 3W-rule center-spacing factor (≤0 → default pcbCouplingW).
+func analyzePcbCheck(pads []pcbPadP, tracks []pcbTrack, vias []pcbViaP, couplingW float64) pcbCheckReport {
 	rep := pcbCheckReport{TrackCount: len(tracks), ViaCount: len(vias), PadCount: len(pads)}
+	if couplingW <= 0 {
+		couplingW = pcbCouplingW
+	}
 
 	// Drop degenerate zero-length tracks up front (they connect nothing and would
 	// pollute angle/dangling math).
@@ -124,6 +133,7 @@ func analyzePcbCheck(pads []pcbPadP, tracks []pcbTrack, vias []pcbViaP) pcbCheck
 	rep.Findings = append(rep.Findings, findViaIssues(tracks, vias)...)
 	rep.Findings = append(rep.Findings, findWidthMismatch(tracks, pads)...)
 	rep.Findings = append(rep.Findings, findDuplicateSegments(tracks)...)
+	rep.Findings = append(rep.Findings, findParallelCoupling(tracks, couplingW)...)
 
 	for _, f := range rep.Findings {
 		switch f.Type {
@@ -139,6 +149,8 @@ func analyzePcbCheck(pads []pcbPadP, tracks []pcbTrack, vias []pcbViaP) pcbCheck
 			rep.Summary.WidthMismatches++
 		case "duplicate-segment":
 			rep.Summary.DuplicateSegments++
+		case "parallel-coupling":
+			rep.Summary.ParallelCoupling++
 		}
 		if f.Level == "WARN" || f.Level == "ERROR" {
 			rep.Summary.Warnings++
@@ -418,6 +430,83 @@ func collinearOverlap(a, b pcbTrack) (float64, bool) {
 	return hi - lo, true
 }
 
+// ── R6: 3W parallel-coupling ────────────────────────────────────────────────
+// Two DIFFERENT-net, same-layer segments running near-parallel with a
+// center-to-center gap below couplingW×maxWidth, over a meaningful overlap, are
+// a crosstalk / manufacturing-spacing risk (the classic 3W rule). Same-net pairs
+// (intentional) and power/GND (poured, not coupled tracks) are skipped.
+func findParallelCoupling(tracks []pcbTrack, couplingW float64) []pcbCheckFinding {
+	var out []pcbCheckFinding
+	for i := 0; i < len(tracks); i++ {
+		a := tracks[i]
+		if isGlobalNet(a.Net) {
+			continue
+		}
+		for j := i + 1; j < len(tracks); j++ {
+			b := tracks[j]
+			if a.Net == b.Net || a.Layer != b.Layer || isGlobalNet(b.Net) {
+				continue
+			}
+			gap, ovlp, ok := parallelGap(a, b)
+			if !ok || ovlp < pcbCouplingMinOvlp {
+				continue
+			}
+			need := couplingW * math.Max(a.Width, b.Width)
+			if gap < need {
+				na, nb := a.Net, b.Net
+				if nb < na {
+					na, nb = nb, na
+				}
+				out = append(out, pcbCheckFinding{
+					Type: "parallel-coupling", Level: "WARN", Nets: []string{na, nb}, Layer: a.Layer,
+					Primitives: []string{a.ID, b.ID},
+					Message: fmt.Sprintf("parallel traces %.1f mil apart over %.0f mil (< %.1f mil = %.0f×W) — crosstalk/3W risk",
+						gap, ovlp, need, couplingW),
+				})
+			}
+		}
+	}
+	return out
+}
+
+// parallelGap reports, for two near-parallel segments, their center-to-center
+// perpendicular gap and the length over which they run parallel (their overlap
+// projected onto a's direction). ok=false when they are not parallel.
+func parallelGap(a, b pcbTrack) (gap, overlap float64, ok bool) {
+	adx, ady := a.X2-a.X1, a.Y2-a.Y1
+	bdx, bdy := b.X2-b.X1, b.Y2-b.Y1
+	la, lb := math.Hypot(adx, ady), math.Hypot(bdx, bdy)
+	if la < 1e-9 || lb < 1e-9 {
+		return 0, 0, false
+	}
+	ang := angleBetween(adx, ady, bdx, bdy)
+	if ang > pcbParallelDeg && ang < 180-pcbParallelDeg {
+		return 0, 0, false // not parallel nor anti-parallel
+	}
+	// unit direction of a; project b's endpoints + a's endpoints onto it.
+	ux, uy := adx/la, ady/la
+	proj := func(x, y float64) float64 { return (x-a.X1)*ux + (y-a.Y1)*uy }
+	a0, a1 := 0.0, la
+	b0, b1 := proj(b.X1, b.Y1), proj(b.X2, b.Y2)
+	if b0 > b1 {
+		b0, b1 = b1, b0
+	}
+	lo := math.Max(math.Min(a0, a1), b0)
+	hi := math.Min(math.Max(a0, a1), b1)
+	overlap = hi - lo
+	if overlap <= 0 {
+		return 0, 0, false // parallel but don't run alongside each other
+	}
+	// perpendicular gap: distance from b's midpoint (of the overlap region) to a's
+	// infinite line — a good proxy for the constant separation of parallel lines.
+	mt := (lo + hi) / 2
+	// midpoint on a's line at param mt:
+	amx, amy := a.X1+ux*mt, a.Y1+uy*mt
+	// closest point of b's segment to that midpoint gives the true separation.
+	gap = segPtDist(amx, amy, b.X1, b.Y1, b.X2, b.Y2)
+	return gap, overlap, true
+}
+
 // ── geometry helpers ────────────────────────────────────────────────────────
 
 // segPtDist is the distance from (px,py) to segment (ax,ay)-(bx,by). Unlike the
@@ -480,7 +569,7 @@ func uniqStr(in []string) []string {
 
 // runPcbCheck pulls placed copper (tracks + vias + pads), runs the DFM audit,
 // renders it, and (with strict) returns a non-zero exit when there are findings.
-func runPcbCheck(cfg *appConfig, window string, strict, asJSON bool, stdout, stderr io.Writer) error {
+func runPcbCheck(cfg *appConfig, window string, couplingW float64, strict, asJSON bool, stdout, stderr io.Writer) error {
 	pads, err := fetchPcbPads(cfg, window)
 	if err != nil {
 		return fmt.Errorf("fetch PCB pads: %w", err)
@@ -494,7 +583,7 @@ func runPcbCheck(cfg *appConfig, window string, strict, asJSON bool, stdout, std
 		return fmt.Errorf("fetch PCB vias: %w", err)
 	}
 
-	rep := analyzePcbCheck(pads, tracks, vias)
+	rep := analyzePcbCheck(pads, tracks, vias, couplingW)
 
 	if asJSON {
 		enc := json.NewEncoder(stdout)
@@ -598,8 +687,8 @@ func renderPcbCheckReport(rep pcbCheckReport, w io.Writer) {
 		fmt.Fprintln(w, "  ✓ no DFM issues found")
 		return
 	}
-	fmt.Fprintf(w, "  dangling=%d acute=%d overlapVia=%d singleLayerVia=%d widthMismatch=%d dupSegment=%d\n",
-		s.DanglingEnds, s.AcuteAngles, s.OverlappingVias, s.SingleLayerVias, s.WidthMismatches, s.DuplicateSegments)
+	fmt.Fprintf(w, "  dangling=%d acute=%d overlapVia=%d singleLayerVia=%d widthMismatch=%d dupSegment=%d coupling=%d\n",
+		s.DanglingEnds, s.AcuteAngles, s.OverlappingVias, s.SingleLayerVias, s.WidthMismatches, s.DuplicateSegments, s.ParallelCoupling)
 	for _, f := range rep.Findings {
 		loc := ""
 		if f.At != nil {
