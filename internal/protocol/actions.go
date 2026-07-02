@@ -36,6 +36,15 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"daemon status", "connected windows", "active window"},
 		},
 		{
+			Name:        "system.notify",
+			Domain:      DomainSystem,
+			Phase:       1,
+			NeedsWindow: true,
+			Description: "Show a non-blocking toast INSIDE the EasyEDA window — the design flow announces each stage as it passes (完成 X,下一步 Y) so the user can watch progress live.",
+			Inputs:      []string{"message (required)", "type optional (info|success|warn|error|question, default info)", "duration optional (seconds, default 3)"},
+			Outputs:     []string{"shown", "message", "type"},
+		},
+		{
 			Name:        "project.current",
 			Domain:      DomainProject,
 			Phase:       1,

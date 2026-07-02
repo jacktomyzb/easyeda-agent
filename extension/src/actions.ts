@@ -3277,6 +3277,25 @@ const pcbNewBoard: Handler = async (payload) => {
 	return { result: { boardName, pcbName, pcbUuid, schematicUuid } };
 };
 
+// system.notify — surface a toast INSIDE the EasyEDA window (设计流程步骤通知).
+// Non-blocking; the design flow calls it as each stage passes so the user can watch
+// progress live ("完成 布线,下一步 铺铜"). type ∈ info|success|warn|error|question.
+const systemNotify: Handler = async (payload) => {
+	const message = requireString(payload, 'message');
+	const raw = (optionalString(payload, 'type') ?? 'info').toLowerCase();
+	const kind = raw === 'warning' ? 'warn' : raw;
+	const allowed = new Set(['info', 'success', 'warn', 'error', 'question']);
+	const t = (allowed.has(kind) ? kind : 'info') as ESYS_ToastMessageType;
+	const timer = optionalNumber(payload, 'duration') ?? 3;
+	try {
+		eda.sys_Message.showToastMessage(message, t, timer);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to show the notification toast.');
+	}
+	return { result: { shown: true, message, type: t } };
+};
+
 /**
  * Sync the schematic netlist/components into the active PCB (从原理图导入变更) —
  * the primary way components arrive on the board. `importChanges` returns false
@@ -4940,6 +4959,7 @@ const HANDLERS: Record<string, Handler> = {
 	'board.current': boardCurrent,
 	'board.create': boardCreate,
 	'board.new_pcb': pcbNewBoard,
+	'system.notify': systemNotify,
 	'board.rename': boardRename,
 	'board.copy': boardCopy,
 	'board.delete': boardDelete,

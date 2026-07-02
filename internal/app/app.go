@@ -62,6 +62,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	root.AddCommand(
 		newVersionCmd(stdout),
 		newActionsCmd(stdout, stderr),
+		newNotifyCmd(cfg, stdout, stderr),
 		newCallCmd(cfg, stdout, stderr),
 		newDaemonCmd(cfg, stdout, stderr),
 		newAuditCmd(stdout, stderr),
@@ -92,6 +93,39 @@ func newVersionCmd(stdout io.Writer) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// ── notify ────────────────────────────────────────────────────────────────
+
+func newNotifyCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
+	var window, message, typ string
+	var duration float64
+	c := &cobra.Command{
+		Use:   "notify",
+		Short: "Show a toast inside the EasyEDA window (design-flow step notification)",
+		Long: `Surface a non-blocking toast INSIDE the EasyEDA window. The design flow calls this
+as each stage passes so the user can watch progress live — "完成 X,下一步 Y".
+type ∈ info | success | warn | error | question.`,
+		Args: cobra.NoArgs,
+		Example: `  easyeda notify --message "完成 布局,下一步 布线" --type success
+  easyeda notify --message "DRC 未通过,需修复" --type error --duration 5`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{"message": message}
+			if typ != "" {
+				payload["type"] = typ
+			}
+			if cmd.Flags().Changed("duration") {
+				payload["duration"] = duration
+			}
+			return dispatch(cfg, "system.notify", window, payload, stdout, stderr)
+		},
+	}
+	c.Flags().StringVar(&message, "message", "", "toast text (required)")
+	c.Flags().StringVar(&typ, "type", "info", "info | success | warn | error | question")
+	c.Flags().Float64Var(&duration, "duration", 3, "seconds to show")
+	c.Flags().StringVar(&window, "window", "", "EasyEDA window ID (else use --project)")
+	_ = c.MarkFlagRequired("message")
+	return c
 }
 
 // ── actions ───────────────────────────────────────────────────────────────

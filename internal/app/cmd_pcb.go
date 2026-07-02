@@ -1296,7 +1296,7 @@ exported DSN contains keepout entries before trusting the result.`,
 		var noRotate bool
 		var multiGap float64
 		var mainPins int
-		var gap, pitch float64
+		var gap, pitch, assemblyGap float64
 		var dryRun bool
 		c := &cobra.Command{
 			Use:   "auto-place",
@@ -1330,12 +1330,13 @@ This is a SEED, not a final layout — verify with 'pcb drc'.
 				// 2. Plan (pure, daemon-side).
 				opt := defaultApOptions()
 				// Clearance-aware spacing: derive gap/pitch from the board's live DRC
-				// rule (room for a legal track + clearances between parts) instead of
-				// the hardcoded 40/30, so packing never creates sub-clearance corridors
-				// and packs as tight as the rule allows. (#22)
+				// rule (room for a legal track + clearances between parts). (#22) BUT
+				// floor it at --assembly-gap so parts also keep hand-SOLDER room around
+				// their pads — a bare DRC-clearance gap (~28mil) routes fine but is too
+				// cramped to reach with an iron tip; default 40mil leaves that room.
 				apRules := fetchPcbRules(cfg, window)
-				opt.gap = math.Max(12, apRules.clearanceMil*2+apRules.trackWidthMil+6)
-				opt.pitch = math.Max(8, apRules.clearanceMil+apRules.trackWidthMil)
+				opt.gap = math.Max(assemblyGap, apRules.clearanceMil*2+apRules.trackWidthMil+6)
+				opt.pitch = math.Max(assemblyGap*0.7, apRules.clearanceMil+apRules.trackWidthMil)
 				if mainPins > 0 {
 					opt.mainPins = mainPins
 				}
@@ -1389,8 +1390,9 @@ This is a SEED, not a final layout — verify with 'pcb drc'.
 			},
 		}
 		c.Flags().IntVar(&mainPins, "main-pins", 0, "distinct-pin threshold to treat a component as a main chip (default 8)")
-		c.Flags().Float64Var(&gap, "gap", 0, "clearance from chip edge to satellite (mil, default 40)")
-		c.Flags().Float64Var(&pitch, "pitch", 0, "spacing between satellites packed on the same edge (mil, default 30)")
+		c.Flags().Float64Var(&gap, "gap", 0, "override: fixed clearance from chip edge to satellite (mil); 0 = derive")
+		c.Flags().Float64Var(&pitch, "pitch", 0, "override: fixed spacing between satellites on the same edge (mil); 0 = derive")
+		c.Flags().Float64Var(&assemblyGap, "assembly-gap", 40, "min hand-SOLDER clearance around each part (mil floor for gap/pitch)")
 		c.Flags().BoolVar(&noRotate, "no-rotate", false, "do not re-orient satellites (v1 translate-only behavior)")
 		c.Flags().Float64Var(&multiGap, "multi-gap", 0, "min bbox gap between multiple main chips (mil, default 150; 0 disables spacing)")
 		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the placement plan without moving anything")

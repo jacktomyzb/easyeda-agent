@@ -97,6 +97,7 @@ type pcbSilkText struct {
 const (
 	pcbSideTop      = 1
 	pcbSideBottom   = 2
+	pcbLayerMulti   = 12 // 多层 / MULTI — a region here spans every copper layer at once
 	silkTopLayer    = 3
 	silkBottomLayer = 4
 )
@@ -763,6 +764,12 @@ func findAntennaKeepout(ants []pcbAntComp, regions []pcbKeepRegion, copperLayers
 		for _, r := range regions {
 			if r.BBox == nil || !boxesOverlap(*a.BBox, *r.BBox) {
 				continue
+			}
+			// A MULTI-layer (12/多层) no-copper keep-out covers EVERY copper layer at
+			// once — top, bottom, AND inner — the simplest one-region way to protect an
+			// antenna (no need for a per-layer region on each).
+			if r.NoOuterCopper && r.Layer == pcbLayerMulti {
+				topOK, botOK, innerOK = true, true, true
 			}
 			if r.NoOuterCopper && r.Layer == pcbSideTop {
 				topOK = true

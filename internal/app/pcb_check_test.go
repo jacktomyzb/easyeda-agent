@@ -417,6 +417,14 @@ func TestPcbCheck_AntennaKeepout(t *testing.T) {
 	if got := len(findAntennaKeepout(ants, twoLayer, 2)); got != 0 {
 		t.Fatalf("top+bottom keep-out (2L) = %d, want 0", got)
 	}
+	// A SINGLE MULTI-layer (12/多层) no-copper region covers top+bottom+inner at once → clear on 4L.
+	multi := []pcbKeepRegion{{BBox: bb, Layer: pcbLayerMulti, NoOuterCopper: true}}
+	if got := len(findAntennaKeepout(ants, multi, 4)); got != 0 {
+		t.Fatalf("multi-layer keep-out (4L) = %d, want 0 (12 covers all layers)", got)
+	}
+	if got := len(findAntennaKeepout(ants, multi, 2)); got != 0 {
+		t.Fatalf("multi-layer keep-out (2L) = %d, want 0", got)
+	}
 	if !isAntennaDevice("ESP32-S3-WROOM-1", "U1") || !isAntennaDevice("", "ANT1") || isAntennaDevice("0402WGF", "R2") {
 		t.Fatal("isAntennaDevice classification wrong")
 	}

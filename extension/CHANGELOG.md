@@ -37,6 +37,9 @@ UX fix. (Consolidates the dev-loop releases 0.6.1–0.6.7 below.)
   silent no-op — `createBoard(schematicUuid)` mints a board shell, then
   `createPcb(boardName)` adds the PCB INTO it — with shell rollback on failure.
   `--schematic` defaults to the current board's schematic.
+- **`easyeda notify` (`system.notify`)** — show a non-blocking toast INSIDE the EasyEDA
+  window so the design flow can announce each stage live ("完成 布线,下一步 铺铜").
+  `--type info|success|warn|error|question`, `--duration`.
 
 ### Changed
 - **`pcb silk-align` → position-aware (v2)** — ranks each designator's 4 sides by local
@@ -47,6 +50,12 @@ UX fix. (Consolidates the dev-loop releases 0.6.1–0.6.7 below.)
 - **`pcb power-planes` flips the GND inner layer to 内电层/PLANE** after pouring (verified
   pour-while-SIGNAL → flip-type → rebuild recipe, DRC clean), matching the common customer
   stackup GND=内电层 / VCC=信号层. Drove the ESP32 regression board DRC 31→0, No-Connection→0.
+- **`pcb auto-place --assembly-gap` (default 40 mil)** floors the chip-to-satellite gap at a
+  hand-SOLDER clearance, not just the DRC routing clearance (~28 mil packed too tight to
+  reach with an iron). **`pcb check` antenna-keepout now recognizes a single MULTI-layer(12)
+  region** as covering every copper layer — one 多层 keep-out replaces the per-layer set.
+  design-flow.md PCB pipeline reordered so keep-out regions + silk-align run BEFORE routing
+  (post-hoc keep-outs forced re-routing).
 
 ### Fixed
 - **Reconnect toast dedup** — one toast per daemon outage instead of one on every 3s retry
