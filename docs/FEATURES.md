@@ -236,6 +236,25 @@ These are planned and **not implemented** today.
 - **立创商城比对选型 / LCSC mall comparison selection** — compare candidate parts by
   price / stock / specs to pick the optimal one. Not built.
 
+### 验收用例 roadmap (acceptance regressions, NOT yet run end-to-end)
+
+两块 ESP32 最小系统板作为**端到端检查验收基准**——跑通即证明放置→布线→`pcb check`
+(含新的丝印正反 / 走线压焊盘 / 非正交走线规则)→DRC 全流程闭环。
+
+- **task #34 — ESP32 **模组**最小系统板 (module minimal system).** 承接
+  [`docs/test-case-esp32-blink.md`](test-case-esp32-blink.md) 的 ESP32-S3-WROOM-1
+  模组板,升级为「完整最小系统」验收:3V3 供电 + 去耦 + EN/IO0 上拉 straps + 点灯 LED,
+  PCB 侧走 [`docs/test-case-esp32-pcb.md`](test-case-esp32-pcb.md) 脊柱,**收尾必须
+  `pcb check` 0 ERROR**(含丝印正反、走线压焊盘)。模组自带天线/晶振/flash,keep-out
+  只需盖模组天线区。
+- **task #35 — ESP32 **芯片级** N8R8 最小系统板 (bare-chip minimal system, no module
+  template).** 用裸 **ESP32-S3** 芯片(不是 WROOM 模组),自己搭最小系统:**PCB 板载
+  天线 + π 型匹配网络**、**N8R8 = 8MB flash + 8MB PSRAM**、40MHz 晶振、EN/boot straps、
+  多路去耦。规格见 [`docs/test-case-esp32-chip-n8r8.md`](test-case-esp32-chip-n8r8.md)。
+  这是比模组板更硬的验收:天线 keep-out + 阻抗、晶振布局、flash/PSRAM 高速走线,压满
+  `pcb check` 的走线/丝印规则。**先补 `standard-parts.json` 芯片级选型**(ESP32-S3 裸片 /
+  flash / PSRAM / 天线器件)再跑。
+
 ### LCSC C-number lost on placed parts → fixed by BOM enrichment
 
 A placed component's `getState_SupplierId()` returns `MPN.1` (e.g.
