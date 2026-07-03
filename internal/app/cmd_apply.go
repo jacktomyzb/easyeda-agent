@@ -113,6 +113,7 @@ func newApplyCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		fromRef, toRef             string
 		journalPath, window        string
 		varOverrides               []string
+		stepDelay                  float64
 	)
 
 	cmd := &cobra.Command{
@@ -166,6 +167,7 @@ Precedence: CLI flag > playbook file > built-in default.`,
 				pb: pb, pbPath: args[0], sha: sha256Hex(raw), vars: vars,
 				window: effWindow, yes: yes, quiet: quiet,
 				journalPath: journalPath,
+				stepDelay:   time.Duration(stepDelay * float64(time.Second)),
 			}
 			if dryRun {
 				return r.printPlan()
@@ -191,6 +193,7 @@ Precedence: CLI flag > playbook file > built-in default.`,
 	cmd.Flags().StringVar(&journalPath, "journal", "", "journal path (default <playbook>.journal.jsonl)")
 	cmd.Flags().StringVar(&window, "window", "", "EasyEDA window ID (overrides meta.window)")
 	cmd.Flags().StringArrayVar(&varOverrides, "var", nil, "override/add a playbook var: KEY=VALUE (repeatable)")
+	cmd.Flags().Float64Var(&stepDelay, "step-delay", 0, "pause N seconds between steps (demo / recording pacing)")
 	return cmd
 }
 
@@ -612,6 +615,7 @@ type applyRunner struct {
 	journalPath string
 	journal     *os.File
 	doneOK      map[int]bool // idx (0-based) -> already ok (resume)
+	stepDelay   time.Duration
 
 	fromIdx, toIdx int // 0-based inclusive range
 }
@@ -841,6 +845,9 @@ func (r *applyRunner) execute() error {
 					mark = " 💾"
 				}
 				fmt.Fprintf(r.stdout, "[%d/%d] %-16s ok (%.1fs)%s\n", i+1, len(r.pb.Steps), ref, float64(ms)/1000, mark)
+			}
+			if r.stepDelay > 0 && i < r.toIdx {
+				time.Sleep(r.stepDelay)
 			}
 			continue
 		}
