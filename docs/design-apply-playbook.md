@@ -132,6 +132,30 @@ easyeda apply sch.playbook.json --var LIB=其他库uuid   # 参数化复写
 easyeda apply pcb.playbook.json --resume              # 断点续跑
 ```
 
+### 错误处理(定稿——步骤间息息相关,默认从严)
+
+1. **默认即最严:失败即终止。** 步骤互相依赖(后步引用 capture 变量、假设前步已生效),
+   带病续跑必然放大破坏。任何执行错误或 assert 不过 → 终止整册、退出码 1、醒目报错
+   (步骤 id / 动作 / payload 摘要 / 错误详情 / journal 路径 / `--resume` 提示)。
+2. **默认重试,但按「可否安全重试」分类**(出厂 `defaults.retry: 2`,退避 2s→5s):
+   - **只读步骤**(catalog `Mutates:false` 或 run 白名单 list/check/lint/drc):超时、
+     连接器忙、无窗口 → 自动重试 ✓;
+   - **变更类步骤超时:不自动重试,直接 stop**——平台实测超时的 mutation 可能**已生效**
+     (本项目踩过:place 超时但器件已落板),盲重试 = 双重放置。报错时附提示:
+     「变更可能已生效,先用 verify/读回确认,再 --resume」。
+   - payload 校验错、变量未定义等确定性错误:不重试,直接 stop。
+3. **`verify` 块 = 「停下来检查校验」的机器化**(可选,变更类步骤强烈建议):
+   ```jsonc
+   { "id": "place-u1", "action": "schematic.component.place", "payload": { … },
+     "verify": { "action": "schematic.components.list",
+                 "assert": { "$.components[?(@.designator=='U1')]": "exists" } } }
+   ```
+   步骤失败/超时后先跑 verify:**过 = 视为已生效,继续**;不过 = 按第 2 条重试/终止。
+   这让「超时但其实成功」不再需要人工介入。
+4. **人工介入回路**:stop 后 journal 保留全部状态(含 captured 变量)→ 人/agent 检查修复
+   → `--resume` 原地续跑(或 `--from <id>` 指定)。
+5. `onFail: continue` 仅限显式标注的非关键步骤(notify/截图);`prompt` 交互决定。
+
 ## 关键设计决策
 
 1. **刻意不做编程语言**——无条件分支、无循环。60 行数据就是 60 步。生成侧(agent/
