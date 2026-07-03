@@ -1,4 +1,4 @@
-.PHONY: help test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test release
+.PHONY: help test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test release replay demo-replay
 
 DIST := dist
 
@@ -29,6 +29,16 @@ fmt: ## gofmt cmd + internal
 
 actions: ## print the typed action catalog
 	go run ./cmd/easyeda actions
+
+# ── playbook 回放(esp32-mini 录制样例)────────────────────────────────────
+# PROJECT 可覆写(默认 ceshi);moves.playbook.json 的 s7-s24 是幂等移件区间。
+PROJECT ?= ceshi
+
+replay: ## 回放 esp32-mini 移件 playbook,恢复布局(PROJECT=ceshi)
+	easyeda apply examples/esp32-mini/moves.playbook.json --from 7 --to 24 --project $(PROJECT)
+
+demo-replay: ## 演示:挪乱4件→观察→逐步回放恢复(PAUSE=30 STEP_DELAY=1.2 可覆写)
+	bash examples/esp32-mini/demo-replay.sh
 
 api-index: ## regenerate the embedded eda.* API index (run after bumping pro-api-types)
 	python3 internal/apidoc/gen.py
