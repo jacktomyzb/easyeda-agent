@@ -30,6 +30,11 @@ Clearance 26→**0**、`pcb check` **0**、`layout-lint` **100/100**。残留 1 
 ### B. CLI / daemon 改进
 
 **P0(直接阻塞本轮的)**
+- [ ] **`easyeda apply <playbook.json>` 声明式步骤回放**(设计见
+  [`design-apply-playbook.md`](./design-apply-playbook.md)):本轮 10 个一次性 bash
+  胶水脚本的根治;含变量捕获(`capture`/`${}`)、门禁步骤(assert/onFail)、journal
+  断点续跑、`audit export --playbook` 录制导出。esp32 案例固化为 examples 双 playbook
+  即回归用例。**它同时吸收下列 via-hop(做成宏步骤)与部分 --json 需求。**
 - [ ] `pcb drc --timeout <s>` + **忙时防重入**(daemon 侧:上一个 DRC 未返回不再下发;超时报错附「把 EasyEDA 切前台」提示)。
 - [ ] **`pcb via-hop` 复合命令**:stub + via + 对层 track + via + stub + **自动 4 片键合 fill**,一条命令封掉 A1 坑。
 - [ ] `pcb via-delete --ids` / `pcb track-delete --ids`(现只能整网 `rip-up`,单颗错 via 要重铺全网)。
