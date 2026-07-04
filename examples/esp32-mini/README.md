@@ -65,12 +65,21 @@ make demo-replay                            # 挪乱4件→观察→回放归位
 > - **阶段二**:182/182 步执行成功;铜几何与金板逐条一致(89 tracks / 37 vias / 5 pours),
 >   `layout-lint` 100/100、`pcb check` 0。
 
-## ⚠️ 已知问题:新 PCB 上铺铜 reflow 行为不一致(调查中)
+## ⚠️ 已知问题:新 PCB 上铺铜 reflow 行为不一致(已有 API 侧修法)
 
 在新建 PCB 上回放后,官方 DRC 报 GND 热焊盘未生成(No Connection)+ 铺铜到焊盘
 ~9.7mil(<10 规则)。**已排除**:DRC 规则(与金板逐键一致,仅浮点尾数差)、叠层
 (4 层 + L15 PLANE 相同)、pour 图元属性(fill/priority/silos 相同)、创建时机
 (同规则下重新 pour-fit 复现)。金板同期复测依旧全绿 → **同工程内两块 PCB 对相同
-输入的 reflow 结果不同**,疑似 per-PCB 隐藏填充参数或平台缺陷,正在做最小复现
-(候选官方 issue)。临时手工修法:在 EasyEDA UI 里对该板执行一次「重新铺铜」
-并检查 铺铜设置(安全间距/焊盘连接方式)后保存。
+输入的 reflow 结果不同**,疑似 per-PCB 隐藏填充参数或平台缺陷(候选官方 issue)。
+
+**已验证的 API 侧修法(2026-07-04,ceshi/PCB2 DRC 28→1)**:用
+`eda.pcb_Drc.overwriteCurrentRuleConfiguration(cfg.config)` 把 `config.Plane` 下
+`copperRegion`(两个 pad model)+ `innerPlane` 的 `lineClearance` 从 0.254 提到
+0.3048mm(10→12mil),再 `pcb pour-rebuild` —— 21 处铺铜间距违例**和** 6 处 GND
+No-Connection(热焊盘缺失)一次全清,剩 1 条为已知 add-component 网表常驻误报。
+两个陷阱:①参数必须传**裸 config 内容**(`getCurrentRuleConfiguration()` 返回的
+`{name, config}` 整个传入会**静默失败**,resolve `undefined` 且读回不变);
+②系统预设 `JLCPCB Capability(...)` 不可修改,写入成功后当前配置自动变为「自定义配置」。
+值得注意:切到自定义配置后同一次 rebuild 连热焊盘也正常生成了 —— 分歧疑似与
+**系统预设配置在新建 PCB 上的 reflow 路径**有关,可作为最小复现的切入点。
