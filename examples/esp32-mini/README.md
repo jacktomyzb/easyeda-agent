@@ -59,4 +59,18 @@ make demo-replay                            # 挪乱4件→观察→回放归位
 | `moves.playbook.json` | `audit export --playbook` 的录制样例(demo-replay 用) |
 | `demo-replay.sh` | 挪乱→回放演示脚本 |
 
-> 已验证:阶段一在全新页上 47/47 步通过,重建网表与金板逐位一致(2026-07-04)。
+> 已验证(2026-07-04):
+> - **阶段一**:两次全新环境(新页 + 新板)47/47 通过,重建网表与金板**逐位一致**,
+>   uniqueId 确定性成立(fresh 板 = 默认 gge1..19,零覆写)。
+> - **阶段二**:182/182 步执行成功;铜几何与金板逐条一致(89 tracks / 37 vias / 5 pours),
+>   `layout-lint` 100/100、`pcb check` 0。
+
+## ⚠️ 已知问题:新 PCB 上铺铜 reflow 行为不一致(调查中)
+
+在新建 PCB 上回放后,官方 DRC 报 GND 热焊盘未生成(No Connection)+ 铺铜到焊盘
+~9.7mil(<10 规则)。**已排除**:DRC 规则(与金板逐键一致,仅浮点尾数差)、叠层
+(4 层 + L15 PLANE 相同)、pour 图元属性(fill/priority/silos 相同)、创建时机
+(同规则下重新 pour-fit 复现)。金板同期复测依旧全绿 → **同工程内两块 PCB 对相同
+输入的 reflow 结果不同**,疑似 per-PCB 隐藏填充参数或平台缺陷,正在做最小复现
+(候选官方 issue)。临时手工修法:在 EasyEDA UI 里对该板执行一次「重新铺铜」
+并检查 铺铜设置(安全间距/焊盘连接方式)后保存。

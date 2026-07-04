@@ -509,6 +509,8 @@ func evalPredicate(val any, found bool, pred string) (bool, string) {
 			n = len(t)
 		case string:
 			n = len(t)
+		case nil:
+			n = 0 // JSON null collection == empty (e.g. layout-lint "overlaps": null)
 		default:
 			return false, fmt.Sprintf("len unsupported on %T", val)
 		}

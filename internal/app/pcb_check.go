@@ -232,7 +232,7 @@ func findDanglingEnds(tracks []pcbTrack, vias []pcbViaP, pads []pcbPadP) []pcbCh
 	for i, t := range tracks {
 		for _, ep := range [][2]float64{{t.X1, t.Y1}, {t.X2, t.Y2}} {
 			px, py := ep[0], ep[1]
-			if anchored(px, py, i, t.Layer, tracks, vias, pads) {
+			if anchored(px, py, i, t.Layer, t.Net, tracks, vias, pads) {
 				continue
 			}
 			k := [2]int64{int64(math.Round(px * 100)), int64(math.Round(py * 100))}
@@ -250,14 +250,27 @@ func findDanglingEnds(tracks []pcbTrack, vias []pcbViaP, pads []pcbPadP) []pcbCh
 	return out
 }
 
+// padBodyAnchorTol is the same-net pad anchoring tolerance: the pad list carries
+// only centers (no extents), so an endpoint landing INSIDE the pad copper but off
+// its center (a legitimate bond — EasyEDA's own connectivity accepts it, verified
+// on U1's castellated GND stubs) must still anchor. 30 mil covers typical pad
+// half-extents without reaching a neighboring pad (smallest pitch on board ≥ 20 mil
+// applies only to FOREIGN nets, which keep the strict epsilon below).
+const padBodyAnchorTol = 30.0
+
 // anchored reports whether a track endpoint at (px,py) on copper layer `layer`
-// is electrically continued: a pad or via there (vias span layers, pads may be
-// through-hole — both anchor regardless of layer), or ANOTHER track passing
-// through it ON THE SAME LAYER. A different-layer track crossing the XY is NOT a
-// connection without a via, so it must not anchor the stub.
-func anchored(px, py float64, self, layer int, tracks []pcbTrack, vias []pcbViaP, pads []pcbPadP) bool {
+// is electrically continued: a pad there (same-net pads anchor within the pad-body
+// tolerance, foreign pads only at the exact center — a near-miss on a foreign pad
+// is NOT a connection), a via, or ANOTHER track passing through it ON THE SAME
+// LAYER. A different-layer track crossing the XY is NOT a connection without a
+// via, so it must not anchor the stub.
+func anchored(px, py float64, self, layer int, net string, tracks []pcbTrack, vias []pcbViaP, pads []pcbPadP) bool {
 	for _, p := range pads {
-		if math.Hypot(p.X-px, p.Y-py) <= pcbCoincEps {
+		tol := pcbCoincEps
+		if net != "" && p.Net == net {
+			tol = padBodyAnchorTol
+		}
+		if math.Hypot(p.X-px, p.Y-py) <= tol {
 			return true
 		}
 	}

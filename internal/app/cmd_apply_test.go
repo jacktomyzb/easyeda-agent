@@ -141,6 +141,8 @@ func TestEvalPredicate(t *testing.T) {
 		{1.0, true, "exists", true},
 		{[]any{1, 2, 3}, true, "len==3", true},
 		{[]any{}, true, "len>0", false},
+		{nil, true, "len==0", true}, // JSON null collection == empty
+		{nil, true, "len>0", false},
 		{95.0, true, ">=95", true},
 	}
 	for _, c := range cases {
