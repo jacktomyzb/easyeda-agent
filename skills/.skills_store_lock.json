@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "skills": {
+    "chrome": {
+      "name": "Chrome",
+      "zip_url": "https://api.skillhub.cn/api/v1/download?slug=chrome",
+      "source": "community",
+      "version": "1.0.0",
+      "installedAt": "2026-07-05T11:39:13Z"
+    }
+  }
+}
