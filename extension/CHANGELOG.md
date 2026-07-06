@@ -6,6 +6,21 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-07-06
+
+插件市场审核修复：README 演示图**打进插件包并改用包内相对路径**。之前用
+`cdn.jsdelivr.net` 外链，国内审核环境加载不出 → 审核员看到"README 图片未显示"
+被驳回。现在演示图（原理图生成 GIF / PCB 布局 GIF / ESP32 成品板 PNG）随 `.eext`
+打包到 `extension/images/`，README 用 `./images/...` 相对引用，和已能正常显示的
+`logo.jpg` 同一机制，彻底不依赖外网 CDN。纯市场展示层修复，连接器代码无变化，
+**无需**重新连接/重启 EasyEDA。
+
+### Fixed
+- 市场 README 演示图不显示：外链 jsDelivr → 包内相对路径 `./images/demo-*`。
+
+### Changed
+- `extension/images/` 新增 3 张演示资产随包分发。
+
 ## [0.8.3] - 2026-07-06
 
 Typed PCB layer/view switching for bottom-side visual QA (#40) + release-flow
