@@ -6,20 +6,20 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.8.6] - 2026-07-06
+## [0.8.7] - 2026-07-07
 
-插件市场审核修复：README 演示图**打进插件包并改用包内相对路径**。之前用
-`cdn.jsdelivr.net` 外链，国内审核环境加载不出 → 审核员看到"README 图片未显示"
-被驳回。现在演示图（原理图生成 GIF / PCB 布局 GIF / ESP32 成品板 PNG）随 `.eext`
-打包到 `extension/images/`，README 用 `./images/...` 相对引用，和已能正常显示的
-`logo.jpg` 同一机制，彻底不依赖外网 CDN。纯市场展示层修复，连接器代码无变化，
-**无需**重新连接/重启 EasyEDA。
+插件市场审核修复（承接 0.8.4–0.8.6）：README 演示图引用路径 `./images/...` →
+`images/...`（去掉 `./` 前缀）。0.8.3 因外链 jsDelivr 加载不出被判"README 图片
+未显示"；改成打进包 + `./images/` 相对引用后，上传又弹"上传的图片未通过审核"。
+对拆了 4 个高装机成功插件（Gerber 转 PCB / 网表重建原理图 / 智能 API 调试 / 设计
+报告）的实测结论：它们 README 图片一律写 `images/xxx`（**无 `./` 前缀**），且
+GIF、PNG 都能过审——平台解析 README 图片时不认 `./` 开头，导致抽取/审核该图失败。
+去掉 `./` 即对齐成功写法。演示图（含两张 GIF）保持打进包 `extension/images/`。
+纯市场展示层修复，连接器代码无变化，**无需**重新连接/重启 EasyEDA。
 
 ### Fixed
-- 市场 README 演示图不显示：外链 jsDelivr → 包内相对路径 `./images/demo-*`。
-
-### Changed
-- `extension/images/` 新增 3 张演示资产随包分发。
+- 市场"上传的图片未通过审核"：README 图片路径 `./images/demo-*` → `images/demo-*`
+  （去掉 `./`，对齐审核通过插件的一致写法；GIF 本身不是问题）。
 
 ## [0.8.3] - 2026-07-06
 
