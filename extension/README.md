@@ -1,16 +1,6 @@
 # EasyEDA Agent Connector
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/docs/assets/easyeda-agent-logo.png" width="96" alt="easyeda-agent logo" />
-</p>
-
-<p align="center">
-  面向 EasyEDA（嘉立创EDA专业版）的 AI 原生自动化连接器
-</p>
-
-<p align="center">
-  <a href="https://github.com/zhoushoujianwork/easyeda-agent"><b>GitHub 仓库</b></a>
-</p>
+面向 EasyEDA（嘉立创EDA专业版）的 AI 原生自动化连接器。
 
 `easyeda-agent` 把官方 EasyEDA 扩展 API 变成一套**有类型、可观测、Skill 友好**的系统。这个连接器插件本身保持很薄：它只负责连接本地 `easyeda-agent` daemon，并把 typed actions 分发到官方 `eda.*` API；真正的工作流、校验、确认、产物处理和多步编排，都在 Go CLI/daemon 与 Skill 层完成。
 
@@ -18,24 +8,24 @@
 Skill / CLI -> Go daemon -> EasyEDA Agent Connector -> official eda.* API
 ```
 
-## 项目地址
-
-- GitHub: https://github.com/zhoushoujianwork/easyeda-agent
-- 安装脚本: https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh
+- GitHub 仓库：https://github.com/zhoushoujianwork/easyeda-agent
+- 安装脚本：https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh
 
 ## 效果演示
 
 下面两段录屏来自真实 EasyEDA 画布：AI 从空白页开始生成原理图，再切到 PCB 完成布局、板框、铺铜和丝印。它不是生成一张图片，而是在编辑器里一步步执行 typed actions。
 
-| 原理图从空白页生成 | PCB 布局与铺铜 |
-| --- | --- |
-| <img src="https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/docs/assets/demo-schematic-generation.gif" width="420" alt="AI 在 EasyEDA 中从空白页生成原理图" /> | <img src="https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/docs/assets/demo-pcb-layout.gif" width="420" alt="AI 在 EasyEDA 中完成 PCB 布局、板框和铺铜" /> |
+**原理图从空白页生成：**
+
+![AI 在 EasyEDA 中从空白页生成原理图](https://cdn.jsdelivr.net/gh/zhoushoujianwork/easyeda-agent@main/docs/assets/demo-schematic-generation.gif)
+
+**PCB 布局与铺铜：**
+
+![AI 在 EasyEDA 中完成 PCB 布局、板框和铺铜](https://cdn.jsdelivr.net/gh/zhoushoujianwork/easyeda-agent@main/docs/assets/demo-pcb-layout.gif)
 
 下面这块板由 agent 驱动完整 PCB 流程产出：**自动布局 -> 板框贴合 -> 规则感知布线 -> 4 层电源平面 -> 丝印碰撞避让**，并在真实 EasyEDA 画布上验证。
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/docs/assets/demo-esp32-board.png" width="560" alt="ESP32-S3 成品板：4 层电源平面 + 圆角板框 + 位号对齐" />
-</p>
+![ESP32-S3 成品板：4 层电源平面 + 圆角板框 + 位号对齐](https://cdn.jsdelivr.net/gh/zhoushoujianwork/easyeda-agent@main/docs/assets/demo-esp32-board.png)
 
 ## 它是什么
 
@@ -67,7 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main
 安装后请在 EasyEDA 中确认：
 
 1. 已导入 `.eext` 连接器。
-2. 已开启“允许外部交互 / Allow external interaction”。
+2. 已开启「允许外部交互 / Allow external interaction」。
 3. 已启动本地 `easyeda-agent` daemon。
 
 ## 重新打包
