@@ -6,6 +6,37 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-07-06
+
+Typed PCB layer/view switching for bottom-side visual QA (#40) + release-flow
+ClawHub integration. Connector code changed (`extension/src/actions.ts`) — this
+release **requires a connector re-import** (uninstall old → import new .eext →
+fully quit & relaunch EasyEDA). Version 0.8.2 is skipped: it was burned on
+ClawHub by a stale-content skill upload (clawhub workdir trap; versions are
+immutable there), so 0.8.3 keeps CLI/connector/skill aligned.
+
+### Added
+- **Typed PCB layer/view actions** (no more manual UI clicks for bottom-side
+  checks): `pcb.layers.set_current` (`pcb layer-set`, accepts
+  id|name|top|bottom|inner1), `pcb.layers.visibility` (`pcb layer-visibility`,
+  presets top-only|bottom-only|copper-only|silk-only or explicit show/hide),
+  `pcb.view.side` (`pcb view-side`) — selects the side's copper and focuses its
+  copper/silk layers so the next snapshot reflects that side. No native canvas
+  flip API exists, so view-side is a layer-focus approximation, not a physical
+  board flip.
+- **`make release` now publishes the skill to ClawHub** at the same version
+  (best-effort — a hub failure doesn't block the release; retry with
+  `make publish-skill VERSION=…`). Uses an absolute path to dodge the clawhub
+  global-workdir trap.
+
+### Fixed
+- **`currentLayer:null` readback (#40)** — `pcb.layers.list` now activates the
+  PCB tab before `getCurrentLayer` and returns `visibleLayers` as display-state
+  evidence when `currentLayer` is empty.
+- **README install commands** — removed the non-working skillhub.cn CLI command
+  (web-only community, no `/api/cli/v1` endpoint); ClawHub + GitHub Release
+  `skills.tar.gz` are the supported skill-install paths.
+
 ## [0.8.1] - 2026-07-04
 
 Fresh-PCB pour-reflow fix, solidified end to end (root cause pinned → commands →
