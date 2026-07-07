@@ -75,6 +75,44 @@ type pcbPadP struct {
 	X, Y       float64
 }
 
+// pcbSlotP is one board cutout / slot (a MULTI-layer fill, layer 12 — e.g. an M3
+// mounting hole). The mill removes material on EVERY layer, so all copper must
+// keep the spacing rule from its bbox.
+type pcbSlotP struct {
+	ID                     string
+	MinX, MinY, MaxX, MaxY float64
+}
+
+// rectPtDist is the distance from a point to an axis-aligned rect (0 inside).
+func rectPtDist(minX, minY, maxX, maxY, x, y float64) float64 {
+	dx := math.Max(math.Max(minX-x, 0), x-maxX)
+	dy := math.Max(math.Max(minY-y, 0), y-maxY)
+	return math.Hypot(dx, dy)
+}
+
+// rectSegDist is the shortest distance from a segment to an axis-aligned rect
+// (0 if the segment touches or enters it).
+func rectSegDist(minX, minY, maxX, maxY, x1, y1, x2, y2 float64) float64 {
+	if rectPtDist(minX, minY, maxX, maxY, x1, y1) == 0 || rectPtDist(minX, minY, maxX, maxY, x2, y2) == 0 {
+		return 0
+	}
+	d := math.Inf(1)
+	edges := [4][4]float64{
+		{minX, minY, maxX, minY}, {maxX, minY, maxX, maxY},
+		{maxX, maxY, minX, maxY}, {minX, maxY, minX, minY},
+	}
+	for _, e := range edges {
+		if segSegCross(x1, y1, x2, y2, e[0], e[1], e[2], e[3]) {
+			return 0
+		}
+		d = math.Min(d, math.Min(
+			math.Min(segPtDist(e[0], e[1], x1, y1, x2, y2), segPtDist(e[2], e[3], x1, y1, x2, y2)),
+			math.Min(segPtDist(x1, y1, e[0], e[1], e[2], e[3]), segPtDist(x2, y2, e[0], e[1], e[2], e[3])),
+		))
+	}
+	return d
+}
+
 // pcbSilkText is one silkscreen text primitive (pcb.silk.list) — a component
 // designator/value attribute or a free string. Layer is the silk layer
 // (silkTopLayer / silkBottomLayer); CompLayer is the parent component's side
@@ -466,7 +504,7 @@ func findTrackOverPad(tracks []pcbTrack, pads []pcbPadP) []pcbCheckFinding {
 // foreground-only native DRC. Pad sizes aren't in the input, so a nominal pad
 // half-extent pads the distance; vias use their real outer radius. Capped so a
 // wall of violations can't drown the report — the count says how many were cut.
-func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, clearance float64) []pcbCheckFinding {
+func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, slots []pcbSlotP, clearance float64) []pcbCheckFinding {
 	const cap = 40
 	var out []pcbCheckFinding
 	dropped := 0
@@ -537,6 +575,75 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 					Type: "clearance", Level: "ERROR", Nets: uniqStr([]string{a.Net, b.Net}), Layer: a.Layer,
 					Primitives: []string{a.ID, b.ID}, At: &pcbXY{round2(mx), round2(my)},
 					Message: fmt.Sprintf("tracks (net %s / %s) run %.1fmil apart — under the %.0fmil spacing rule", a.Net, b.Net, d, clearance),
+				})
+			}
+		}
+	}
+	// via ↔ pad (a via is through-hole — it clashes with a pad on ANY layer) and
+	// via ↔ via (different nets; same-net stacking is overlapping-via's rule).
+	for _, v := range vias {
+		if strings.TrimSpace(v.Net) == "" {
+			continue
+		}
+		for _, p := range pads {
+			if p.Net == v.Net || strings.TrimSpace(p.Net) == "" {
+				continue
+			}
+			if d := math.Hypot(v.X-p.X, v.Y-p.Y) - v.Dia/2 - nominalPadHalf; d < clearance {
+				ref := p.Designator
+				if p.Number != "" {
+					ref += "." + p.Number
+				}
+				add(pcbCheckFinding{
+					Type: "clearance", Level: "ERROR", Nets: uniqStr([]string{v.Net, p.Net}),
+					Designator: p.Designator, Primitives: []string{v.ID},
+					At:      &pcbXY{round2(v.X), round2(v.Y)},
+					Message: fmt.Sprintf("via (net %s) sits ~%.1fmil from pad %s (net %s) — under the %.0fmil spacing rule", v.Net, math.Max(d, 0), ref, p.Net, clearance),
+				})
+			}
+		}
+	}
+	for i := 0; i < len(vias); i++ {
+		for j := i + 1; j < len(vias); j++ {
+			a, b := vias[i], vias[j]
+			if a.Net == b.Net {
+				continue
+			}
+			if d := math.Hypot(a.X-b.X, a.Y-b.Y) - a.Dia/2 - b.Dia/2; d < clearance {
+				add(pcbCheckFinding{
+					Type: "clearance", Level: "ERROR", Nets: uniqStr([]string{a.Net, b.Net}),
+					Primitives: []string{a.ID, b.ID}, At: &pcbXY{round2(a.X), round2(a.Y)},
+					Message: fmt.Sprintf("vias (net %s / %s) sit ~%.1fmil apart — under the %.0fmil spacing rule", a.Net, b.Net, math.Max(d, 0), clearance),
+				})
+			}
+		}
+	}
+	// slot (board cutout, e.g. an M3 hole) ↔ track / via — the mill removes
+	// material on every layer; JLC wants ≥ max(rule, 8mil) copper-to-cutout.
+	slotClr := math.Max(clearance, 8)
+	for _, s := range slots {
+		for _, t := range tracks {
+			if strings.TrimSpace(t.Net) == "" {
+				continue
+			}
+			if d := rectSegDist(s.MinX, s.MinY, s.MaxX, s.MaxY, t.X1, t.Y1, t.X2, t.Y2) - t.Width/2; d < slotClr {
+				mx, my := (t.X1+t.X2)/2, (t.Y1+t.Y2)/2
+				add(pcbCheckFinding{
+					Type: "clearance", Level: "ERROR", Net: t.Net, Layer: t.Layer,
+					Primitives: []string{s.ID, t.ID}, At: &pcbXY{round2(mx), round2(my)},
+					Message: fmt.Sprintf("track (net %s) runs ~%.1fmil from a board cutout/slot — under the %.0fmil copper-to-cutout rule", t.Net, math.Max(d, 0), slotClr),
+				})
+			}
+		}
+		for _, v := range vias {
+			if strings.TrimSpace(v.Net) == "" {
+				continue
+			}
+			if d := rectPtDist(s.MinX, s.MinY, s.MaxX, s.MaxY, v.X, v.Y) - v.Dia/2; d < slotClr {
+				add(pcbCheckFinding{
+					Type: "clearance", Level: "ERROR", Net: v.Net,
+					Primitives: []string{s.ID, v.ID}, At: &pcbXY{round2(v.X), round2(v.Y)},
+					Message: fmt.Sprintf("via (net %s) sits ~%.1fmil from a board cutout/slot — under the %.0fmil copper-to-cutout rule", v.Net, math.Max(d, 0), slotClr),
 				})
 			}
 		}
@@ -1223,15 +1330,21 @@ func runPcbCheck(cfg *appConfig, window string, couplingW float64, strict, asJSO
 
 	rep := analyzePcbCheckFull(pads, tracks, vias, silk, couplingW)
 
-	// Clearance is a LIVE rule — it needs the board's live spacing value. Flags a
-	// track running under the spacing rule to another net's pad/via/track: the
-	// headless twin of native DRC's 间距错误, so `pcb check --strict` gates the
-	// low-level shorts WITHOUT the foreground-only native DRC.
+	// Clearance is a LIVE rule — it needs the board's live spacing value. Flags
+	// copper running under the spacing rule against another net's pad/via/track
+	// and against board cutouts (slots): the headless twin of native DRC's
+	// 间距错误, so `pcb check --strict` gates the low-level shorts WITHOUT the
+	// foreground-only native DRC.
 	clearance := fetchPcbRules(cfg, window).clearanceMil
 	if clearance <= 0 {
 		clearance = 6
 	}
-	for _, f := range findClearanceViolations(tracks, pads, vias, clearance) {
+	slots, serr := fetchPcbSlots(cfg, window)
+	if serr != nil {
+		fmt.Fprintf(stderr, "warning: clearance check runs without slot/cutout data (%v)\n", serr)
+		slots = nil
+	}
+	for _, f := range findClearanceViolations(tracks, pads, vias, slots, clearance) {
 		rep.Findings = append(rep.Findings, f)
 		rep.Summary.Clearance++
 		rep.Summary.Errors++
@@ -1377,6 +1490,35 @@ func fetchPcbVias(cfg *appConfig, window string) ([]pcbViaP, error) {
 		vias = append(vias, pcbViaP{ID: id, Net: net, X: x, Y: y, Hole: hole, Dia: dia})
 	}
 	return vias, nil
+}
+
+// fetchPcbSlots reads board cutouts (MULTI-layer fills, layer 12) with bboxes —
+// the clearance rule keeps copper off the milled edges.
+func fetchPcbSlots(cfg *appConfig, window string) ([]pcbSlotP, error) {
+	res, err := requestAction(cfg, "pcb.fill.list", window, map[string]any{"layer": 12, "includeBBox": true})
+	if err != nil {
+		return nil, err
+	}
+	var slots []pcbSlotP
+	for _, rf := range mnavSlice(res.Result, "fills") {
+		fm, ok := rf.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := fm["primitiveId"].(string)
+		bb, ok := fm["bbox"].(map[string]any)
+		if !ok {
+			continue
+		}
+		minX, ok1 := asFloatOK(bb["minX"])
+		minY, ok2 := asFloatOK(bb["minY"])
+		maxX, ok3 := asFloatOK(bb["maxX"])
+		maxY, ok4 := asFloatOK(bb["maxY"])
+		if ok1 && ok2 && ok3 && ok4 {
+			slots = append(slots, pcbSlotP{ID: id, MinX: minX, MinY: minY, MaxX: maxX, MaxY: maxY})
+		}
+	}
+	return slots, nil
 }
 
 func fetchPcbSilk(cfg *appConfig, window string) ([]pcbSilkText, error) {

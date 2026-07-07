@@ -1848,6 +1848,9 @@ emits a chord-approximated fillet (native arcs do not commit on this build).
 						opt.existingVias = append(opt.existingVias, obVia{net: v.Net, x: v.X, y: v.Y, r: v.Dia / 2})
 					}
 				}
+				if sl, err := fetchPcbSlots(cfg, window); err == nil {
+					opt.slots = sl // board cutouts (M3 holes) — keep copper off the mill
+				}
 				segs, vias, diags := planShortRoutes(comps, routed, opt)
 
 				// 3. Draw (unless --dry-run): one line.create per segment, then one

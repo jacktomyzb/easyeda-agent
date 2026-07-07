@@ -53,15 +53,36 @@ func routeWithAvoid(net string, a, b rtPad, w float64, opt rtOptions, placed []r
 	h := routeHop(net, a, b, w, opt, true)  // horizontal-first
 	v := routeHop(net, a, b, w, opt, false) // vertical-first
 	clr := opt.clearance + nominalPadHalf
-	if hopCost(v, net, a, b, placed, obstacles, vias, clr) < hopCost(h, net, a, b, placed, obstacles, vias, clr) {
+	hc := hopCost(h, net, a, b, placed, obstacles, vias, clr) + hopSlotCost(h, opt.slots, opt.clearance)
+	vc := hopCost(v, net, a, b, placed, obstacles, vias, clr) + hopSlotCost(v, opt.slots, opt.clearance)
+	if vc < hc {
 		return v
 	}
 	return h // ties keep the conventional horizontal-first
 }
 
+// hopSlotCost penalizes a candidate whose copper lands inside a board cutout's
+// keep-away band (max(clearance, 8mil) off the milled edge, every layer).
+func hopSlotCost(cand []rtSeg, slots []pcbSlotP, clearance float64) int {
+	if len(slots) == 0 {
+		return 0
+	}
+	band := math.Max(clearance, 8)
+	cost := 0
+	for _, s := range cand {
+		for _, sl := range slots {
+			if rectSegDist(sl.MinX, sl.MinY, sl.MaxX, sl.MaxY, s.X1, s.Y1, s.X2, s.Y2)-s.Width/2 < band {
+				cost += 6
+			}
+		}
+	}
+	return cost
+}
+
 // hopCost scores a candidate route by how many other-net obstacles it hits. This
 // hop's own endpoint pads (a, b) are never counted. Cost 0 means the route violates
-// no clearance against anything planned/known so far.
+// no clearance against anything planned/known so far. opt-independent obstacles
+// (slots) are scored via hopSlotCost by the caller that has them.
 func hopCost(cand []rtSeg, net string, a, b rtPad, placed []rtSeg, obstacles []obPad, vias []obVia, clr float64) int {
 	cost := 0
 	for _, s := range cand {

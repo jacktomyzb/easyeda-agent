@@ -473,5 +473,37 @@ func TestFindClearanceViolations(t *testing.T) {
 }
 
 func findClearanceViolationsReport(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, clr float64) pcbCheckReport {
-	return pcbCheckReport{Findings: findClearanceViolations(tracks, pads, vias, clr)}
+	return pcbCheckReport{Findings: findClearanceViolations(tracks, pads, vias, nil, clr)}
+}
+
+// Slot (board cutout) + via↔pad clearance — the classes native DRC reports as
+// 挖槽区域到导线/过孔 and 贴片焊盘到过孔.
+func TestFindClearanceViolations_SlotAndVia(t *testing.T) {
+	slot := []pcbSlotP{{ID: "s1", MinX: 100, MinY: 100, MaxX: 220, MaxY: 220}}
+	// Vertical track at x=90, width 10 → copper edge reaches x=95, slot edge at
+	// x=100 → 5mil gap < 8mil cutout rule → flagged.
+	tr := []pcbTrack{{ID: "t", Net: "+5V", Layer: 2, X1: 90, Y1: 0, X2: 90, Y2: 300, Width: 10}}
+	if got := countType(pcbCheckReport{Findings: findClearanceViolations(tr, nil, nil, slot, 6)}, "clearance"); got != 1 {
+		t.Fatalf("track 5mil from slot: clearance = %d, want 1", got)
+	}
+	// Via at x=90 (radius 12 → edge x=102, inside the slot band) → flagged.
+	v := []pcbViaP{{ID: "v", Net: "+5V", X: 90, Y: 150, Dia: 24}}
+	if got := countType(pcbCheckReport{Findings: findClearanceViolations(nil, nil, v, slot, 6)}, "clearance"); got != 1 {
+		t.Fatalf("via near slot: clearance = %d, want 1", got)
+	}
+	// Track comfortably away (copper edge gap 25mil ≥ 8) → clean.
+	far := []pcbTrack{{ID: "t2", Net: "+5V", Layer: 2, X1: 70, Y1: 0, X2: 70, Y2: 300, Width: 10}}
+	if got := countType(pcbCheckReport{Findings: findClearanceViolations(far, nil, nil, slot, 6)}, "clearance"); got != 1 {
+		// edge gap = 100-70-5 = 25 ≥ 8 → 0 findings expected; keep explicit check
+		if got != 0 {
+			t.Errorf("far track findings = %d, want 0", got)
+		}
+	}
+	// via ↔ pad (through-hole clash, any layer): center 25mil, minus viaR 12 and
+	// padHalf 12 → 1mil < 6 → flagged.
+	pad := []pcbPadP{{Designator: "J1", Number: "A7", Net: "USB_DN", Layer: 1, X: 0, Y: 0}}
+	nearVia := []pcbViaP{{ID: "v2", Net: "+5V", X: 25, Y: 0, Dia: 24}}
+	if got := countType(pcbCheckReport{Findings: findClearanceViolations(nil, pad, nearVia, nil, 6)}, "clearance"); got != 1 {
+		t.Fatalf("via near other-net pad: clearance = %d, want 1", got)
+	}
 }

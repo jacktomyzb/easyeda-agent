@@ -27,6 +27,7 @@ type stitchCtx struct {
 	offsets   []float64  // candidate via offsets from the pad center (mil)
 	shareDist float64    // same-net pads within this of a planned via reuse it (mil)
 	rect      [4]float64 // outline inset box vias must land inside (minX,minY,maxX,maxY)
+	slots     []pcbSlotP // board cutouts — vias keep max(clearance,8) off the mill
 }
 
 func defaultStitchCtx(clearance float64, rect [4]float64) stitchCtx {
@@ -104,6 +105,11 @@ func planStitchViasForNet(net string, padsAll []pcbPadP, tracks []pcbTrack, vias
 		}
 		for _, pv := range planned {
 			if math.Hypot(x-pv.x, y-pv.y) < viaBand {
+				return false
+			}
+		}
+		for _, sl := range ctx.slots {
+			if rectPtDist(sl.MinX, sl.MinY, sl.MaxX, sl.MaxY, x, y)-viaR < math.Max(ctx.clearance, 8) {
 				return false
 			}
 		}

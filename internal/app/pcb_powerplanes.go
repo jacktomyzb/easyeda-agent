@@ -59,6 +59,10 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 		boardVias = nil
 	}
 	rules := fetchPcbRules(cfg, window)
+	slots, slerr := fetchPcbSlots(cfg, window)
+	if slerr != nil {
+		slots = nil
+	}
 
 	// 2. Assign layers: GND → gndLayer. Of the non-GND power nets, only the LARGEST
 	//    (most pads) pours on powerLayer — two nets on one plane layer re-create the
@@ -133,6 +137,7 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 	// 4. Per poured net: clearance-aware stitch (offset via + stub, shared among
 	//    close pads, TH pads skipped), then pour on the net's inner layer.
 	sctx := defaultStitchCtx(rules.clearanceMil, rect)
+	sctx.slots = slots
 	var priorVias []rtVia
 	stitchStats := map[string]map[string]int{}
 	for i := range plan {
@@ -200,6 +205,7 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 		for _, v := range priorVias {
 			opt.existingVias = append(opt.existingVias, obVia{net: v.Net, x: v.X, y: v.Y, r: sctx.viaDia / 2})
 		}
+		opt.slots = slots
 		segs, rvias, _ := planShortRoutes(comps, already, opt)
 		drawn, viasDrawn := 0, 0
 		for _, s := range segs {

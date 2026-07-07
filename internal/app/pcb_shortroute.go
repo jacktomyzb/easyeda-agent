@@ -78,6 +78,9 @@ type rtOptions struct {
 	// its OWN segments and lands new copper inside old copper's clearance band).
 	existing     []rtSeg
 	existingVias []obVia
+	// Board cutouts / slots (M3 holes …) — the mill removes every layer, so all
+	// planned copper keeps ≥ max(clearance, 8mil) from these rects.
+	slots []pcbSlotP
 
 	// minWidth is the fab's legal minimum track width (mil). A hop whose endpoint
 	// sits in a FINE-PITCH pad field (an other-net pad within finePitch of it —
@@ -185,7 +188,7 @@ func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOption
 			singleCost := 1 << 30
 			if !mustDetour {
 				single = routeWithAvoid(net, a, b, w, opt, obstacleSegs, obPads, obVias)
-				singleCost = hopCost(single, net, a, b, obstacleSegs, obPads, obVias, clr)
+				singleCost = hopCost(single, net, a, b, obstacleSegs, obPads, obVias, clr) + hopSlotCost(single, opt.slots, opt.clearance)
 			}
 
 			// Detour onto the emptier copper layer when the hop needs it, or when the
@@ -195,7 +198,7 @@ func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOption
 				ml, mv := routeMultilayerHop(net, a, b, w, opt, obPads, obVias, obstacleSegs)
 				// The detour's cost includes its own vias landing near other nets —
 				// otherwise it would trade a track-over-pad short for a worse via-over-pad.
-				mlCost := hopCost(ml, net, a, b, obstacleSegs, obPads, obVias, clr)
+				mlCost := hopCost(ml, net, a, b, obstacleSegs, obPads, obVias, clr) + hopSlotCost(ml, opt.slots, opt.clearance)
 				for _, vv := range mv {
 					mlCost += viaClearanceCost(vv, obPads, obVias, clr, opt.viaDia/2)
 				}
@@ -238,6 +241,11 @@ func viaSpotClear(x, y float64, net string, obPads []obPad, obVias []obVia, segs
 			continue
 		}
 		if segPointDist(s.X1, s.Y1, s.X2, s.Y2, x, y) < opt.clearance+viaR+s.Width/2 {
+			return false
+		}
+	}
+	for _, sl := range opt.slots {
+		if rectPtDist(sl.MinX, sl.MinY, sl.MaxX, sl.MaxY, x, y)-viaR < math.Max(opt.clearance, 8) {
 			return false
 		}
 	}
@@ -304,7 +312,9 @@ func bestL(net string, from, to rtPad, w float64, opt rtOptions, obstacleSegs []
 	h := lShape90(net, from, to, w, true)
 	v := lShape90(net, from, to, w, false)
 	clr := opt.clearance + nominalPadHalf
-	if hopCost(v, net, from, to, obstacleSegs, obPads, obVias, clr) < hopCost(h, net, from, to, obstacleSegs, obPads, obVias, clr) {
+	hc := hopCost(h, net, from, to, obstacleSegs, obPads, obVias, clr) + hopSlotCost(h, opt.slots, opt.clearance)
+	vc := hopCost(v, net, from, to, obstacleSegs, obPads, obVias, clr) + hopSlotCost(v, opt.slots, opt.clearance)
+	if vc < hc {
 		return v
 	}
 	return h
