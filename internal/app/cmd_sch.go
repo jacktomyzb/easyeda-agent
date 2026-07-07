@@ -327,7 +327,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 				return dispatch(cfg, "schematic.components.list", window, payload, stdout, stderr)
 			},
 		}
-		c.Flags().BoolVar(&allPages, "all-pages", false, "list components across all schematic pages")
+		c.Flags().BoolVar(&allPages, "all-pages", false, "list components across all schematic pages (WARNING: non-active pages return shallow data — pins/bbox may be empty; use `doc switch` to that page for accurate data)")
 		c.Flags().BoolVar(&includeBBox, "include-bbox", false, "attach each component's rendered extent {minX,minY,maxX,maxY}")
 		c.Flags().BoolVar(&includePins, "include-pins", false, "attach each pin's {pinName,pinNumber,x,y,noConnected} — the data plane for routing/connectivity checks (output grows, esp. with --all-pages)")
 		sch.AddCommand(c)
@@ -606,6 +606,52 @@ run ` + "`easyeda sch drc`" + ` / ` + "`easyeda sch check`" + ` after to confirm
 		c.Flags().StringVar(&pointsJSON, "points", "", `JSON coordinate list, nested '[[x,y],...]' or flat '[x1,y1,x2,y2,...]' (connector normalizes; required)`)
 		c.Flags().StringVar(&net, "net", "", "net name to assign to the wire")
 		c.Flags().StringVar(&styleJSON, "style", "", "JSON object with wire style overrides")
+		sch.AddCommand(c)
+	}
+
+	// ── group-move ────────────────────────────────────────────────────────
+	// schematic.group.move — a virtual, stateless group: pass the full member
+	// id list every call (components AND wires in any mix), nothing persists
+	// between calls. NOT backed by EasyEDA's native "组合" UI field (verified
+	// 2026-07-07: that field has zero extension-API surface — no primitive
+	// type, no getter/setter, not smuggled into OtherProperty either).
+	{
+		var idsJSON string
+		var dx, dy float64
+		c := &cobra.Command{
+			Use:   "group-move",
+			Short: "Translate a set of components+wires together as one rigid assembly (dx,dy)",
+			Long: `Move a component and its surrounding stub wires/flags together as a single
+unit — internal relative layout is untouched, only the whole assembly shifts by
+(dx,dy). This is a STATELESS virtual group: pass every member's primitiveId on
+each call, nothing is remembered between invocations (there is no EasyEDA API
+for its native "组合" UI field to persist against — see docs/optimization-loop.md).
+
+Components translate via a plain position modify (same primitiveId survives).
+Wires have no modify-in-place, so each is deleted and recreated at the shifted
+endpoints (net/color/width/lineType preserved) — a wire's primitiveId CHANGES;
+pull fresh ids before any follow-up mutation on it.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda sch group-move --ids '["idComp1","idWire1","idWire2"]' --dx 200 --dy 0
+  easyeda sch group-move --ids '["<R4>","<stub-wire>","<flag>"]' --dx 0 --dy -150`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				if idsJSON == "" {
+					return fmt.Errorf("--ids is required (component and/or wire primitiveIds)")
+				}
+				if !cmd.Flags().Changed("dx") && !cmd.Flags().Changed("dy") {
+					return fmt.Errorf("at least one of --dx / --dy is required (a zero-move is a no-op)")
+				}
+				var ids []any
+				if err := json.Unmarshal([]byte(idsJSON), &ids); err != nil {
+					return fmt.Errorf("invalid --ids json (expected array): %w", err)
+				}
+				payload := map[string]any{"primitiveIds": ids, "dx": dx, "dy": dy}
+				return dispatch(cfg, "schematic.group.move", window, payload, stdout, stderr)
+			},
+		}
+		c.Flags().StringVar(&idsJSON, "ids", "", "JSON array of primitiveIds (components and/or wires) to move together (required)")
+		c.Flags().Float64Var(&dx, "dx", 0, "X translation (mil)")
+		c.Flags().Float64Var(&dy, "dy", 0, "Y translation (mil)")
 		sch.AddCommand(c)
 	}
 
@@ -925,7 +971,7 @@ exits non-zero when there are any findings, to use it as a gate.`,
 				return runSchCheck(cfg, window, allPages, strict, asJSON, stdout, stderr)
 			},
 		}
-		c.Flags().BoolVar(&allPages, "all-pages", false, "check components across all schematic pages")
+		c.Flags().BoolVar(&allPages, "all-pages", false, "check components across all schematic pages (WARNING: non-active pages return shallow data — pins/bbox may be empty; use `doc switch` to that page for accurate data)")
 		c.Flags().BoolVar(&strict, "strict", false, "exit non-zero when there are findings (gate mode)")
 		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
 		sch.AddCommand(c)
@@ -962,7 +1008,7 @@ check for a faster read.`,
 				return dispatch(cfg, "schematic.read", window, payload, stdout, stderr)
 			},
 		}
-		c.Flags().BoolVar(&allPages, "all-pages", false, "read components across all schematic pages")
+		c.Flags().BoolVar(&allPages, "all-pages", false, "read components across all schematic pages (WARNING: non-active pages return shallow data — pins/bbox may be empty; use `doc switch` to that page for accurate data)")
 		c.Flags().BoolVar(&noCheck, "no-check", false, "skip the geometric design check for a faster read")
 		sch.AddCommand(c)
 	}
@@ -1016,7 +1062,7 @@ Exits non-zero when any overlap is found, so it can gate a workflow.`,
 		}
 		c.Flags().Float64Var(&minGap, "min-gap", 2.54, "minimum gap between component bboxes in mm (closer = WARN)")
 		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
-		c.Flags().BoolVar(&allPages, "all-pages", false, "lint components across all schematic pages")
+		c.Flags().BoolVar(&allPages, "all-pages", false, "lint components across all schematic pages (WARNING: non-active pages return shallow data — components with no bbox are SKIPPED from overlap checks, not confirmed clear; use `doc switch` to that page for accurate linting)")
 		c.Flags().BoolVar(&includeNonParts, "include-non-parts", false, "also lint non-part primitives (sheet/title-frame, netflag/netport/…); excluded by default")
 		sch.AddCommand(c)
 	}

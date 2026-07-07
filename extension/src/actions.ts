@@ -17,6 +17,8 @@ import {
 	blobToBase64,
 	classifyPinConnectivity,
 	classifyWireConnectivity,
+	filterExactLcsc,
+	isLcscQuery,
 	newArtifactId,
 	type NamedLibItem,
 	normalizeRegion,
@@ -355,7 +357,20 @@ const schematicPageCreate: Handler = async (payload) => {
 	return { result: { pageUuid: uuid } };
 };
 
-/** Rename a schematic page. */
+/**
+ * Rename a schematic page.
+ *
+ * Platform quirk (issue #55): `modifySchematicPageName` returns ok=true, but the
+ * new name does NOT immediately show up in `getAllSchematicPagesInfo()` — the
+ * platform's page-metadata cache only refreshes after some later write op fires,
+ * so an immediate `doc ls` reads the STALE old name. This is the same family of
+ * platform-async traps as the getState_Rotation echo (schematic-layout-conventions.md).
+ *
+ * We can't fix the platform, so we do a write-after read-back verification here:
+ * retry `getAllSchematicPagesInfo()` a few times with small delays and confirm the
+ * target page's name is actually the new value. Report the truth to the caller via
+ * `verified` (+ a `warning` when it never settles) instead of blindly echoing ok.
+ */
 const schematicPageRename: Handler = async (payload) => {
 	const pageUuid = requireString(payload, 'pageUuid');
 	const name = requireString(payload, 'name');
@@ -366,8 +381,44 @@ const schematicPageRename: Handler = async (payload) => {
 	catch (err) {
 		throw edaError(err, 'Failed to rename schematic page.');
 	}
-	return { result: { ok } };
+	// Write-after self-verification: poll the page list until the new name lands,
+	// so callers doing an immediate `doc ls` don't read the stale old name.
+	const verified = await verifySchematicPageName(pageUuid, name);
+	if (verified) {
+		return { result: { ok, verified: true } };
+	}
+	return {
+		result: {
+			ok,
+			verified: false,
+			warning: '重命名已提交，但页面列表元数据尚未同步为新名（EasyEDA 平台异步缓存，issue #55）；'
+				+ '请稍后重试或触发任意其他写操作后再用 doc ls 确认。',
+		},
+	};
 };
+
+/**
+ * Poll `getAllSchematicPagesInfo()` up to a few times until the target page's name
+ * equals `expected`. Returns true once observed, false if it never settles.
+ * Best-effort: read errors are swallowed and treated as "not yet settled".
+ */
+async function verifySchematicPageName(pageUuid: string, expected: string): Promise<boolean> {
+	const delays = [0, 120, 250, 500]; // ~0.87s worst case, small enough to stay snappy
+	for (const wait of delays) {
+		if (wait > 0) {
+			await new Promise<void>(resolve => setTimeout(resolve, wait));
+		}
+		try {
+			const pages = await eda.dmt_Schematic.getAllSchematicPagesInfo();
+			const hit = pages.find(p => p.uuid === pageUuid);
+			if (hit && hit.name === expected) return true;
+		}
+		catch {
+			/* best-effort — treat as not-yet-settled and keep polling */
+		}
+	}
+	return false;
+}
 
 /** Delete a schematic page. */
 const schematicPageDelete: Handler = async (payload) => {
@@ -761,6 +812,101 @@ const schematicWireCreate: Handler = async (payload) => {
 			primitiveId: wire.getState_PrimitiveId(),
 			net: wire.getState_Net(),
 			line: wire.getState_Line(),
+		},
+	};
+};
+
+// ─── Group move (virtual grouping — no native EasyEDA "组合" API exists) ────
+// Investigated 2026-07-07: EasyEDA Pro's UI has a real "组合"(Combination) field
+// on the component property panel (and a matching left-panel tree tab), but it
+// is 100% UI-only — ESCH_PrimitiveType has no Group/Combination member, no
+// sch_PrimitiveComponent getter/setter touches it, and it isn't smuggled into
+// OtherProperty either. There is no way for an extension to read, write, or
+// query it. So this does NOT use or persist that native field; it is a
+// stateless "move this ad-hoc bag of primitives together" primitive — the
+// caller (typically an agent that just placed the assembly) supplies the full
+// member list each time. Components translate via a plain x/y modify; wires
+// have no modify-in-place (see the delete-then-create note on
+// schematicComponentModify above) so they are deleted and recreated at the
+// shifted endpoints, preserving net/color/width/lineType. Rotation is
+// untouched — a pure translation cannot disturb each member's own orientation
+// or the assembly's internal relative layout, which is the entire point.
+
+const schematicGroupMove: Handler = async (payload) => {
+	const raw = payload.primitiveIds;
+	if (!Array.isArray(raw) || raw.length === 0 || !raw.every(id => typeof id === 'string')) {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'Missing required field "primitiveIds" (non-empty string[]).');
+	}
+	const wantIds = new Set(raw as Array<string>);
+	const dx = requireNumber(payload, 'dx');
+	const dy = requireNumber(payload, 'dy');
+
+	// Resolve via getAll() + local filter, NOT a per-id .get(id) call: a
+	// component created earlier in the SAME session/batch can 404 on a direct
+	// .get(id) immediately after creation (observed live, 2026-07-07) despite
+	// being fully present in getAll() — the same "pull fresh via a list call"
+	// caution this codebase already applies elsewhere (rip_up, route delete).
+	let allComponents, allWires;
+	try {
+		allComponents = await eda.sch_PrimitiveComponent.getAll();
+		allWires = await eda.sch_PrimitiveWire.getAll();
+	}
+	catch (err) {
+		throw edaError(err, 'group-move: failed to read components/wires for id resolution.');
+	}
+
+	const movedComponents: Array<Record<string, unknown>> = [];
+	const movedWires: Array<Record<string, unknown>> = [];
+	const notFound: Array<string> = [];
+	const seen = new Set<string>();
+
+	for (const comp of allComponents) {
+		const id = comp.getState_PrimitiveId();
+		if (!wantIds.has(id)) continue;
+		seen.add(id);
+		const from = { x: comp.getState_X(), y: comp.getState_Y() };
+		const to = { x: from.x + dx, y: from.y + dy };
+		let moved;
+		try { moved = await eda.sch_PrimitiveComponent.modify(id, { x: to.x, y: to.y }); }
+		catch (err) { throw edaError(err, `group-move: failed to translate component ${id}.`); }
+		if (!moved) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `group-move: modify returned no primitive for component ${id}.`);
+		movedComponents.push({ primitiveId: id, designator: moved.getState_Designator?.() ?? null, from, to });
+	}
+
+	for (const wire of allWires) {
+		const id = wire.getState_PrimitiveId();
+		if (!wantIds.has(id)) continue;
+		seen.add(id);
+		const line = normalizeWirePoints(wire.getState_Line());
+		const shifted = line.map((v, i) => (i % 2 === 0 ? v + dx : v + dy));
+		const net = wire.getState_Net();
+		const color = wire.getState_Color();
+		const lineWidth = wire.getState_LineWidth();
+		const lineType = wire.getState_LineType();
+		try { await eda.sch_PrimitiveWire.delete([id]); }
+		catch (err) { throw edaError(err, `group-move: failed to remove old wire ${id} before recreating it shifted.`); }
+		let created;
+		try { created = await eda.sch_PrimitiveWire.create(shifted, net, color, lineWidth, lineType); }
+		catch (err) { throw edaError(err, `group-move: failed to recreate wire ${id} at the shifted position (original was deleted — rerun with the same spec to retry).`); }
+		if (!created) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `group-move: recreating wire ${id} returned no primitive (original was deleted).`);
+		movedWires.push({ oldPrimitiveId: id, newPrimitiveId: created.getState_PrimitiveId(), net });
+	}
+
+	for (const id of wantIds) {
+		if (!seen.has(id)) notFound.push(id);
+	}
+
+	if (!movedComponents.length && !movedWires.length) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `group-move: none of the ${wantIds.size} id(s) resolved to a component or wire. Pull fresh ids first.`);
+	}
+
+	return {
+		result: {
+			dx, dy,
+			movedComponents,
+			movedWires,
+			count: movedComponents.length + movedWires.length,
+			...(notFound.length ? { notFound } : {}),
 		},
 	};
 };
@@ -2026,6 +2172,7 @@ const schematicExportBom: Handler = async (payload) => {
 const schematicLibrarySearch: Handler = async (payload) => {
 	const query = requireString(payload, 'query');
 	const limit = optionalNumber(payload, 'limit') ?? 10;
+	const allowFuzzy = optionalBoolean(payload, 'allowFuzzy') ?? false;
 
 	let raw: Array<unknown>;
 	try {
@@ -2036,6 +2183,41 @@ const schematicLibrarySearch: Handler = async (payload) => {
 	}
 	if (!Array.isArray(raw)) {
 		return { result: { count: 0, components: [] } };
+	}
+
+	// Exact LCSC mode. When the query is itself a bare C-number (e.g. "C5665"),
+	// EasyEDA's free-text search still ranks by keyword — so "C5665" surfaces the
+	// op-amp CLC5665IMX (name contains "5665") over the real part whose LCSC id
+	// equals C5665. Strictly filter the raw results by the lcsc/supplierId field so
+	// batch selection never silently binds the wrong device. Opt out with
+	// allowFuzzy to fall through to the ranked free-text path below.
+	if (!allowFuzzy && isLcscQuery(query)) {
+		const exact = filterExactLcsc(raw as Array<Record<string, unknown>>, query)
+			.slice(0, limit)
+			.map((r) => {
+				const otherProperty = (r.otherProperty as Record<string, unknown> | undefined) ?? {};
+				return {
+					uuid: r.uuid,
+					libraryUuid: r.libraryUuid,
+					name: r.name,
+					value: otherProperty.Value,
+					footprintName: r.footprintName,
+					symbolName: r.symbolName,
+					lcsc: r.supplierId ?? otherProperty['Supplier Part'],
+					manufacturer: r.manufacturer ?? otherProperty.Manufacturer,
+					manufacturerId: r.manufacturerId ?? otherProperty['Manufacturer Part'],
+					description: typeof r.description === 'string' ? r.description.slice(0, 200) : r.description,
+				};
+			});
+		if (exact.length === 0) {
+			throw new ActionError(
+				ErrorCodes.EDA_CALL_FAILED,
+				`No device exactly matches LCSC id "${query}". The raw search returned ${raw.length} `
+				+ 'fuzzy candidate(s) whose LCSC field differs — re-run with allowFuzzy (CLI: --allow-fuzzy) '
+				+ 'to see them, or use "lib by-lcsc" for a deterministic lookup.',
+			);
+		}
+		return { result: { count: exact.length, query, exactMatch: true, components: exact } };
 	}
 
 	// Relevance rerank. EasyEDA's raw order often surfaces the wrong category first
@@ -6055,6 +6237,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.component.modify': schematicComponentModify,
 	'schematic.component.delete': schematicComponentDelete,
 	'schematic.wire.create': schematicWireCreate,
+	'schematic.group.move': schematicGroupMove,
 	'schematic.netflag.create': schematicNetflagCreate,
 	'schematic.pin.set_no_connect': schematicPinSetNoConnect,
 	'schematic.select': schematicSelect,

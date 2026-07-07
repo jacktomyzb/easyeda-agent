@@ -164,9 +164,9 @@ func AllActions() []ActionSpec {
 			Phase:       1,
 			Mutates:     true,
 			NeedsWindow: true,
-			Description: "Rename a schematic page.",
+			Description: "Rename a schematic page. Verifies the new name landed in the page list (issue #55 platform-async cache); returns verified=false + warning if it hasn't synced yet.",
 			Inputs:      []string{"pageUuid", "name"},
-			Outputs:     []string{"ok"},
+			Outputs:     []string{"ok", "verified", "warning"},
 		},
 		{
 			Name:         "schematic.page.delete",
@@ -207,7 +207,7 @@ func AllActions() []ActionSpec {
 			Phase:       1,
 			NeedsWindow: true,
 			Description: "List components on the active schematic page. includeBBox attaches each component's rendered extent {minX,minY,maxX,maxY} (used by `easyeda sch layout-lint` for overlap/spacing checks). NOTE: the component/symbol/footprint/uniqueId fields are placed-INSTANCE ids — they are NOT device-library uuids and cannot be replayed into `schematic.component.place`. To re-place the same part, get a fresh device uuid from `schematic.library.search`.",
-			Inputs:      []string{"allPages optional", "includePins optional", "includeBBox optional"},
+			Inputs:      []string{"allPages optional (WARNING: non-active pages return shallow data — pins/bbox may be empty even when wired; switch to the page via document.switch for accurate data)", "includePins optional", "includeBBox optional"},
 			Outputs:     []string{"component primitives", "designator", "name", "pins", "bbox"},
 		},
 		{
@@ -266,6 +266,17 @@ func AllActions() []ActionSpec {
 			Inputs:      []string{"points", "net optional", "style optional"},
 			Outputs:     []string{"primitive id", "wire state"},
 			VerifyWith:  []string{"schematic.primitive.get", "schematic.snapshot"},
+		},
+		{
+			Name:        "schematic.group.move",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Translate a set of primitives (components AND wires, in any mix) together by (dx,dy) as a rigid assembly — a component + its surrounding stub wires + flags move as one unit, internal relative layout untouched. NOT backed by EasyEDA's native '组合' UI field — investigated 2026-07-07: that field has zero extension-API exposure (not a primitive type, no getter/setter, not in OtherProperty), so it can't be read, written, or driven programmatically. This is a stateless virtual group: pass the full member id list every call, nothing is remembered between calls. Components translate via a plain modify; wires have no modify-in-place so they are deleted and recreated at the shifted endpoints (net/color/width/lineType preserved) — a wire's returned primitiveId CHANGES, re-fetch fresh ids before any follow-up mutation.",
+			Inputs:      []string{"primitiveIds (string[], components and/or wires)", "dx", "dy"},
+			Outputs:     []string{"movedComponents[]{primitiveId,designator,from,to}", "movedWires[]{oldPrimitiveId,newPrimitiveId,net}", "count", "notFound"},
+			VerifyWith:  []string{"schematic.components.list", "schematic.snapshot"},
 		},
 		{
 			Name:        "schematic.netflag.create",
