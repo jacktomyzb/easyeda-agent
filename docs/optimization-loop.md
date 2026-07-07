@@ -89,6 +89,35 @@ Clearance 26→**0**、`pcb check` **0**、`layout-lint` **100/100**。残留 1 
   验收线:DRC Connection=0 ∧ Clearance=0、`pcb check`=0、`layout-lint`≥95、BOM 全 C 号、已 save。
   Netlist Error≤1 且 `netlist-diff` 判定一致时视为通过(直至 A3 修复)。
 
+## 探针轮次 #3 — esp32MiniRequire 从零重跑(2026-07-07,Board2/PCB2,agent 全程自驱)
+
+**结果:验收线全达标。** 原理图 20 件/13 网络(比前轮 +C7 EN-RC):layout-lint 0 overlap、
+sch check 除设计内 NC 外 0、13 网络逐一对齐设计。PCB:4 层(Inner1=GND 内电层/PLANE +
+Inner2=+3V3/+5V 分割电源层 + 顶/底 GND 铺铜)、M3 四角挖孔+禁布环、天线区多层 keepout、
+LED +/− 极性丝印、**DRC 1(仅 A3 已知假阳性)、pcb check 0 ERROR、lint 0 overlap、
+BOM 13/13 全 C 号、已落盘**。环境(编辑器/工程/连接器 0.8.11)由 agent 用
+environment-setup.md SOP 自举,零人工。
+
+### 新暴露缺口(轮次 #3)
+- [x] **autolayout×connect_pin 网格契约**:分区居中产出分数坐标 → 引脚离 5 网格 →
+  批量 autoconnect 53/64 失败。已修(c0d6e80):锚点 snap 5 网格 + 连接器可行动报错。
+- [x] **geom-net-mismatch 对 netflag 全量误报**(#45 交叉校验过宽):flag 在本 build 有
+  pin"1" 但网表无此件 → 64/64 假警。已修(c0d6e80):designator 为空静音网表判据。
+- [ ] **auto-place 跨组卫星不查碰撞**:3 对 overlap(C1↔U2 等)在 gap 调大后依旧原样
+  ——卫星只对自家主芯片避让。修法归入 B/P1 `pcb floorplan`;本轮以脚本找空位手工过门。
+- [ ] **power-planes 缝合 via 落点缺陷**:打在 SMD pad 正中(via-on-pad 不导通)+ 距
+  TH 孔 <11.8mil(Hole-to-Hole)+ 压在信号线上。本轮 via-delete 手术清除 7 颗重打。
+  应修 power-planes 的落点选择(避 pad/避孔/避线)。
+- [ ] **Inner1 GND pour 在 reload/rebuild 链后静默丢失**(pcb check via-crosses-plane
+  的"PLANE 无网络铺铜"分支抓到)——配方重跑(SIGNAL→pour→PLANE→rebuild)即复,根因待查。
+- USB-C 16P 隐藏 NPTH 槽(±98,+43)坑亲验:via 打上去 = Slot-to-Via/Hole 三连;绕行即可。
+- via-crosses-plane 对合法 via 21 条假阳性属文档已知(best-effort,DRC 仲裁)。
+
+### 新工具链实战验证(全程使用)
+`drc --json`(定位每一轮修复)· `via-delete`/`track-delete`(手术十余次,kind 守卫零
+误删)· `via-hop`(UART L2 对角跳线×2,键合 fill 自动)· `via-bond` 检查器(终态 0 ——
++5V L2 树 12 片手工键合全过)· `ACTION_BUSY` 防重入 · pour-rebuild SOP(断连暴增即重灌)。
+
 ## 第三大块:外壳设计(调研 2026-07-04,待支持)
 
 集齐「原理图 → PCB → **外壳**」三大块。官方 API 现状(`easyeda api search 外壳`):
