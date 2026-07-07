@@ -38,15 +38,24 @@ Clearance 26→**0**、`pcb check` **0**、`layout-lint` **100/100**。残留 1 
   capture 自动接线、raw-id 边界警告;真机全环验证(昨日会话 1920 行 → 27 步提取 →
   18 步区间回放,lint 保持 100)。首个样例 `examples/esp32-mini/moves.playbook.json`。
   后续小改进:exporter stamp `meta.doc`;`pcb via-hop` 宏步骤仍待做(见下)。
-- [x] `pcb drc --timeout <s>` + **忙时防重入**——**代码已落地(2026-07-07,真机待验)**:
+> **B/P0 四项真机验证通过(2026-07-07,ceshi/PCB1,agent 全程自驱)**:环境由 agent 用
+> chrome-devtools MCP 自举(开 web 编辑器 → #id 直达开工程 → IndexedDB 热重载连接器
+> 0.8.4→0.8.9,零人工);`drc --json` 出扁平明细并当场用于定位 10 条 GND 断连;并发 DRC
+> 第二发被拒 `ACTION_BUSY`;via-hop 造 3 track+2 via+4 键合 fill 后由 via-delete(kind
+> 守卫负向验证通过)/track-delete/fill delete 精准清场,图元数还原 37/89;**新发现**:
+> 手术增删后同网(GND)大面积 Connection Error 是铺铜连通性失效,`pour-rebuild` 后
+> DRC 11→1(基线,剩 A3 假阳性)。自举流程已沉淀为
+> `skills/easyeda-agent/references/environment-setup.md`。
+
+- [x] `pcb drc --timeout <s>` + **忙时防重入**——**已落地+真机验证(2026-07-07)**:
   CLI `--timeout`(默认 60s)经协议新字段 `timeoutMs` 传导给 daemon,daemon 提前
   2s 出结构化 DISPATCH_FAILED(不再两头各自傻等);超时提示「切前台单发,勿循环重试」;
   daemon 对 `pcb/schematic.drc.check` 按 window 防重入(重复下发拒 `ACTION_BUSY` 409)。
-- [x] **`pcb via-hop` 复合命令**——**代码已落地(2026-07-07,真机待验)**:
+- [x] **`pcb via-hop` 复合命令**——**已落地+真机验证(2026-07-07)**:
   `pcb.route.via_hop` = stub + via + 对层 track + via + stub + **自动 4 片键合 fill**
   (两 via × 两层,默认 20×20mil,`--no-bond` 关),via 距端点 `--stub`(默认 20mil)
   防压焊盘,中途失败整体回滚。封 A1 坑。
-- [x] `pcb via-delete --ids` / `pcb track-delete --ids`——**代码已落地(2026-07-07,真机待验)**:
+- [x] `pcb via-delete --ids` / `pcb track-delete --ids`——**已落地+真机验证(2026-07-07)**:
   `pcb.route.delete` 按 primitiveId 精准删,kind 守卫防贴错 id,`removed[]` 回显完整
   before-state(audit 可重建)。
 - [x] `pcb drc --json`——**已落地(2026-07-07,单测覆盖真实叶子样本)**:扁平

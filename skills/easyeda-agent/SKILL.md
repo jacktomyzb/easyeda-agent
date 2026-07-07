@@ -43,6 +43,12 @@ EasyEDA tooling.
 
 ## What To Read
 
+- `easyeda health` shows `windows: []` / `NO_CONNECTOR`, or you changed the
+  connector (`extension/`): read `references/environment-setup.md` — with a
+  browser-control tool (chrome-devtools MCP) the agent bootstraps the whole live
+  environment itself (open web editor → open project → verify attach → hot-reload
+  connector via IndexedDB, no uninstall/re-import); only fall back to asking the
+  user when no browser control is available.
 - Whole board, from scratch, or >~10 parts: read `references/design-flow.md` first.
 - Schematic work: read `references/schematic.md` and `references/actions.md`.
 - PCB work: read `references/pcb.md`.

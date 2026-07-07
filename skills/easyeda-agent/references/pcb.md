@@ -103,7 +103,10 @@ segment-by-segment, or use the file-exchange autoroute flow.
   --json` `objs`; **pull them fresh — ids churn after edits**. Each subcommand guards its
   kind (pasting track ids into `via-delete` errors out); locked primitives are skipped,
   stale ids reported as `notFound`. The result's `removed[]` echoes each primitive's full
-  before-state (net/layer/geometry) so the audit log can recreate it.
+  before-state (net/layer/geometry) so the audit log can recreate it. ⚠️ **After surgical
+  edits (delete/via-hop/fill changes), a burst of same-net (usually GND) Connection
+  Errors in DRC is pour-mediated connectivity gone stale, not real breaks — run
+  `pcb pour-rebuild` first, then re-judge** (verified live: 11→1 baseline).
 - `easyeda pcb via-hop --net N --from-x … --from-y … --to-x … --to-y …`
   (`pcb.route.via_hop`) — **composite layer hop**: entry stub → via → hop-layer track →
   via → exit stub, **plus (default) a small net-bound bond FILL on both layers of both
