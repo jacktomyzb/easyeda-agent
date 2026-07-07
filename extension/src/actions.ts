@@ -412,6 +412,17 @@ const schematicComponentsList: Handler = async (payload) => {
 		throw edaError(err, 'Failed to list schematic components.');
 	}
 
+	// When pins are requested, also resolve each pin's CURRENT net from the
+	// JSON-authoritative netlist (same source as schematic.read). This is the data
+	// plane `sch autoconnect` needs to be idempotent: without a per-pin net it can't
+	// tell "already connected to the target net" (skip) from "connected to a DIFFERENT
+	// net" (conflict) from "floating" (new connect). See issue #50.
+	let pinNetsByDesignator: Map<string, Map<string, string>> | null = null;
+	if (includePins) {
+		try { pinNetsByDesignator = (await collectNetlistPinNets()).byDesignator; }
+		catch { pinNetsByDesignator = null; }
+	}
+
 	const serialized: Array<Record<string, unknown>> = [];
 	for (const component of components) {
 		const record = serializeComponent(component);
@@ -427,7 +438,14 @@ const schematicComponentsList: Handler = async (payload) => {
 				const pins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(
 					component.getState_PrimitiveId(),
 				);
-				record.pins = (pins ?? []).map(serializePin);
+				const designator = String(component.getState_Designator?.() ?? '');
+				const netByNumber = pinNetsByDesignator?.get(designator) ?? null;
+				record.pins = (pins ?? []).map((pin) => {
+					const rec = serializePin(pin);
+					// null (not '') distinguishes "known floating" from "netlist unavailable".
+					rec.net = netByNumber ? (netByNumber.get(String(rec.pinNumber ?? '')) ?? '') : null;
+					return rec;
+				});
 			}
 			catch { /* pins are optional */ }
 		}
@@ -2528,6 +2546,82 @@ async function detectRotationNegation(): Promise<boolean> {
 async function appliedRotation(desired: number): Promise<number> {
 	return (await detectRotationNegation()) ? (((360 - desired) % 360) + 360) % 360 : desired;
 }
+
+// schematic.pin.disconnect — remove the stub connection at a pin: every wire with
+// an endpoint on (pinX,pinY) AND the netflag/netport sitting at that wire's far end,
+// deleted TOGETHER. This is the inverse of connect_pin and the primitive `sch
+// autoconnect --replace` uses to re-route a pin that's on the wrong net. Deleting
+// the flag+wire as a pair (not just the flag) avoids leaving an orphan stub wire —
+// the dangling-wire hazard tracked in issue #51.
+const schematicPinDisconnect: Handler = async (payload) => {
+	const pinX = requireNumber(payload, 'pinX');
+	const pinY = requireNumber(payload, 'pinY');
+
+	let wires, components;
+	try {
+		wires = await eda.sch_PrimitiveWire.getAll();
+		components = await eda.sch_PrimitiveComponent.getAll();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read schematic for pin disconnect.');
+	}
+
+	const wireSegs = collectWireSegments((wires ?? []) as Array<{ getState_Line: () => Array<number>; getState_Net?: () => string; getState_PrimitiveId?: () => string }>);
+	const TOL = CHECK_EPS * 8;
+	const near = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by) <= TOL;
+
+	// Stub wires: any wire with an endpoint coincident with the pin. Collect the
+	// far endpoints so we can find the flags/ports they anchor.
+	const wireIds = new Set<string>();
+	const farEnds: Array<{ x: number; y: number }> = [];
+	for (const ws of wireSegs) {
+		const [x0, y0, x1, y1] = ws.seg;
+		if (near(x0, y0, pinX, pinY)) {
+			if (ws.wirePrimitiveId) wireIds.add(ws.wirePrimitiveId);
+			farEnds.push({ x: x1, y: y1 });
+		}
+		else if (near(x1, y1, pinX, pinY)) {
+			if (ws.wirePrimitiveId) wireIds.add(ws.wirePrimitiveId);
+			farEnds.push({ x: x0, y: y0 });
+		}
+	}
+
+	// Net markers (flag/port/label) sitting at any far end of a stub we're removing.
+	const NET_MARKER_TYPES = new Set(['netflag', 'netport', 'netlabel', 'short_symbol']);
+	const flagIds = new Set<string>();
+	for (const c of components ?? []) {
+		let type: string;
+		try { type = String(c.getState_ComponentType?.() ?? ''); }
+		catch { continue; }
+		if (!NET_MARKER_TYPES.has(type)) continue;
+		let cx: number, cy: number, cid: string;
+		try { cx = c.getState_X(); cy = c.getState_Y(); cid = String(c.getState_PrimitiveId?.() ?? ''); }
+		catch { continue; }
+		if (cid && farEnds.some(e => near(e.x, e.y, cx, cy))) flagIds.add(cid);
+	}
+
+	const deletedWires: Array<string> = [];
+	const deletedFlags: Array<string> = [];
+	for (const id of wireIds) {
+		try { if (await eda.sch_PrimitiveWire.delete([id])) deletedWires.push(id); }
+		catch { /* best-effort; report what actually went */ }
+	}
+	for (const id of flagIds) {
+		try { if (await eda.sch_PrimitiveComponent.delete([id])) deletedFlags.push(id); }
+		catch { /* best-effort */ }
+	}
+
+	return {
+		result: {
+			pinX,
+			pinY,
+			deletedWirePrimitiveIds: deletedWires,
+			deletedFlagPrimitiveIds: deletedFlags,
+			deletedWireCount: deletedWires.length,
+			deletedFlagCount: deletedFlags.length,
+		},
+	};
+};
 
 const schematicPowerConnectPin: Handler = async (payload) => {
 	const pinX = requireNumber(payload, 'pinX');
@@ -5869,6 +5963,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.wire.create': schematicWireCreate,
 	'schematic.netflag.create': schematicNetflagCreate,
 	'schematic.pin.set_no_connect': schematicPinSetNoConnect,
+	'schematic.pin.disconnect': schematicPinDisconnect,
 	'schematic.select': schematicSelect,
 	'schematic.snapshot': schematicSnapshot,
 	'schematic.drc.check': schematicDrcCheck,
