@@ -80,6 +80,13 @@ extensionUuid 在 `extension/extension.json`。IndexedDB 结构非官方稳定 A
   先 pour-rebuild 再判断。
 - **后台窗口 DRC 永不完成**:见 `pcb.md` DRC 条目——切前台单发,daemon 已防
   重入(`ACTION_BUSY`)。
+- **用户说「画面没更新」**:web 编辑器前台窗口对所有编辑类型**即时重绘**
+  (2026-07-07 sha 比对实测:track/挪件/丝印/pour-rebuild 全即时,tab 切回也
+  即时)——画面旧只发生在桌面客户端、OS 级最小化/遮挡恢复、或铺铜 reflow 几何
+  过期(数据旧非画布旧)。**确定性修法一条:`easyeda doc reload`**(save→
+  close→reopen,不丢工作);轻量替代:让用户点一下画布/缩放,或 agent 跑
+  `easyeda view fit`(前台有效)。长任务时配合 `easyeda notify` 每阶段通知,
+  用户就知道何时该看/刷。
 - **headless 环境(CI / ClawFlow operator)不能做运行时验收**:没有编辑器就
   没有 DRC/check 的运行时产物;正确行为是失败并说明,绝不伪造通过。
 
