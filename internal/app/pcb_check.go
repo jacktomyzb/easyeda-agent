@@ -128,6 +128,7 @@ type pcbCheckSummary struct {
 	AcuteAngles       int `json:"acuteAngles"`
 	NonOrthogonal     int `json:"nonOrthogonal"`
 	TrackOverPad      int `json:"trackOverPad"`
+	Clearance         int `json:"clearance"`
 	SilkscreenFlipped int `json:"silkscreenFlipped"`
 	OverlappingVias   int `json:"overlappingVias"`
 	SingleLayerVias   int `json:"singleLayerVias"`
@@ -452,6 +453,99 @@ func findTrackOverPad(tracks []pcbTrack, pads []pcbPadP) []pcbCheckFinding {
 				})
 			}
 		}
+	}
+	return out
+}
+
+// ── clearance: a track runs closer than the spacing rule to another net ──────
+// The headless twin of EasyEDA DRC's 间距错误 (Safe Spacing) — a track passing
+// within `clearance` of an OTHER net's pad, via, or track is a short-in-waiting.
+// track-over-pad owns the exact overlap (a track crossing a pad center); this
+// owns the "too close but not on top" band and the track↔via / track↔track cases
+// that overlap-only checks miss, so `pcb check` can gate on shorts WITHOUT the
+// foreground-only native DRC. Pad sizes aren't in the input, so a nominal pad
+// half-extent pads the distance; vias use their real outer radius. Capped so a
+// wall of violations can't drown the report — the count says how many were cut.
+func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, clearance float64) []pcbCheckFinding {
+	const cap = 40
+	var out []pcbCheckFinding
+	dropped := 0
+	add := func(f pcbCheckFinding) {
+		if len(out) < cap {
+			out = append(out, f)
+		} else {
+			dropped++
+		}
+	}
+	isEnd := func(x, y, x1, y1, x2, y2 float64) bool {
+		return math.Hypot(x-x1, y-y1) <= pcbCoincEps || math.Hypot(x-x2, y-y2) <= pcbCoincEps
+	}
+	for _, t := range tracks {
+		if strings.TrimSpace(t.Net) == "" {
+			continue
+		}
+		for _, p := range pads {
+			if p.Layer != t.Layer || p.Net == t.Net || strings.TrimSpace(p.Net) == "" {
+				continue
+			}
+			if isEnd(p.X, p.Y, t.X1, t.Y1, t.X2, t.Y2) {
+				continue // legitimate termination
+			}
+			d := segPtDist(p.X, p.Y, t.X1, t.Y1, t.X2, t.Y2)
+			if d >= clearance+nominalPadHalf || d <= pcbOverPadEps {
+				continue // over-pad short is track-over-pad's; ≥clearance is fine
+			}
+			ref := p.Designator
+			if p.Number != "" {
+				ref += "." + p.Number
+			}
+			add(pcbCheckFinding{
+				Type: "clearance", Level: "ERROR", Net: t.Net, Layer: t.Layer,
+				Designator: p.Designator, Primitives: []string{t.ID},
+				At:      &pcbXY{round2(p.X), round2(p.Y)},
+				Message: fmt.Sprintf("track (net %s) runs %.1fmil from pad %s (net %s) — under the %.0fmil spacing rule", t.Net, d, ref, p.Net, clearance),
+			})
+		}
+		for _, v := range vias {
+			if v.Net == t.Net || strings.TrimSpace(v.Net) == "" {
+				continue
+			}
+			if isEnd(v.X, v.Y, t.X1, t.Y1, t.X2, t.Y2) {
+				continue
+			}
+			d := segPtDist(v.X, v.Y, t.X1, t.Y1, t.X2, t.Y2)
+			if d >= clearance+v.Dia/2 {
+				continue
+			}
+			add(pcbCheckFinding{
+				Type: "clearance", Level: "ERROR", Net: t.Net, Layer: t.Layer,
+				Primitives: []string{t.ID, v.ID}, At: &pcbXY{round2(v.X), round2(v.Y)},
+				Message: fmt.Sprintf("track (net %s) runs %.1fmil from via (net %s) — under the %.0fmil spacing rule", t.Net, d, v.Net, clearance),
+			})
+		}
+	}
+	// track ↔ track (different net, same layer)
+	for i := 0; i < len(tracks); i++ {
+		for j := i + 1; j < len(tracks); j++ {
+			a, b := tracks[i], tracks[j]
+			if a.Layer != b.Layer || a.Net == b.Net || strings.TrimSpace(a.Net) == "" || strings.TrimSpace(b.Net) == "" {
+				continue
+			}
+			if d := segSegDist(a.X1, a.Y1, a.X2, a.Y2, b.X1, b.Y1, b.X2, b.Y2); d < clearance && d > pcbOverPadEps {
+				mx, my := (a.X1+a.X2)/2, (a.Y1+a.Y2)/2
+				add(pcbCheckFinding{
+					Type: "clearance", Level: "ERROR", Nets: uniqStr([]string{a.Net, b.Net}), Layer: a.Layer,
+					Primitives: []string{a.ID, b.ID}, At: &pcbXY{round2(mx), round2(my)},
+					Message: fmt.Sprintf("tracks (net %s / %s) run %.1fmil apart — under the %.0fmil spacing rule", a.Net, b.Net, d, clearance),
+				})
+			}
+		}
+	}
+	if dropped > 0 {
+		out = append(out, pcbCheckFinding{
+			Type: "clearance", Level: "ERROR",
+			Message: fmt.Sprintf("+%d more clearance violation(s) not listed (capped at %d) — run `pcb drc` for the full set", dropped, cap),
+		})
 	}
 	return out
 }
@@ -1129,6 +1223,22 @@ func runPcbCheck(cfg *appConfig, window string, couplingW float64, strict, asJSO
 
 	rep := analyzePcbCheckFull(pads, tracks, vias, silk, couplingW)
 
+	// Clearance is a LIVE rule — it needs the board's live spacing value. Flags a
+	// track running under the spacing rule to another net's pad/via/track: the
+	// headless twin of native DRC's 间距错误, so `pcb check --strict` gates the
+	// low-level shorts WITHOUT the foreground-only native DRC.
+	clearance := fetchPcbRules(cfg, window).clearanceMil
+	if clearance <= 0 {
+		clearance = 6
+	}
+	for _, f := range findClearanceViolations(tracks, pads, vias, clearance) {
+		rep.Findings = append(rep.Findings, f)
+		rep.Summary.Clearance++
+		rep.Summary.Errors++
+		rep.Summary.Total++
+	}
+	rep.Passed = rep.Summary.Total == 0
+
 	// Antenna keep-out is a LIVE-only rule (needs component bboxes + regions, which
 	// the pure core doesn't take). Degrade gracefully if either fetch fails.
 	if ants, regions, copperLayers, aerr := fetchAntennaContext(cfg, window, silk); aerr != nil {
@@ -1415,9 +1525,9 @@ func renderPcbCheckReport(rep pcbCheckReport, w io.Writer) {
 		fmt.Fprintln(w, "  ✓ no DFM issues found")
 		return
 	}
-	fmt.Fprintf(w, "  ERROR=%d WARN=%d  |  dangling=%d acute=%d nonOrtho=%d overPad=%d silkFlipped=%d overlapVia=%d singleLayerVia=%d widthMismatch=%d dupSegment=%d coupling=%d antennaKeepout=%d netlessPour=%d viaCrossesPlane=%d floatingIsland=%d\n",
+	fmt.Fprintf(w, "  ERROR=%d WARN=%d  |  dangling=%d acute=%d nonOrtho=%d overPad=%d clearance=%d silkFlipped=%d overlapVia=%d singleLayerVia=%d widthMismatch=%d dupSegment=%d coupling=%d antennaKeepout=%d netlessPour=%d viaCrossesPlane=%d floatingIsland=%d\n",
 		s.Errors, s.Warnings-s.Errors,
-		s.DanglingEnds, s.AcuteAngles, s.NonOrthogonal, s.TrackOverPad, s.SilkscreenFlipped, s.OverlappingVias, s.SingleLayerVias, s.WidthMismatches, s.DuplicateSegments, s.ParallelCoupling, s.AntennaKeepout, s.NetlessPours, s.ViaCrossesPlane, s.FloatingIslands)
+		s.DanglingEnds, s.AcuteAngles, s.NonOrthogonal, s.TrackOverPad, s.Clearance, s.SilkscreenFlipped, s.OverlappingVias, s.SingleLayerVias, s.WidthMismatches, s.DuplicateSegments, s.ParallelCoupling, s.AntennaKeepout, s.NetlessPours, s.ViaCrossesPlane, s.FloatingIslands)
 	for _, f := range rep.Findings {
 		loc := ""
 		if f.At != nil {

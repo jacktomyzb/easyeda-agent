@@ -441,3 +441,37 @@ func TestPcbCheck_Fix8_CouplingDivergingWedge(t *testing.T) {
 		t.Fatalf("diverging-wedge parallel-coupling = %d, want 1", got)
 	}
 }
+
+// findClearanceViolations flags a track running under the spacing rule to another
+// net's pad / via / track (same layer for pads), skips same-net + endpoint + pure
+// overlap (track-over-pad owns those) + other-layer pads.
+func TestFindClearanceViolations(t *testing.T) {
+	// Track on layer 1 passing 8mil from a SIG2 pad (clearance 6 + nominalPadHalf 12
+	// = 18mil band; 8 < 18 → flagged).
+	tracks := []pcbTrack{{ID: "t", Net: "SIG1", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 10}}
+	pad := []pcbPadP{{Designator: "R1", Number: "1", Net: "SIG2", Layer: 1, X: 50, Y: 8}}
+	if got := countType(findClearanceViolationsReport(tracks, pad, nil, 6), "clearance"); got != 1 {
+		t.Fatalf("track 8mil from other-net pad: clearance = %d, want 1", got)
+	}
+	// Same net → not a violation.
+	if got := countType(findClearanceViolationsReport(tracks, []pcbPadP{{Net: "SIG1", Layer: 1, X: 50, Y: 8}}, nil, 6), "clearance"); got != 0 {
+		t.Errorf("same-net pad flagged, want 0")
+	}
+	// Other layer → not a violation (layer-aware).
+	if got := countType(findClearanceViolationsReport(tracks, []pcbPadP{{Net: "SIG2", Layer: 2, X: 50, Y: 8}}, nil, 6), "clearance"); got != 0 {
+		t.Errorf("other-layer pad flagged, want 0")
+	}
+	// Endpoint pad (legitimate termination) → not a violation.
+	if got := countType(findClearanceViolationsReport(tracks, []pcbPadP{{Net: "SIG2", Layer: 1, X: 100, Y: 0}}, nil, 6), "clearance"); got != 0 {
+		t.Errorf("endpoint pad flagged, want 0")
+	}
+	// Other-net via 10mil away (clearance 6 + via radius 12 = 18mil band) → flagged.
+	via := []pcbViaP{{ID: "v", Net: "SIG2", X: 50, Y: 10, Dia: 24}}
+	if got := countType(findClearanceViolationsReport(tracks, nil, via, 6), "clearance"); got != 1 {
+		t.Errorf("track near other-net via: clearance = %d, want 1", got)
+	}
+}
+
+func findClearanceViolationsReport(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, clr float64) pcbCheckReport {
+	return pcbCheckReport{Findings: findClearanceViolations(tracks, pads, vias, clr)}
+}

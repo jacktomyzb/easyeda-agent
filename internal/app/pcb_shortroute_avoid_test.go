@@ -27,7 +27,7 @@ func TestRouteWithAvoid_PicksClearOrientation(t *testing.T) {
 	opt := defaultRtOptions()
 	opt.corner = "90"
 
-	got := routeWithAvoid("S", a, b, 10, opt, placed, nil)
+	got := routeWithAvoid("S", a, b, 10, opt, placed, nil, nil)
 	if len(got) == 0 {
 		t.Fatal("no segments returned")
 	}
@@ -39,7 +39,7 @@ func TestRouteWithAvoid_PicksClearOrientation(t *testing.T) {
 
 	// With avoidance OFF, it reverts to the naive horizontal-first L (corner at 10,10).
 	opt.avoid = false
-	naive := routeWithAvoid("S", a, b, 10, opt, placed, nil)
+	naive := routeWithAvoid("S", a, b, 10, opt, placed, nil, nil)
 	if naive[0].X2 != 10 || naive[0].Y2 != 10 {
 		t.Errorf("no-avoid should be horizontal-first (corner 10,10), got corner (%.0f,%.0f)", naive[0].X2, naive[0].Y2)
 	}
@@ -50,13 +50,21 @@ func TestHopCost_CountsOtherNetPad(t *testing.T) {
 	a := rtPad{x: 0, y: 0, layer: 1}
 	b := rtPad{x: 10, y: 10, layer: 1}
 	cand := lShape90("S", a, b, 10, true) // (0,0)->(10,0)->(10,10)
-	// A P-net pad sitting on the horizontal leg at (5,0).
-	obst := []obPad{{net: "P", x: 5, y: 0}}
-	if c := hopCost(cand, "S", a, b, nil, obst, 6); c == 0 {
+	// A P-net pad sitting on the horizontal leg at (5,0), same layer as the track.
+	obst := []obPad{{net: "P", x: 5, y: 0, layer: 1}}
+	if c := hopCost(cand, "S", a, b, nil, obst, nil, 6); c == 0 {
 		t.Error("expected non-zero cost for a track running over another net's pad")
 	}
 	// The SAME pad on net S (the hop's own net) is not an obstacle.
-	if c := hopCost(cand, "S", a, b, nil, []obPad{{net: "S", x: 5, y: 0}}, 6); c != 0 {
+	if c := hopCost(cand, "S", a, b, nil, []obPad{{net: "S", x: 5, y: 0, layer: 1}}, nil, 6); c != 0 {
 		t.Errorf("same-net pad must not add cost, got %d", c)
+	}
+	// A P-net pad on a DIFFERENT layer than the track adds no cost (layer-aware).
+	if c := hopCost(cand, "S", a, b, nil, []obPad{{net: "P", x: 5, y: 0, layer: 2}}, nil, 6); c != 0 {
+		t.Errorf("other-layer pad must not add cost, got %d", c)
+	}
+	// A P-net VIA on the horizontal leg adds cost on any layer.
+	if c := hopCost(cand, "S", a, b, nil, nil, []obVia{{net: "P", x: 5, y: 0, r: 12}}, 6); c == 0 {
+		t.Error("expected non-zero cost for a track running over another net's via")
 	}
 }

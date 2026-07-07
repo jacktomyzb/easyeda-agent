@@ -106,7 +106,7 @@ func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOption
 	for _, c := range comps {
 		for _, pd := range c.pads {
 			net := strings.TrimSpace(pd.net)
-			obPads = append(obPads, obPad{net: net, x: pd.x, y: pd.y})
+			obPads = append(obPads, obPad{net: net, x: pd.x, y: pd.y, layer: pd.layer})
 			if net == "" {
 				continue
 			}
@@ -122,7 +122,9 @@ func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOption
 
 	var segs []rtSeg
 	var vias []rtVia
+	var obVias []obVia // multilayer-hop vias become obstacles for later hops
 	var diags []rtNetDiag
+	clr := opt.clearance + nominalPadHalf
 	for _, net := range nets {
 		pads := byNet[net]
 		switch {
@@ -142,16 +144,10 @@ func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOption
 			hop := fmt.Sprintf("%s.%s↔%s.%s", a.comp, a.pin, b.comp, b.pin)
 			crossLayer := a.layer != b.layer
 			mlen := math.Abs(a.x-b.x) + math.Abs(a.y-b.y)
-			// A hop a single-layer L can't clear: different pad layers, or too long
-			// for one straight run. Multilayer routing detours it via the alternate
-			// copper layer instead of deferring to the maze tier (#pcb-multilayer).
-			if crossLayer || mlen > opt.maxLen {
-				if opt.multilayer {
-					hs, hv := routeMultilayerHop(net, a, b, w, opt)
-					segs = append(segs, hs...)
-					vias = append(vias, hv...)
-					continue
-				}
+			mustDetour := crossLayer || mlen > opt.maxLen // can't run as one same-layer L
+
+			// Without multilayer, a hop that needs a detour defers to the maze tier.
+			if mustDetour && !opt.multilayer {
 				if crossLayer {
 					diags = append(diags, rtNetDiag{net, fmt.Sprintf("%s needs a via (layers %d/%d) — enable --multilayer", hop, a.layer, b.layer)})
 				} else {
@@ -159,11 +155,36 @@ func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOption
 				}
 				continue
 			}
-			// Obstacle-aware: pick the L orientation that hits the fewest other-net
-			// obstacles (already-placed segments + other-net pads). Falls back to the
-			// naive H-first L when --no-avoid or when nothing is in the way.
-			hopSegs := routeWithAvoid(net, a, b, w, opt, segs, obPads)
-			segs = append(segs, hopSegs...)
+
+			// Same-layer L candidate (obstacle-aware orientation) + its clearance cost.
+			single := []rtSeg(nil)
+			singleCost := 1 << 30
+			if !mustDetour {
+				single = routeWithAvoid(net, a, b, w, opt, segs, obPads, obVias)
+				singleCost = hopCost(single, net, a, b, segs, obPads, obVias, clr)
+			}
+
+			// Detour onto the emptier copper layer when the hop needs it, or when the
+			// same-layer L would violate clearance and a bottom-layer trunk is cleaner
+			// (all SMD pads sit on top, so the bottom trunk clears the pad field).
+			if opt.multilayer && (mustDetour || singleCost > 0) {
+				ml, mv := routeMultilayerHop(net, a, b, w, opt)
+				// The detour's cost includes its own vias landing near other nets —
+				// otherwise it would trade a track-over-pad short for a worse via-over-pad.
+				mlCost := hopCost(ml, net, a, b, segs, obPads, obVias, clr)
+				for _, vv := range mv {
+					mlCost += viaClearanceCost(vv, obPads, obVias, clr, opt.viaDia/2)
+				}
+				if mustDetour || mlCost < singleCost {
+					segs = append(segs, ml...)
+					vias = append(vias, mv...)
+					for _, vv := range mv {
+						obVias = append(obVias, obVia{net: vv.Net, x: vv.X, y: vv.Y, r: opt.viaDia / 2})
+					}
+					continue
+				}
+			}
+			segs = append(segs, single...)
 		}
 	}
 	return segs, vias, diags
