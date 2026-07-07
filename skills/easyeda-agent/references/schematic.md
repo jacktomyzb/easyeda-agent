@@ -227,6 +227,30 @@ placed), and a `validation` summary (`partOverlaps` / `titleBlockHits` /
   `sch autoconnect` (power/ground/netport) + wiring, then `sch layout-lint` /
   `sch drc` to gate.
 
+## Zone-less packing — `sch autoplace-free`
+
+Where `autolayout` needs you to name zones, **`sch autoplace-free` finds the sheet's
+blank space for you** and drops movable parts in, collision-free — the "把这些件塞进
+纸面空白" case. Parts only (never wires/flags — that's `sch group-move`), so it's pure
+CLI-side (reuses `components.list --include-bbox` + `component.modify`, no connector
+handler). Deterministic top-left first-fit, anchors snapped to the 5-grid.
+
+```bash
+easyeda sch autoplace-free --dry-run                 # auto-pick messy parts, preview
+easyeda sch autoplace-free --designators C1,C2,R4 --apply
+easyeda sch autoplace-free --all --apply             # repack the whole page (tidy mode)
+```
+
+Move-set: **default** auto-selects parts currently OUTSIDE the usable area or
+OVERLAPPING another (clean in-bounds parts stay put); `--designators A,B` targets
+explicit parts; `--all` repacks everything. Fixed (non-moved) parts + the
+title-block keep-out are obstacles it dodges. `--margin` (sheet-edge inset),
+`--gap` (min edge-to-edge), `--grid-step`, `--no-avoid-titleblock`. `--apply`
+moves via `component.modify` then self-checks with layout-lint. A big part on an
+already-full page honestly reports **"no free slot"** rather than overlapping — use
+`--all` so it gets first pick, or free up room. Verified live: 3 stacked parts →
+`--apply` → 0 overlap.
+
 ## Actions
 
 Run `easyeda actions` for the current machine-readable action list.

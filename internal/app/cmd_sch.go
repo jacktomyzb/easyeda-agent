@@ -1130,6 +1130,13 @@ The keepouts[] format is what sch autoconnect / autolayout consume.`,
 	// --apply in cmd_sch_autolayout_run.go. See issue #25.
 	sch.AddCommand(newAutolayoutCmd(cfg, &window, stdout, stderr))
 
+	// ── autoplace-free ────────────────────────────────────────────────────
+	// Zone-less packer: drop movable parts into the sheet's blank space,
+	// top-left first-fit, collision-free against fixed parts + title block.
+	// Pure planner in cmd_sch_autoplace_free.go; I/O + --apply in
+	// cmd_sch_autoplace_free_run.go. Parts-only (no wires/flags).
+	sch.AddCommand(newAutoplaceFreeCmd(cfg, &window, stdout, stderr))
+
 	// ── netlist ───────────────────────────────────────────────────────────
 	// schematic.export.netlist
 	{
