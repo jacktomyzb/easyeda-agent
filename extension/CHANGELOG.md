@@ -6,6 +6,16 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Skill 目录自动同步 + 连接器落后提示**(免手动升级):`daemon start` 默认带
+  `--auto-update-skill`,启动时后台把已存在的 skill 目录(`~/.claude`、`~/.codex`)
+  拉齐到最新 release 并逐步打日志(尊重 `EASYEDA_SKILL_PRESERVE`)。新增
+  `easyeda skill status` / `easyeda skill sync`(`--version`/`--preserve`/`--client`/
+  `--create-missing`/`--json`)手动查看与触发同一机制。连接器一注册即比对版本,落后
+  时打**可操作日志**(重导 `.eext` + 彻底重启 EasyEDA)——sideload `.eext` 无原地
+  自动更新(市场专属能力),故只检测+提示、不静默替换。install.sh 装完 skill 写
+  `.version` 标记与 daemon 对齐避免重复下载。**连接器代码未变,升级无需重导 `.eext`。**
+
 ## [0.9.0] - 2026-07-08
 
 自 0.8.3 以来的整体收口版本:PCB 布线/DRC 从「能放」走到「能连、能查、能救」,
