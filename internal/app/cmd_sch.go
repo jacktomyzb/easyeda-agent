@@ -947,7 +947,7 @@ still surfacing warnings for review.`,
 		}
 		c.Flags().BoolVar(&strict, "strict", false, "treat warnings as errors (SDK strict mode)")
 		c.Flags().BoolVar(&verbose, "verbose", false, "also print each violation's raw EDA object")
-		c.Flags().BoolVar(&asJSON, "json", false, "emit the normalized report as JSON")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the normalized report in the {id,type,version,ok,result} envelope (report under result)")
 		sch.AddCommand(c)
 	}
 
@@ -975,7 +975,11 @@ The floating-pin output is the exact input 'sch no-connect' takes, so the loop i
 sch check → wire the real ones / sch no-connect the intentional ones → sch check.
 
 Exit code: 0 by default (floating IO pins are normal until NC-marked); --strict
-exits non-zero when there are any findings, to use it as a gate.`,
+exits non-zero when there are any findings, to use it as a gate.
+
+--json wraps the report in the same {id,type,version,ok,result} envelope the
+other sch commands emit; the findings are under result.findings (v0.10.0+;
+prior versions emitted a bare {passed,summary,findings}).`,
 			Args: cobra.NoArgs,
 			Example: `  easyeda sch check
   easyeda sch check --json
@@ -986,7 +990,7 @@ exits non-zero when there are any findings, to use it as a gate.`,
 		}
 		c.Flags().BoolVar(&allPages, "all-pages", false, "check components across all schematic pages (WARNING: non-active pages return shallow data — pins/bbox may be empty; use `doc switch` to that page for accurate data)")
 		c.Flags().BoolVar(&strict, "strict", false, "exit non-zero when there are findings (gate mode)")
-		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the report in the {id,type,version,ok,result} envelope (findings under result.findings)")
 		sch.AddCommand(c)
 	}
 
@@ -1112,7 +1116,7 @@ The keepouts[] format is what sch autoconnect / autolayout consume.`,
 				return runSheetGeometry(cfg, window, asJSON, stdout, stderr)
 			},
 		}
-		c.Flags().BoolVar(&asJSON, "json", false, "emit the geometry as JSON")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the geometry in the {id,type,version,ok,result} envelope (geometry under result)")
 		sch.AddCommand(c)
 	}
 

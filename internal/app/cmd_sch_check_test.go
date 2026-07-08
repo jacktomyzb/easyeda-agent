@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -109,6 +110,72 @@ func TestRenderCheck_NetNames(t *testing.T) {
 	for _, want := range []string{"net-marker mismatch", "multi-net wire", "marker=+3V3 wire=BOOT_IO0", "nets=[EN,GND]", "net names"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
+// #66: --json output must be wrapped in the {id,type,version,ok,result}
+// envelope the transparent sch commands stream, so a uniform-envelope parser
+// reading result.findings works here too (previously it emitted a bare
+// {passed,summary,findings} and result.findings was silently empty).
+func TestEncodeResultEnvelope_CheckReport(t *testing.T) {
+	rep := checkReport{
+		Passed:  false,
+		Summary: checkSummary{FloatingPins: 2, Total: 1},
+		Findings: []checkFinding{
+			{Type: "floating-pin", Level: "warn", Designator: "U1", Pins: []string{"4", "5"}},
+		},
+	}
+	res := &actionResult{ID: "req-1", Type: "response", Version: "1", OK: true}
+
+	var buf bytes.Buffer
+	if err := encodeResultEnvelope(res, rep, &buf); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var env struct {
+		ID      string `json:"id"`
+		Type    string `json:"type"`
+		Version string `json:"version"`
+		OK      bool   `json:"ok"`
+		Result  struct {
+			Passed   bool           `json:"passed"`
+			Findings []checkFinding `json:"findings"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v\n%s", err, buf.String())
+	}
+	if env.ID != "req-1" || env.Type != "response" || env.Version != "1" || !env.OK {
+		t.Errorf("envelope metadata lost: %+v", env)
+	}
+	// The whole point of #66: result.findings must be reachable and non-empty.
+	if len(env.Result.Findings) != 1 || env.Result.Findings[0].Designator != "U1" {
+		t.Errorf("result.findings not reachable via envelope: %+v", env.Result)
+	}
+	if env.Result.Passed {
+		t.Error("expected result.passed=false")
+	}
+}
+
+// Envelope metadata is optional: when the daemon response carries no id/type/
+// version, those keys are omitted rather than emitted empty, but ok/result
+// stay present.
+func TestEncodeResultEnvelope_OmitsEmptyMeta(t *testing.T) {
+	rep := checkReport{Passed: true}
+	res := &actionResult{OK: true}
+
+	var buf bytes.Buffer
+	if err := encodeResultEnvelope(res, rep, &buf); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "\"id\"") || strings.Contains(out, "\"type\"") || strings.Contains(out, "\"version\"") {
+		t.Errorf("expected empty meta omitted, got:\n%s", out)
+	}
+	for _, want := range []string{"\"ok\"", "\"result\""} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %s present, got:\n%s", want, out)
 		}
 	}
 }
