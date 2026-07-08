@@ -1,0 +1,206 @@
+{
+ "version": "v0.2",
+ "base": "v0.1 决策承接+两项变更(2026-07-09 用户拍板)",
+ "decisions": {
+  "mcu": "ESP32-S3-WROOM-1U-N8 模组(C2980297)——用户拍板弃芯片级",
+  "antenna24g": "模组自带 IPEX 外引(WROOM-1U)",
+  "antenna433": "CC1101 分立+IPEX 外引(承接)",
+  "stackup": "4层 GND内电层+3V3内层(承接)",
+  "usb": "单取向(承接)",
+  "power": "USB+12V端子双供电(承接)",
+  "assembly": "JLC 贴片(承接)",
+  "doubleSided": "仅 SD 卡槽底面(承接)"
+ },
+ "modules": [
+  {
+   "name": "MCU_CORE",
+   "parts": [
+    "U1",
+    "R102",
+    "C103",
+    "R103",
+    "C110",
+    "C111"
+   ],
+   "page": "p1",
+   "zone": "center"
+  },
+  {
+   "name": "USB_PROG",
+   "parts": [
+    "J2",
+    "U3",
+    "Q1",
+    "Q2",
+    "R301",
+    "R302",
+    "R304",
+    "R305",
+    "R1",
+    "R2",
+    "C301",
+    "C302",
+    "C303",
+    "C304",
+    "C305"
+   ],
+   "page": "p1",
+   "zone": "left"
+  },
+  {
+   "name": "BUTTONS_LED",
+   "parts": [
+    "SW1",
+    "SW2",
+    "LED1",
+    "R901"
+   ],
+   "page": "p1",
+   "zone": "bottom"
+  },
+  {
+   "name": "POWER",
+   "parts": [
+    "J1",
+    "D502",
+    "U5",
+    "C501",
+    "C503",
+    "L501",
+    "D501",
+    "C502",
+    "D503",
+    "U2",
+    "C201",
+    "C202",
+    "C203"
+   ],
+   "page": "p2",
+   "zone": "top"
+  },
+  {
+   "name": "SD",
+   "parts": [
+    "J3",
+    "R801",
+    "R802",
+    "R803",
+    "R804",
+    "R805",
+    "C801",
+    "C802"
+   ],
+   "page": "p2",
+   "zone": "center",
+   "pcbLayer": "BOTTOM"
+  },
+  {
+   "name": "RS485",
+   "parts": [
+    "U7",
+    "R701",
+    "R702",
+    "R703",
+    "R706",
+    "JP701",
+    "D701",
+    "C701",
+    "J4"
+   ],
+   "page": "p2",
+   "zone": "bottom"
+  },
+  {
+   "name": "FIELD_IO",
+   "parts": [
+    "J5",
+    "J6",
+    "R110"
+   ],
+   "page": "p2",
+   "zone": "right"
+  },
+  {
+   "name": "CC1101",
+   "parts": [
+    "U6",
+    "X2",
+    "C681",
+    "C682",
+    "C621",
+    "C631",
+    "L621",
+    "L631",
+    "C624",
+    "L622",
+    "C622",
+    "L623",
+    "C623",
+    "C625",
+    "J_ANT2",
+    "R601",
+    "L601",
+    "C601",
+    "C641",
+    "C651",
+    "C661",
+    "C691",
+    "C692",
+    "C693",
+    "C694"
+   ],
+   "page": "p3",
+   "zone": "center"
+  }
+ ],
+ "pinmap": {
+  "CC_GDO0": "GPIO4",
+  "CC_CSN": "GPIO5",
+  "CC_SCK": "GPIO6",
+  "CC_MOSI": "GPIO7",
+  "REED": "GPIO8",
+  "SD_CS": "GPIO10",
+  "CC_MISO": "GPIO15",
+  "CC_GDO2": "GPIO16",
+  "SD_MOSI": "GPIO17",
+  "SD_SCK": "GPIO18",
+  "SD_MISO": "GPIO21",
+  "RS485_TX": "GPIO38",
+  "RS485_RX": "GPIO39",
+  "RS485_DE": "GPIO40",
+  "K230_TX": "GPIO41",
+  "K230_RX": "GPIO42",
+  "U0TXD": "GPIO43",
+  "U0RXD": "GPIO44",
+  "LED_N": "GPIO48",
+  "BOOT": "GPIO0",
+  "EN": "EN"
+ },
+ "stackup": {
+  "layers": 4,
+  "groundStrategy": "plane",
+  "innerLayers": [
+   "GND",
+   "3V3"
+  ]
+ },
+ "rf": {
+  "parts": [
+   "U1",
+   "J_ANT2",
+   "U6"
+  ],
+  "keepoutLayers": "all"
+ },
+ "board": {
+  "outline": "compact",
+  "mountingHoles": "M3x4-corners-first-locked"
+ },
+ "interfaces": [
+  {
+   "name": "USB_C",
+   "orientation": "single"
+  }
+ ],
+ "costTier": "standard"
+}
