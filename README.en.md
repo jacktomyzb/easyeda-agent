@@ -45,6 +45,12 @@ The action catalog now spans schematic, PCB, document navigation, board binding,
 
 ## Install Skills
 
+> 📖 **Full setup & usage notes: [Quick Start →](docs/quick-start.md)** — the
+> four-part suite (CLI / connector `.eext` / Skill / EasyEDA), version alignment,
+> starting the daemon, upgrade discipline, and a troubleshooting table. **On
+> upgrade, bump all three (CLI + connector + Skill) to the same version**, or
+> `easyeda daemon health` flags the lagging connector as stale.
+
 Install the `easyeda` CLI/daemon first, then import the EasyEDA connector URL printed
 by the installer:
 

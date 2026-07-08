@@ -60,6 +60,8 @@ curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main
 2. 已开启「允许外部交互 / Allow external interaction」。
 3. 已启动本地 `easyeda-agent` daemon。
 
+> 完整上手、版本对齐与升级注意事项见 [快速开始 & 使用注意事项](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/quick-start.md) —— 四件套(CLI / 连接器 `.eext` / Skill / EasyEDA)需同版本同时在位;升级时三方一起升,否则 `easyeda daemon health` 会把落后的连接器标成 stale。
+
 ## 重新打包
 
 ```bash
