@@ -1854,15 +1854,18 @@ const schematicCheck: Handler = async (payload) => {
 		const nets = refs.map(r => r.net).filter(Boolean);
 		if (nets.length <= 1) continue;
 		const unique = [...new Set(nets)];
-		if (unique.length > 1 || nets.length !== unique.length) {
+		// Only distinct net names on one wire is a real short (异名并线).
+		// Repeated same-name flags (e.g. ["GND","GND"] from共线合并的 stub) are
+		// legal — collapse to unique so we don't drown 3 real shorts under 83 dupes.
+		if (unique.length > 1) {
 			multiNetWires++;
 			findings.push({
 				type: 'multi-net-wire',
 				level: 'warn',
 				wirePrimitiveId: wireId,
-				nets,
-				count: nets.length,
-				message: `导线有多个网络名: ${nets.join('、')}`,
+				nets: unique,
+				count: unique.length,
+				message: `导线有多个网络名: ${unique.join('、')}`,
 			});
 		}
 	}
