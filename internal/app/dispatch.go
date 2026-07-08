@@ -96,8 +96,14 @@ type artifactRef struct {
 }
 
 // actionResult is the parsed form of an /action response, for callers that need
-// to read the result programmatically instead of streaming it to stdout.
+// to read the result programmatically instead of streaming it to stdout. The
+// envelope fields (ID/Type/Version) are preserved so reconstruct-then-render
+// commands (sch check/drc/sheet) can re-wrap their typed report in the same
+// {id,type,version,ok,result} envelope the transparent commands stream (#66).
 type actionResult struct {
+	ID        string         `json:"id"`
+	Type      string         `json:"type"`
+	Version   string         `json:"version"`
 	OK        bool           `json:"ok"`
 	Result    map[string]any `json:"result"`
 	Artifacts []artifactRef  `json:"artifacts"`
@@ -121,6 +127,9 @@ func requestActionTimed(cfg *appConfig, action, window string, payload any, time
 	}
 
 	var parsed struct {
+		ID        string         `json:"id"`
+		Type      string         `json:"type"`
+		Version   string         `json:"version"`
 		OK        bool           `json:"ok"`
 		Result    map[string]any `json:"result"`
 		Artifacts []artifactRef  `json:"artifacts"`
@@ -132,7 +141,7 @@ func requestActionTimed(cfg *appConfig, action, window string, payload any, time
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return nil, fmt.Errorf("decode %s response: %w", action, err)
 	}
-	res := &actionResult{OK: parsed.OK, Result: parsed.Result, Artifacts: parsed.Artifacts, Context: parsed.Context}
+	res := &actionResult{ID: parsed.ID, Type: parsed.Type, Version: parsed.Version, OK: parsed.OK, Result: parsed.Result, Artifacts: parsed.Artifacts, Context: parsed.Context}
 	if !parsed.OK {
 		msg := "ok=false"
 		if parsed.Error != nil && parsed.Error.Message != "" {
@@ -142,6 +151,31 @@ func requestActionTimed(cfg *appConfig, action, window string, payload any, time
 		return res, fmt.Errorf("%s failed: %s", action, msg)
 	}
 	return res, nil
+}
+
+// encodeResultEnvelope writes a reconstructed typed report wrapped in the same
+// {id,type,version,ok,result} envelope the transparent (stdout-streaming)
+// commands emit, so `sch check/drc/sheet --json` are consistent with `sch
+// list/read/place` and a uniform-envelope parser reading result.* works across
+// all of them (#66). The envelope metadata is taken from the daemon's response
+// (res); ok mirrors res.OK.
+func encodeResultEnvelope(res *actionResult, report any, stdout io.Writer) error {
+	env := map[string]any{
+		"ok":     res.OK,
+		"result": report,
+	}
+	if res.ID != "" {
+		env["id"] = res.ID
+	}
+	if res.Type != "" {
+		env["type"] = res.Type
+	}
+	if res.Version != "" {
+		env["version"] = res.Version
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(env)
 }
 
 // dispatchCapture runs an action like dispatch (streaming the raw response to

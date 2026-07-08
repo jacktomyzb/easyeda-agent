@@ -89,9 +89,10 @@ func runSchCheck(cfg *appConfig, window string, allPages, strict, asJSON bool, s
 	}
 
 	if asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(rep); err != nil {
+		// Wrap the reconstructed report in the same {id,type,version,ok,result}
+		// envelope the transparent commands (sch list/read/place) stream, so a
+		// uniform-envelope parser reading result.findings works here too (#66).
+		if err := encodeResultEnvelope(res, rep, stdout); err != nil {
 			return err
 		}
 	} else {
