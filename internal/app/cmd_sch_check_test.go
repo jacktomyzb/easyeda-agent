@@ -98,15 +98,15 @@ func TestRenderCheck_NetNames(t *testing.T) {
 				Type:            "multi-net-wire",
 				Level:           "warn",
 				WirePrimitiveId: "w2",
-				Nets:            []string{"EN", "EN"},
-				Message:         "导线有多个网络名: EN、EN",
+				Nets:            []string{"EN", "GND"},
+				Message:         "导线有多个网络名: EN、GND",
 			},
 		},
 	}
 	var buf bytes.Buffer
 	renderCheckReport(rep, &buf)
 	out := buf.String()
-	for _, want := range []string{"net-marker mismatch", "multi-net wire", "marker=+3V3 wire=BOOT_IO0", "nets=[EN,EN]", "net names"} {
+	for _, want := range []string{"net-marker mismatch", "multi-net wire", "marker=+3V3 wire=BOOT_IO0", "nets=[EN,GND]", "net names"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q\n--- output ---\n%s", want, out)
 		}
