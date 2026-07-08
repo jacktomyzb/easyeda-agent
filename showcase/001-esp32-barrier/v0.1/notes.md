@@ -112,6 +112,21 @@ pin 端点上时全链路失明,还给 check 制造"已连接"假象。
 **固化教训**:S5 门必须三件套齐跑(layout-lint + native DRC + check),check 不能
 替代 DRC;端点扫描进 SOP 当第四道自检。
 
+## 2026-07-09 PCB 阶段(进行中)+ 用户布局纠偏
+
+- P0-P8 已走:103 件 add-component(0 失败)→ floorplan+合法化器(0 overlap/0 off-board,
+  板 67.4×53mm 利用率 95%)→ 4 层叠层 + 天线 keepout 8 区 + M3 挖孔×4 → route-short 60 网
+  → power-planes(GND L15 内电层 + 3V3 L16)→ 外层 GND pour。
+- **卡点**:pcb check ERROR=104(track-over-pad 63 + clearance 41)——route-short 启发式档
+  在 QFN56 扇出密度的结构性天花板;逐网 rip→route 空转实证(确定性路由器同障碍同路径,
+  104→104 一个数不差)。出路=迷宫档 Freerouting(需 Java21,装机被用户拦下待批)。
+- 自查六宗罪+改进方向已报告(修复前不问"凭什么会不同"/猜尺寸摆位/memory 不预检/
+  工具超范围/依赖临阵查/长战役无小结)。
+- **用户布局纠偏(定型为 skill 规则)**:布局分档确认制(孔→边缘接口→主芯片→卫星,
+  每档确认+锁定);双面布局与焊接工艺进 S0 决策(#13/#14);丝印两段式确认;
+  M3 净空机械验证 4 处冲突(J2/J_ANT1/J_ANT2 压垫圈 0mil、J6 距 45mil)——正是
+  孔后置的必然后果。**当前布局需按新流程返工②档边缘接口件**。
+
 ## 关键文件
 - 连线蓝图:netlist-plan.md;autoconnect spec:scratchpad/barrier-p{1,2}-connect.json
 - 引脚字典:scratchpad/barrier-p{1,2}-read.json(U1 QFN56:GPIO15/16=pin21/22,GPIO48=pin36,
