@@ -188,12 +188,13 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
 |---|---|
 | `schematic.library.search` | Free-text search of the EasyEDA device library (`eda.lib_Device.search`); returns `libraryUuid` + `uuid` ready for `schematic.component.place`, plus name/value/footprint/lcsc/description. Replaces ad-hoc `debug.exec_js` lookups. **See the search caveat under Roadmap.** |
 
-### Verify (2 actions)
+### Verify (3 actions)
 
 | Action | What |
 |---|---|
 | `schematic.drc.check` | Run the official schematic DRC SDK gate; current EasyEDA builds may return only boolean/aggregate detail. Use `schematic.check` for reconstructed per-item warnings. |
 | `schematic.check` | Reconstructed schematic design check from primitives + official netlist JSON: net-marker mismatch, multi-net wire, floating pins, wire crossings, and wire-over-pin hazards. |
+| `schematic.bridgeCheck` | **Tree-granularity** net-vs-copper consistency check (`sch bridge-check`). Groups every page wire into trees by shared vertices (union-find), then aggregates the netflag/netport net names anchored on each tree: `len(set(nets)) > 1` → **BRIDGE** (共线合并短路, real short, ERROR/gate); empty nets + touches a pin → **ORPHAN** (孤儿桩, WARN). Catches the盲区 `schematic.check`'s per-single-wire `multi-net-wire` rule under-reports when one merge spans several wires. Reports wire ids / flag ids / touched `designator:pin` per problem tree. Read-only. |
 | `schematic.snapshot` | Capture the current rendered area as a PNG artifact. |
 
 ### Export (2 actions)
