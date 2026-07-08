@@ -127,6 +127,26 @@ pin 端点上时全链路失明,还给 check 制造"已连接"假象。
   M3 净空机械验证 4 处冲突(J2/J_ANT1/J_ANT2 压垫圈 0mil、J6 距 45mil)——正是
   孔后置的必然后果。**当前布局需按新流程返工②档边缘接口件**。
 
+
+## 2026-07-09 深夜:布局定稿(用户确认)+ 迷宫档首战
+
+- **②档边缘件用户确认通过**(朝向/边序 OK):USB+按键+K230 下边、12V/485/磁簧右边、
+  双 IPEX 上边两角、SD 卡槽独移底面(用户拍板)+上拉阵随行;M3 净空 0 冲突、
+  真同层 overlap 0(lint 跨层假阳 7 处=双面应然,盲区已在案);keepout 8 区跟随重建;
+  板 65.2×51.5mm。焊接工艺拍板=JLC 贴片(BOM 0402 不动)。
+- **迷宫档(Freerouting 1.9 + JDK21,用户批准安装)**:rip 全部→DSN→路由→SES 导入,
+  **69/69 网全布通**(启发式档最好 60/69)。但 native DRC 499 条 ClearanceError,
+  **全部为 Track↔Track 0mil 异网重叠**——freerouting 输出应为 DRC-clean,矛头指向
+  **SES 导入环节坐标/去重缺陷**(autoroute action 的导入路径)。电源二次教训:
+  freerouting 会把电源网也当轨布(DSN 无 pour 概念),GND/3V3 轨已撤改回纯面+缝合,
+  其余 7 子电源轨保留 freerouting 轨。
+- **下一步(新会话)**:① 解剖 --keep 的 SES vs 导入后 track 坐标,定位 0mil 重叠是
+  导入重复还是坐标错位(疑似我方 bug,不是 freerouting);② 修复后 pcb check 收尾
+  (dangling 40/acute 78 多为导入伴生);③ P9 丝印终调 → P10 双门 → 确认点③。
+- 坑新增:autoroute 前必须 PCB 为活动文档(reload 后活动页会跳回原理图,DSN 导出空
+  报"PCB may be empty");DRC --json 大结果解码截断(count 1515 时 flattener 崩,
+  用原始树 regex 统计兜底)。
+
 ## 关键文件
 - 连线蓝图:netlist-plan.md;autoconnect spec:scratchpad/barrier-p{1,2}-connect.json
 - 引脚字典:scratchpad/barrier-p{1,2}-read.json(U1 QFN56:GPIO15/16=pin21/22,GPIO48=pin36,
