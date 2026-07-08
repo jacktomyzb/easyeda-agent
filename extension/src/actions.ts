@@ -511,6 +511,11 @@ const schematicComponentsList: Handler = async (payload) => {
 	// (via eda.sch_Primitive.getPrimitivesBBox) so the agent / `sch layout-lint`
 	// can reason about size, spacing, and overlap — mirrors pcb.components.list.
 	const includeBBox = optionalBoolean(payload, 'includeBBox') === true;
+	// includeWires attaches existing wire segments {x0,y0,x1,y1,net} so `sch
+	// autoconnect` can hard-reject any candidate stub that would touch a foreign-net
+	// wire — EasyEDA merges nets at an endpoint-on-wire junction, a silent short the
+	// post-hoc DRC can't catch. See issue #64.
+	const includeWires = optionalBoolean(payload, 'includeWires') === true;
 	// tagPages attributes each component to its owning page (pageUuid/pageName).
 	// Opt-in because it briefly cycles the active page; autoconnect requests it so
 	// its off-page error can point at the exact `doc switch` target.
@@ -573,7 +578,21 @@ const schematicComponentsList: Handler = async (payload) => {
 		serialized.push(record);
 	}
 
-	return { result: { components: serialized, count: serialized.length } };
+	// Existing wire geometry for the autoconnect scorer (issue #64). Flatten every
+	// wire's polyline into per-edge segments tagged with the wire's net, so the Go
+	// side can hard-reject a stub that would touch a foreign-net wire.
+	const wires: Array<{ x0: number; y0: number; x1: number; y1: number; net: string }> = [];
+	if (includeWires) {
+		let rawWires: Array<{ getState_Line: () => Array<number>; getState_Net?: () => string; getState_PrimitiveId?: () => string }> = [];
+		try { rawWires = (await eda.sch_PrimitiveWire.getAll() ?? []) as typeof rawWires; }
+		catch { rawWires = []; }
+		const segs = collectWireSegments(rawWires);
+		for (const s of segs) {
+			wires.push({ x0: s.seg[0], y0: s.seg[1], x1: s.seg[2], y1: s.seg[3], net: s.net });
+		}
+	}
+
+	return { result: { components: serialized, count: serialized.length, wires } };
 };
 
 const schematicComponentPlace: Handler = async (payload) => {
