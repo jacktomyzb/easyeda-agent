@@ -581,6 +581,246 @@
 			"footprint": "HDR-TH_4P-P2.54-V-M-3",
 			"basic": false,
 			"desc": ""
+		},
+		"ic.xl1509_5v_buck": {
+			"value": null,
+			"mpn": "XL1509-5.0E1",
+			"lcsc": "C61063",
+			"manufacturer": "XLSEMI(芯龙)",
+			"deviceUuid": "aa38039ffb7144df89b006eb6329c5ad",
+			"footprint": "SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL",
+			"basic": false,
+			"desc": ""
+		},
+		"diode.ss34_sma": {
+			"value": null,
+			"mpn": "SS34",
+			"lcsc": "C8678",
+			"manufacturer": "MDD(辰达半导体)",
+			"deviceUuid": "009407eaaa604eb9b6f73cc3868f316d",
+			"footprint": "SMA_L4.3-W2.6-LS5.2-RD",
+			"basic": false,
+			"desc": ""
+		},
+		"ind.68uh_3a": {
+			"value": "68uH",
+			"mpn": "CYH125-68UH",
+			"lcsc": "C7431083",
+			"manufacturer": "SHOU HAN(首韩)",
+			"deviceUuid": "ee8310b61c1745a59168f90e371658b2",
+			"footprint": "IND-SMD_L12.5-W12.5",
+			"basic": false,
+			"desc": ""
+		},
+		"cap.220p_0402": {
+			"value": "220pF",
+			"mpn": "0402B221K500NT",
+			"lcsc": "C1530",
+			"manufacturer": "FH(风华)",
+			"deviceUuid": "9107c10522464a9f937b03120c81f81e",
+			"footprint": "C0402",
+			"basic": false,
+			"desc": "容值:220pF;精度:±10%;额定电压:50V;温度系数:X7R;"
+		},
+		"cap.10n_0402": {
+			"value": "10nF",
+			"mpn": "CL05B103KB5NNNC",
+			"lcsc": "C15195",
+			"manufacturer": "SAMSUNG(三星)",
+			"deviceUuid": "8336204f19ca418294856efd9d6f6580",
+			"footprint": "C0402",
+			"basic": false,
+			"desc": "容值:10nF;精度:±10%;额定电压:50V;温度系数:X7R;"
+		},
+		"cap.12p_0402": {
+			"value": "12pF",
+			"mpn": "0402CG120J500NT",
+			"lcsc": "C1547",
+			"manufacturer": "FH(风华)",
+			"deviceUuid": "e905fbae89674448b731f2bb70b25e7a",
+			"footprint": "C0402",
+			"basic": false,
+			"desc": "容值:12pF;精度:±5%;额定电压:50V;温度系数:C0G;"
+		},
+		"cap.15p_0402": {
+			"value": "15pF",
+			"mpn": "0402CG150J500NT",
+			"lcsc": "C1548",
+			"manufacturer": "FH(风华)",
+			"deviceUuid": "a2c156947c7646728bef570483cc98db",
+			"footprint": "C0402",
+			"basic": false,
+			"desc": "容值:15pF;精度:±5%;额定电压:50V;温度系数:C0G;"
+		},
+		"fb.blm15hg102": {
+			"value": "BLM15HG102SN1D",
+			"mpn": "BLM15HG102SN1D",
+			"lcsc": "C76889",
+			"manufacturer": "muRata(村田)",
+			"deviceUuid": "c3bcf8c29f43413dace7f0d8ec5c57ab",
+			"footprint": "L0402",
+			"basic": false,
+			"desc": "阻抗@频率:1kΩ@100MHz;误差:±25%;直流电阻(DCR):1.1Ω;"
+		},
+		"tvs.sm712_sot23": {
+			"value": "PSM712-LF-T7",
+			"mpn": "PSM712-LF-T7",
+			"lcsc": "C32677",
+			"manufacturer": "PROTEK",
+			"deviceUuid": "46f638b2935c42718f09eb74f6058737",
+			"footprint": "SOT-23-3_L3.0-W1.7-P0.95-LS2.9-BR",
+			"basic": false,
+			"desc": "极性:单向;反向截止电压(Vrwm):12V;钳位电压:19V;峰值脉冲电流(Ipp):34A@8/20us；30A@8/20us;峰值脉冲功率(Ppp):600W@8/20us;击穿电压(VBR):13.3V;"
+		},
+		"res.15k_0402": {
+			"value": "15kΩ",
+			"mpn": "0402WGF1502TCE",
+			"lcsc": "C25756",
+			"manufacturer": "UNI-ROYAL(厚声)",
+			"deviceUuid": "6d104587f1cd4b509c6a5fb272570507",
+			"footprint": "R0402",
+			"basic": false,
+			"desc": "电阻类型:厚膜电阻;阻值:15kΩ;精度:±1%;功率:62.5mW;最大工作电压:50V;温度系数:±100ppm/℃;"
+		},
+		"res.0r_0402": {
+			"value": "0Ω",
+			"mpn": "0402WGF0000TCE",
+			"lcsc": "C17168",
+			"manufacturer": "UNI-ROYAL(厚声)",
+			"deviceUuid": "b4609725881a44fab1d65d4001f053a7",
+			"footprint": "R0402",
+			"basic": false,
+			"desc": "电阻类型:厚膜电阻;阻值:0Ω;精度:±1%;功率:62.5mW;工作电压:50V;温度系数:±800ppm/℃;"
+		},
+		"res.120r_1206": {
+			"value": "120Ω",
+			"mpn": "1206W4F1200T5E",
+			"lcsc": "C17909",
+			"manufacturer": "UNI-ROYAL(厚声)",
+			"deviceUuid": "ed04490edc2d4d7b8e55ab3d0d65529f",
+			"footprint": "R1206",
+			"basic": false,
+			"desc": "电阻类型:厚膜电阻;阻值:120Ω;精度:±1%;功率:250mW;工作电压:200V;温度系数:±100ppm/℃;"
+		},
+		"cap.3p9_0402": {
+			"value": "3.9pF",
+			"mpn": "0402CG3R9C500NT",
+			"lcsc": "C1566",
+			"manufacturer": "FH(风华)",
+			"deviceUuid": "1e9940a1dbb24edb885acb4f35cc29e5",
+			"footprint": "C0402",
+			"basic": false,
+			"desc": "容值:3.9pF;额定电压:50V;温度系数:C0G;"
+		},
+		"cap.8p2_0402": {
+			"value": "8.2pF",
+			"mpn": "0402CG8R2C500NT",
+			"lcsc": "C1579",
+			"manufacturer": "FH(风华)",
+			"deviceUuid": "0c953dfc0e5247cfbde4bf0c3e97e8ee",
+			"footprint": "C0402",
+			"basic": false,
+			"desc": "容值:8.2pF;额定电压:50V;温度系数:C0G;"
+		},
+		"cap.5p6_0402": {
+			"value": "5.6pF",
+			"mpn": "0402CG5R6C500NT",
+			"lcsc": "C1574",
+			"manufacturer": "FH(风华)",
+			"deviceUuid": "4cb22463198f486f84b19ed1a4b231ff",
+			"footprint": "C0402",
+			"basic": false,
+			"desc": "容值:5.6pF;额定电压:50V;温度系数:C0G;"
+		},
+		"cap.1p5_0402": {
+			"value": "1.5pF",
+			"mpn": "0402CG1R5C500NT",
+			"lcsc": "C1552",
+			"manufacturer": "FH(风华)",
+			"deviceUuid": "0b1f83e4b60641bdb1242dcf97dc983b",
+			"footprint": "C0402",
+			"basic": false,
+			"desc": "容值:1.5pF;额定电压:50V;温度系数:C0G;"
+		},
+		"ind.27nh_0402": {
+			"value": "27nH",
+			"mpn": "LQG15HS27NJ02D",
+			"lcsc": "C12669",
+			"manufacturer": "muRata(村田)",
+			"deviceUuid": "bdc3fa172f40479798c05b43c41aa262",
+			"footprint": "L0402-RD",
+			"basic": false,
+			"desc": "电感值:27nH;精度:±5%;额定电流:350mA;饱和电流(Isat):-;直流电阻(DCR):460mΩ;"
+		},
+		"ind.22nh_0402": {
+			"value": "22nH",
+			"mpn": "LQG15HS22NJ02D",
+			"lcsc": "C12670",
+			"manufacturer": "muRata(村田)",
+			"deviceUuid": "f541cd456b0542289a6b53d319884cb9",
+			"footprint": "L0402",
+			"basic": false,
+			"desc": "电感值:22nH;精度:±5%;额定电流:350mA;饱和电流(Isat):-;直流电阻(DCR):420mΩ;"
+		},
+		"ind.2n0_0402": {
+			"value": "2nH",
+			"mpn": "LQG15HS2N0S02D",
+			"lcsc": "C18216",
+			"manufacturer": "muRata(村田)",
+			"deviceUuid": "5febecfc5b0d48148594fd10c099123d",
+			"footprint": "L0402",
+			"basic": false,
+			"desc": "电感值:2nH;精度:-;额定电流:900mA;饱和电流(Isat):-;直流电阻(DCR):90mΩ;"
+		},
+		"res.680r_0402": {
+			"value": "680Ω",
+			"mpn": "0402WGF6800TCE",
+			"lcsc": "C25130",
+			"manufacturer": "UNI-ROYAL(厚声)",
+			"deviceUuid": "db0fa956af67488fb236dcebfd766801",
+			"footprint": "R0402",
+			"basic": false,
+			"desc": "电阻类型:厚膜电阻;阻值:680Ω;精度:±1%;功率:62.5mW;工作电压:50V;温度系数:±100ppm/℃;"
+		},
+		"res.56k_0402": {
+			"value": "56kΩ",
+			"mpn": "0402WGF5602TCE",
+			"lcsc": "C25796",
+			"manufacturer": "UNI-ROYAL(厚声)",
+			"deviceUuid": "0d85e42011ec4910b1749e936b037dd7",
+			"footprint": "R0402",
+			"basic": false,
+			"desc": "电阻类型:厚膜电阻;阻值:56kΩ;精度:±1%;功率:62.5mW;工作电压:50V;温度系数:±100ppm/℃;"
+		},
+		"cap.470uf35v_smd": {
+			"value": "CAP,铝电解电容,470UF,7*12",
+			"mpn": "CAP,铝电解电容,470UF,7*12",
+			"lcsc": "C9900003002",
+			"manufacturer": "",
+			"deviceUuid": "5dbc405640c0427b85363c187acb124e",
+			"footprint": "CAP-TH_BD6.3-P2.50-D0.5-FD",
+			"basic": false,
+			"desc": ""
+		},
+		"cap.220uf35v_smd": {
+			"value": "220uF 16V 铝电解电容",
+			"mpn": "220uF 16V 铝电解电容",
+			"lcsc": "C9900003178",
+			"manufacturer": "",
+			"deviceUuid": "eb6a58bf7df54b73a54f42bfacb3a5e1",
+			"footprint": "CAP-SMD_BD6.3-L6.6-W6.6-LS7.4-FD",
+			"basic": false,
+			"desc": ""
+		},
+		"conn.sip2_254": {
+			"value": null,
+			"mpn": "SIP2-2.54mm单排针",
+			"lcsc": "C9900009052",
+			"manufacturer": "",
+			"deviceUuid": "232ae76e43074f68bf72aebb8ada545c",
+			"footprint": "HDR-TH_2P-P2.54-V-M-1",
+			"basic": false,
+			"desc": ""
 		}
 	}
 }
