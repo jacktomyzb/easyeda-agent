@@ -1005,6 +1005,59 @@ prior versions emitted a bare {passed,summary,findings}).`,
 		sch.AddCommand(c)
 	}
 
+	// ── bridge-check ────────────────────────────────────────────────────────
+	// schematic.bridgeCheck — tree-granularity net-vs-copper consistency gate.
+	// `sch check`'s multi-net-wire rule is per SINGLE wire; when EasyEDA merges
+	// collinear touching stubs of DIFFERENT nets into one tree the short spans
+	// several wires and no single wire carries two names, so it under-reports.
+	// bridge-check groups wires into trees (shared-vertex union-find) and
+	// aggregates the netflag/netport net names per tree: >1 net → BRIDGE (real
+	// short, ERROR, non-zero exit = gate); empty + touches a pin → ORPHAN (WARN).
+	{
+		var allPages, asJSON bool
+		c := &cobra.Command{
+			Use:   "bridge-check",
+			Short: "Detect共线合并短路 (bridges) and孤儿桩 (orphans) at wire-tree granularity",
+			Long: `Tree-granularity net-vs-copper consistency check — the盲区 'sch check' can't see.
+
+EasyEDA merges two collinear touching stubs of DIFFERENT nets into ONE wire tree
+that spans several wire primitives. No single wire then carries two net names, so
+'sch check''s per-wire multi-net-wire rule under-reports the short. 'sch drc'
+doesn't flag it either (the merged tree looks like an ordinary wire). Only the
+"one wire tree carries several net names" data view exposes it.
+
+bridge-check groups every page wire into trees by shared vertices (union-find),
+then aggregates the net names of the netflag/netport anchored on each tree:
+
+  • len(set(nets)) > 1                    → BRIDGE (real short)        ERROR
+  • nets empty & tree touches a comp pin  → ORPHAN (dangling stub)     WARN
+
+Each problem tree reports its wire ids / flag ids / touched pins (designator:pin)
+so the fix — delete the whole tree (sch prim-delete) then re-connect each pin to
+its own net (sch connect) — is actionable. This is the third pillar of the S5
+verification gate: layout-lint (placement) + check/drc (structure) + bridge-check
+(network-semantics vs physical-copper).
+
+Exit code: non-zero when any BRIDGE exists (real short → gate). Orphans alone
+exit 0 (they are WARN). Run it after autoconnect / manual routing as a self-heal
+post-step.
+
+NOTE: --all-pages reads non-active pages shallowly (same limit as 'sch check' /
+'sch list' — pins may be empty), so cross-page trees can be under-reported; switch
+to a page for authoritative results.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda sch bridge-check
+  easyeda sch bridge-check --json
+  easyeda sch bridge-check --all-pages`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runSchBridgeCheck(cfg, window, allPages, asJSON, stdout, stderr)
+			},
+		}
+		c.Flags().BoolVar(&allPages, "all-pages", false, "check wire trees across all schematic pages (WARNING: non-active pages return shallow data — pins may be empty; use `doc switch` to that page for accurate results)")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the report in the {id,type,version,ok,result} envelope (trees under result.trees)")
+		sch.AddCommand(c)
+	}
+
 	// ── read ──────────────────────────────────────────────────────────────
 	// schematic.read — one-call semantic snapshot (components + pin nets + nets +
 	// check), so the agent reads the whole circuit at once.

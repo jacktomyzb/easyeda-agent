@@ -110,7 +110,7 @@ clawhub install easyeda-agent
 
 **原理图**
 - 从立创/LCSC 库按 uuid 放**真实器件**再布线;电源/地**网络标志**用 `connect_pin`(自动补偿旋转存储的坑)。
-- **DRC**(`sch drc`)+ 重建的逐项**设计检查**(`sch check`——悬空引脚、导线交叉、导线压引脚)+ 几何 **layout-lint**(重叠/间距)。
+- **DRC**(`sch drc`)+ 重建的逐项**设计检查**(`sch check`——悬空引脚、导线交叉、导线压引脚)+ 几何 **layout-lint**(重叠/间距)+ **树粒度桥接检测**(`sch bridge-check`——共线合并短路 BRIDGE / 孤儿桩 ORPHAN,`sch check` 的单线视角看不全的盲区)。
 - 模块感知**自动布局**(放置→校验→调整)、一次调用 **`sch read`**(器件+网络+悬空引脚+检查)、**BOM**/**网表**导出(BOM 自动补 LCSC C 号)。
 
 **PCB — 布局**

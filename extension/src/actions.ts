@@ -2119,6 +2119,133 @@ const schematicCheck: Handler = async (payload) => {
 	return { result: { passed: findings.length === 0, summary, findings } };
 };
 
+// ─── Bridge check (tree-granularity net-vs-copper consistency) ─────────
+//
+// `sch check`'s multi-net-wire rule works per SINGLE wire primitive, but when
+// EasyEDA merges two collinear touching stubs of DIFFERENT nets into one tree,
+// the short spans SEVERAL wires — no single wire carries two net names, so the
+// per-wire rule under-reports. bridge-check groups wires into trees by shared
+// vertices (union-find) and aggregates the net names of every netflag/netport
+// anchored on that tree:
+//   • len(set(nets)) > 1  → BRIDGE (real short, ERROR)
+//   • nets empty & tree touches a component pin → ORPHAN (dangling stub, WARN)
+// Read-only: reports wire ids / flag ids / touched pins (designator:pin) per
+// problem tree so the fix (integral-tree delete + occupancy-aware reconnect)
+// can be driven by hand or a later --repair pass (issue #73).
+
+interface BridgeTree {
+	kind: 'BRIDGE' | 'ORPHAN';
+	wireIds: Array<string>;
+	flagIds: Array<string>;
+	pins: Array<string>; // "designator:pin"
+	nets: Array<string>;
+}
+
+const schematicBridgeCheck: Handler = async (payload) => {
+	const allPages = optionalBoolean(payload, 'allPages') === true;
+	let components, wires;
+	try {
+		components = await eda.sch_PrimitiveComponent.getAll(undefined, allPages);
+		wires = await eda.sch_PrimitiveWire.getAll();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read schematic for bridge check.');
+	}
+	const wireSegs = collectWireSegments((wires ?? []) as Array<{ getState_Line: () => Array<number>; getState_Net?: () => string; getState_PrimitiveId?: () => string }>);
+	const COINCIDE_TOL = CHECK_EPS * 8;
+
+	// Netflags/netports/netlabels carry the net name we aggregate per tree.
+	const NET_MARKER_TYPES = new Set(['netflag', 'netport', 'netlabel', 'short_symbol']);
+	const markers: Array<{ x: number; y: number; net: string; primitiveId: string }> = [];
+	const pins: Array<{ designator: string; number: string; x: number; y: number }> = [];
+	for (const c of components ?? []) {
+		let type: string;
+		try { type = String(c.getState_ComponentType?.() ?? ''); }
+		catch { continue; }
+		if (NET_MARKER_TYPES.has(type)) {
+			try {
+				markers.push({ x: c.getState_X(), y: c.getState_Y(), net: String(c.getState_Net?.() ?? ''), primitiveId: String(c.getState_PrimitiveId?.() ?? '') });
+			}
+			catch { /* marker without coords */ }
+			continue;
+		}
+		const primitiveId = c.getState_PrimitiveId();
+		let compPins;
+		try { compPins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(primitiveId); }
+		catch { continue; }
+		if (!compPins || compPins.length === 0) continue;
+		const designator = String(c.getState_Designator?.() ?? '');
+		for (const p of compPins) {
+			try { pins.push({ designator, number: String(p.getState_PinNumber?.() ?? ''), x: p.getState_X(), y: p.getState_Y() }); }
+			catch { /* pin without coords */ }
+		}
+	}
+
+	// ── Union-find over wires: two wires join a tree when they share a vertex. ──
+	const wireList = wireSegs.length > 0
+		? [...new Map(wireSegs.filter(w => w.wirePrimitiveId).map(w => [w.wirePrimitiveId, w])).keys()]
+		: [];
+	// Vertices per wire primitive id (from every segment endpoint).
+	const wireVerts = new Map<string, Array<[number, number]>>();
+	for (const ws of wireSegs) {
+		if (!ws.wirePrimitiveId) continue;
+		const arr = wireVerts.get(ws.wirePrimitiveId) ?? [];
+		arr.push([ws.seg[0], ws.seg[1]], [ws.seg[2], ws.seg[3]]);
+		wireVerts.set(ws.wirePrimitiveId, arr);
+	}
+	const idx = new Map<string, number>();
+	wireList.forEach((id, i) => idx.set(id, i));
+	const parent = wireList.map((_, i) => i);
+	const find = (a: number): number => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+	const union = (a: number, b: number) => { parent[find(a)] = find(b); };
+	for (let i = 0; i < wireList.length; i++) {
+		for (let j = i + 1; j < wireList.length; j++) {
+			const vi = wireVerts.get(wireList[i]) ?? [];
+			const vj = wireVerts.get(wireList[j]) ?? [];
+			const touch = vi.some(a => vj.some(b => Math.hypot(a[0] - b[0], a[1] - b[1]) <= COINCIDE_TOL));
+			if (touch) union(i, j);
+		}
+	}
+
+	// ── Aggregate each tree's wires + anchored flags/pins + net names. ──
+	const treeMap = new Map<number, { wireIds: Set<string>; verts: Array<[number, number]> }>();
+	for (const id of wireList) {
+		const root = find(idx.get(id)!);
+		const t = treeMap.get(root) ?? { wireIds: new Set<string>(), verts: [] };
+		t.wireIds.add(id);
+		t.verts.push(...(wireVerts.get(id) ?? []));
+		treeMap.set(root, t);
+	}
+
+	const trees: Array<BridgeTree> = [];
+	for (const t of treeMap.values()) {
+		const onTree = (x: number, y: number) => t.verts.some(v => Math.hypot(v[0] - x, v[1] - y) <= COINCIDE_TOL);
+		const flagIds: Array<string> = [];
+		const nets = new Set<string>();
+		for (const m of markers) {
+			if (!onTree(m.x, m.y)) continue;
+			if (m.primitiveId) flagIds.push(m.primitiveId);
+			if (m.net) nets.add(m.net);
+		}
+		const touchedPins: Array<string> = [];
+		for (const p of pins) {
+			if (onTree(p.x, p.y)) touchedPins.push(`${p.designator}:${p.number}`);
+		}
+		const netList = [...nets];
+		if (netList.length > 1) {
+			trees.push({ kind: 'BRIDGE', wireIds: [...t.wireIds], flagIds, pins: [...new Set(touchedPins)], nets: netList });
+		}
+		else if (netList.length === 0 && touchedPins.length > 0) {
+			trees.push({ kind: 'ORPHAN', wireIds: [...t.wireIds], flagIds, pins: [...new Set(touchedPins)], nets: netList });
+		}
+	}
+
+	const bridges = trees.filter(t => t.kind === 'BRIDGE').length;
+	const orphans = trees.filter(t => t.kind === 'ORPHAN').length;
+	const summary = { trees: trees.length, bridges, orphans, wireTreesTotal: treeMap.size };
+	return { result: { passed: bridges === 0 && orphans === 0, summary, trees } };
+};
+
 // ─── Save ─────────────────────────────────────────────────────────────
 
 const schematicSave: Handler = async () => {
@@ -6368,6 +6495,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.snapshot': schematicSnapshot,
 	'schematic.drc.check': schematicDrcCheck,
 	'schematic.check': schematicCheck,
+	'schematic.bridgeCheck': schematicBridgeCheck,
 	'schematic.read': schematicRead,
 	'schematic.save': schematicSave,
 	'schematic.export.netlist': schematicExportNetlist,
