@@ -147,6 +147,20 @@ pin 端点上时全链路失明,还给 check 制造"已连接"假象。
   报"PCB may be empty");DRC --json 大结果解码截断(count 1515 时 flattener 崩,
   用原始树 regex 统计兜底)。
 
+
+## 2026-07-09 收官决策(用户两道拍板)
+
+1. **v0.2 转 ESP32-S3 模组**(用户:"不要用芯片了 复杂度高了")——芯片级(QFN56+flash+晶振
+   +π匹配+去耦阵)复杂度已充分暴露工具边界,教学价值拿满;v0.2 改 WROOM 模组:
+   砍 U4/X1/C101/C102/L101/π匹配三件/大半去耦阵(~20 件),2.4G 天线随模组(仅留 keepout),
+   原理图约 80 件,布线密度大降。CC1101/SD/RS485/CH340/buck 全保留。
+2. **P7 布线改人机协作档**(用户思路):官方 autoRouting API 未放出(#28)期间,
+   agent 备好一切→用户 UI 点「自动布线」→agent 接手验证+铺铜+丝印。已进 design-flow
+   三档阶梯;v0.2 上首验。
+3. 迷宫档两坑实证收录:残留叠布(rip 未验证 0 轨,499 ClearanceError→净跑 9)、
+   电源后缝合打架(9→161)。Freerouting 本身表现优异(69/69 布通,零 dangling/叠孔)。
+4. 芯片级板 v0.1 现状封存:布局定稿(0 同层冲突),布线待 v0.2 流程重做,不再投入。
+
 ## 关键文件
 - 连线蓝图:netlist-plan.md;autoconnect spec:scratchpad/barrier-p{1,2}-connect.json
 - 引脚字典:scratchpad/barrier-p{1,2}-read.json(U1 QFN56:GPIO15/16=pin21/22,GPIO48=pin36,
