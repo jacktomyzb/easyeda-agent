@@ -180,5 +180,32 @@
       "severity": "should"
     }
   ],
+  "placement": {
+    "J1": {
+      "board_edge": true,
+      "edge": "user-facing",
+      "side": "top",
+      "orientation": "KF301 螺钉端子接线口朝板外",
+      "severity": "must",
+      "reason": "12V 电源需外部接线,螺钉端子置于板边"
+    },
+    "C501": {
+      "board_edge": false,
+      "side": "top",
+      "orientation": "输入体电容 CIN 紧贴 U5.VIN(pin1)与 GND,压缩输入热环路面积",
+      "severity": "must",
+      "reason": "CIN→VIN→SW→D501 是高 di/dt 热环路,CIN 必须最靠 VIN"
+    }
+  },
+  "signals": {
+    "SW_HOTLOOP": {
+      "nets": ["SW 开关节点(U5.OUTPUT–D501.K–L501.1)"],
+      "type": "high_current",
+      "route": "开关节点(U5.OUTPUT/续流管 D501.K/电感 L501.1)走线短而粗、铜面小而紧凑;CIN(C501)→U5.VIN→D501→回 GND 的输入环路面积最小化",
+      "keepout": "SW 节点铜面别铺大(是 EMI 辐射源);反馈线(到 U5.FEEDBACK)远离 SW 节点与电感,别拾噪",
+      "severity": "must",
+      "reason": "非同步 buck 的开关节点高 di/dt,热环路大=EMI+纹波差"
+    }
+  },
   "bom_note": "8 件:1×XL1509-5.0E1(SOIC-8) + 2×SS34 肖特基(SMA,续流 D501 + 反接 D502) + 1×68uH/3A 功率电感(12.5×12.5) + 2×铝电解(470uF/35V 输入 C501、220uF 输出 C502) + 1×1uF/0402 陶瓷 C503 + 1×KF301 2P 螺钉端子 J1。全部立创可下单、库存充足,无扩展料瓶颈;主要成本在功率电感与电解电容。C502 以库件 220uF 就近替 datasheet 的 180uF(5V 轨 16V 耐压足够)。"
 }

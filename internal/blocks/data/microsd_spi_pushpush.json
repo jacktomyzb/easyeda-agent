@@ -174,5 +174,25 @@
       "severity": "should"
     }
   ],
+  "placement": {
+    "J_SD": {
+      "board_edge": true,
+      "edge": "user-facing",
+      "side": "top",
+      "orientation": "卡槽开口朝板外,便于插拔;push-push 弹出行程别被外壳挡住。也可放底面做超薄设计(side=bottom)",
+      "severity": "must",
+      "reason": "microSD 需插拔,卡座必须在板边、开口朝外"
+    }
+  },
+  "signals": {
+    "SD_SPI": {
+      "nets": ["SD_SCK", "SD_MOSI", "SD_MISO", "SD_CS"],
+      "type": "single_high_speed",
+      "route": "SPI 总线(SD 模式 ~20-40MHz)尽量短、走线等长概念、别绕远;SCK 别紧贴 MISO/MOSI 长距离并行",
+      "keepout": "远离开关电源/天线;卡座与主控靠近以缩短总线",
+      "severity": "should",
+      "reason": "SD SPI 中高速总线,长走线/强干扰会误码"
+    }
+  },
   "bom_note": "8 件:1× microSD push-push 卡座(conn.tf_socket_pushpush)+ 5× 10k 0402(全上拉,含未用 DAT1/DAT2)+ 1× 10uF 0805 + 1× 0.1uF 0402。其中 10k×5 与 0.1uF 为 JLC basic 料;10uF 0805 与卡座为扩展/常规料。5 颗上拉一个都不能省(Espressif 硬要求)。"
 }

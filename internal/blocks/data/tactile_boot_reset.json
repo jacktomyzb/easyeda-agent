@@ -71,5 +71,23 @@
       "severity": "should"
     }
   ],
+  "placement": {
+    "SW_BOOT": {
+      "board_edge": false,
+      "edge": "user-facing",
+      "side": "top",
+      "orientation": "按键放外壳可按到处/面板开孔位,顶面",
+      "severity": "should",
+      "reason": "BOOT 键需人手按下,须在可操作面(通常顶面靠边)"
+    },
+    "SW_RST": {
+      "board_edge": false,
+      "edge": "user-facing",
+      "side": "top",
+      "orientation": "同上;与 BOOT 键并排便于双键操作(EN+BOOT 手动进下载)",
+      "severity": "should",
+      "reason": "RESET 键需人手按下,须在可操作面"
+    }
+  },
   "bom_note": "2 件:2× 轻触贴片按键(sw.tact_smd)。极简 —— 上拉/复位电容在模组块, 本块只有开关。"
 }
