@@ -26,3 +26,18 @@
      (用户点原生自动布线)首验。
 - CLI 票素材新增:autolayout 无 pin 间隙约束二次复现(同 spec 同坐标重合);
   lib search 返回值展示截断导致 uuid 抄错(应在 CLI 输出完整 uuid——已修 standard-parts)。
+
+## 2026-07-09 上午:merge 修复验证 + P3 收官
+
+- **五个 merge 修复实战验证**:①`sch bridge-check`(修补 daemon 目录漏注册后可用,
+  三页 0 桥 0 孤儿);②layout-lint 异件引脚重合检测 ✓(P1 无误报);③multi-net 同名
+  不再告警 ✓(P2 噪音消失);④check/drc --json 信封 ✓;⑤place --designator(未及用,
+  下轮放置直接受益)。连接器 0.8.17→0.9.0 IndexedDB 热重载三连成(SOP 又验一遍;
+  put 用 in-line key,别带 key 参数)。
+- **发现工具盲区(票素材)**:「wire 端点压异网 pin」类(native DRC 六致命同类)
+  bridge-check 和 check 双盲——bridge-check 的树模型没把 pin 挂进树;建议 bridgeCheck
+  v2 把 pin 触点并入树聚合。实证:P3 三针(U6:21→CC_MOSI/C692:1→GND/X2:3→GND)
+  两工具全绿但网表错。
+- **P3 收官**:拆邻针重画 7 针+删 2 条手术残线(皱巴巴穿 pin 的 zigzag 是 disconnect
+  合并残留),72/72 网名验证 ✓,0 悬空 0 桥。
+- 剩:P1 尾巴 11 针(USB/模组巷道)→ 全量对账 → S5+确认点②。
