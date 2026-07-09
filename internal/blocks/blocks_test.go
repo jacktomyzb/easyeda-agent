@@ -1,16 +1,11 @@
 package blocks
 
 import (
+	"encoding/json"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 )
-
-// skillBlocksDir is the community source-of-truth; the embedded data/ dir is a
-// build-time copy (Makefile `sync-blocks`). Relative to this test file.
-const skillBlocksDir = "../../skills/easyeda-agent/references/blocks"
 
 func TestLoad(t *testing.T) {
 	all, err := Load()
@@ -48,44 +43,91 @@ func TestGetPrefixOptional(t *testing.T) {
 	}
 }
 
-// TestEmbedInSyncWithSkill fails if the go:embed copy drifted from the skill
-// source — a forgotten `make sync-blocks` after editing a block. Keeps the two
-// copies honest so a remote `go install` binary ships the real library.
-func TestEmbedInSyncWithSkill(t *testing.T) {
-	skillFiles, err := filepath.Glob(filepath.Join(skillBlocksDir, "*.json"))
+// TestFilenameMatchesID enforces the one-block-per-file contract: data/<id>.json
+// where <id> is the block id minus the `block.` prefix.
+func TestFilenameMatchesID(t *testing.T) {
+	entries, err := data.ReadDir("data")
 	if err != nil {
-		t.Fatalf("glob skill blocks: %v", err)
+		t.Fatal(err)
 	}
-	if len(skillFiles) == 0 {
-		t.Skip("skill blocks dir not found (running outside repo tree)")
-	}
-	var skillNames []string
-	for _, f := range skillFiles {
-		name := filepath.Base(f)
-		if strings.HasPrefix(name, "_") { // _schema.json etc. are not blocks, not embedded
-			continue
-		}
-		skillNames = append(skillNames, name)
-		embedded, err := data.ReadFile("data/" + name)
-		if err != nil {
-			t.Errorf("%s in skill but not embedded — run `make sync-blocks`", name)
-			continue
-		}
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		if string(src) != string(embedded) {
-			t.Errorf("%s: embedded copy differs from skill source — run `make sync-blocks`", name)
-		}
-	}
-	// Reverse: no stale embedded file the skill no longer has.
-	embeddedEntries, _ := data.ReadDir("data")
-	sort.Strings(skillNames)
-	for _, e := range embeddedEntries {
+	for _, e := range entries {
 		name := e.Name()
-		if idx := sort.SearchStrings(skillNames, name); idx >= len(skillNames) || skillNames[idx] != name {
-			t.Errorf("%s embedded but not in skill source — run `make sync-blocks`", name)
+		if !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, "_") {
+			continue
+		}
+		raw, _ := data.ReadFile("data/" + name)
+		var b Block
+		if err := json.Unmarshal(raw, &b); err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		want := "block." + strings.TrimSuffix(name, ".json")
+		if b.ID != want {
+			t.Errorf("%s: id %q, want %q (filename minus block.)", name, b.ID, want)
+		}
+	}
+}
+
+// TestAttributionOnValidated: a validated (non-draft) block must carry author +
+// added + updated (permanent, traceable credit).
+func TestAttributionOnValidated(t *testing.T) {
+	all, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range all {
+		if !b.Ready() {
+			continue
+		}
+		if b.Author == "" || b.Added == "" || b.Updated == "" {
+			t.Errorf("%s: validated block missing author/added/updated", b.ID)
+		}
+	}
+}
+
+// standardPartsPath is the skill's part library; block parts cross-reference it.
+const standardPartsPath = "../../skills/easyeda-agent/references/standard-parts.json"
+
+// TestPartsExistInStandardParts: every block's parts[].part (and alt[]) must be a
+// real key in standard-parts.json, so BOM/LCSC stays single-sourced.
+func TestPartsExistInStandardParts(t *testing.T) {
+	raw, err := os.ReadFile(standardPartsPath)
+	if err != nil {
+		t.Skipf("standard-parts.json not found (outside repo tree): %v", err)
+	}
+	var sp struct {
+		Parts map[string]any `json:"parts"`
+	}
+	if err := json.Unmarshal(raw, &sp); err != nil {
+		t.Fatalf("parse standard-parts.json: %v", err)
+	}
+	all, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range all {
+		var parts map[string]struct {
+			Part string   `json:"part"`
+			Alt  []string `json:"alt"`
+		}
+		if err := json.Unmarshal(b.Raw, &struct {
+			Parts *map[string]struct {
+				Part string   `json:"part"`
+				Alt  []string `json:"alt"`
+			} `json:"parts"`
+		}{Parts: &parts}); err != nil {
+			t.Errorf("%s: parse parts: %v", b.ID, err)
+			continue
+		}
+		for role, p := range parts {
+			for _, key := range append([]string{p.Part}, p.Alt...) {
+				if key == "" {
+					continue
+				}
+				if _, ok := sp.Parts[key]; !ok {
+					t.Errorf("%s role %s: part %q not in standard-parts.json", b.ID, role, key)
+				}
+			}
 		}
 	}
 }

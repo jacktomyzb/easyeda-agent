@@ -8,18 +8,18 @@
     "",
     "Three-tier library model:",
     "  standard-parts.json    → 器件级 (which part / LCSC C-number)",
-    "  references/blocks/*.json → 电路块级 (how those parts connect + layout constraints)  ← HERE",
+    "  internal/blocks/data/*.json → 电路块级 (how those parts connect + layout constraints)  ← HERE",
     "  design-flow.md         → 流程级 (S0–S6 / P0–P10)",
     "",
-    "FILE LAYOUT — one block per file (references/blocks/<id-without-block-prefix>.json).",
+    "FILE LAYOUT — one block per file (internal/blocks/data/<id-without-block-prefix>.json).",
     "The filename is the block id minus the `block.` prefix (ch340c_usb_serial.json →",
     "block.ch340c_usb_serial). This file (`_schema.json`, underscore-prefixed) holds the",
-    "shared _doc/_schema/libraryUuid and is NOT a block. `scripts/blocks.py` globs this dir,",
+    "shared _doc/_schema/libraryUuid and is NOT a block. `easyeda blocks` (go:embed) compiles this dir into the binary,",
     "skips `_`-prefixed files, and assembles the library — it is the single loader seam, so",
     "consumers (agent, sch block apply) never care that the library is many files. Why per",
     "block: the community model is one-block-per-PR, so a file boundary per block means zero",
     "merge conflicts + clean per-file git-blame attribution. `category` stays a FIELD (filter",
-    "with `blocks.py ls --category`), never a directory boundary.",
+    "with `easyeda blocks ls --category`), never a directory boundary.",
     "",
     "HARD RULE — a block only enters the library as READY after ONE full-flow validation",
     "(place → wire → sch check → DRC = 0) on a real project. Until then `validated: null`",
@@ -39,16 +39,16 @@
     "the validation gate live in references/standard-blocks-contributing.md. Blocks are",
     "versioned (`added`/`updated`) and evolve as parts/footprints change."
   ],
-
   "libraryUuid": "0819f05c4eef4c71ace90d822a990e87",
-
   "_schema": {
     "<id-without-block-prefix>.json": {
-      "id": "block.<id> — MUST match the filename (minus block.) — blocks.py checks this",
+      "id": "block.<id> — MUST match the filename (minus block.) — `go test ./internal/blocks/` checks this",
       "desc": "one-line 中文 what-it-is",
       "category": "usb-serial | power | mcu-support | button | protection | rf | comms",
       "author": "original contributor — GitHub @handle;署名不删,让贡献可追、有归属",
-      "contributors": ["@handle of anyone who later fixed/updated this block"],
+      "contributors": [
+        "@handle of anyone who later fixed/updated this block"
+      ],
       "added": "version this block first entered the library, e.g. v0.6.0",
       "updated": "version of the last change (bump when parts/topology/rules change)",
       "source": "provenance — oshwhub:<url> | datasheet:<mpn> | official-ref:<vendor>",
@@ -56,14 +56,21 @@
       "parts": {
         "<ROLE>": {
           "part": "<key into standard-parts.json>",
-          "alt": ["<alternative standard-parts keys, functionally interchangeable>"],
+          "alt": [
+            "<alternative standard-parts keys, functionally interchangeable>"
+          ],
           "qty": 1,
           "value_override": "optional — override the part's default value for this role",
           "note": "选型注意 / why this part / substitution caveat"
         }
       },
       "internal_nets": [
-        ["<ROLE>.<pinName>", "<ROLE>.<pinName>", "PORT:<PORTNAME>", "..."]
+        [
+          "<ROLE>.<pinName>",
+          "<ROLE>.<pinName>",
+          "PORT:<PORTNAME>",
+          "..."
+        ]
       ],
       "ports": {
         "<PORTNAME>": {
