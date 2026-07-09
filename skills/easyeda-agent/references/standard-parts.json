@@ -82,6 +82,26 @@
       "basic": true,
       "desc": "10k 1% 0402 (pull-up/down)"
     },
+    "res.4k7_0402": {
+      "value": "4.7kΩ",
+      "mpn": "0402WGJ0472TCE",
+      "lcsc": "C25940",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "deviceUuid": "3c6cd697d7c742bc8177ac96f91ce532",
+      "footprint": "R0402",
+      "basic": true,
+      "desc": "4.7k 0402 —— 三极管基极串阻/通用上拉;立创·ESP32S3 开发板自动下载电路用值"
+    },
+    "bjt.mmbt3904_sot23": {
+      "value": "MMBT3904",
+      "mpn": "MMBT3904",
+      "lcsc": "C20526",
+      "manufacturer": "长晶(CJ)",
+      "deviceUuid": "e84258a7c4c54ed6b903438d47c3f671",
+      "footprint": "SOT-23",
+      "basic": true,
+      "desc": "NPN 40V 200mA 通用三极管(自动下载/电平转换);立创官方板自动下载电路用件,等效 S8050"
+    },
     "res.5k1_0402": {
       "value": "5.1kΩ",
       "mpn": "0402WGF5101TCE",
