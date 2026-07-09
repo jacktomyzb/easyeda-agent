@@ -1005,6 +1005,59 @@ prior versions emitted a bare {passed,summary,findings}).`,
 		sch.AddCommand(c)
 	}
 
+	// ── bridge-check ────────────────────────────────────────────────────────
+	// schematic.bridgeCheck — tree-granularity net-vs-copper consistency gate.
+	// `sch check`'s multi-net-wire rule is per SINGLE wire; when EasyEDA merges
+	// collinear touching stubs of DIFFERENT nets into one tree the short spans
+	// several wires and no single wire carries two names, so it under-reports.
+	// bridge-check groups wires into trees (shared-vertex union-find) and
+	// aggregates the netflag/netport net names per tree: >1 net → BRIDGE (real
+	// short, ERROR, non-zero exit = gate); empty + touches a pin → ORPHAN (WARN).
+	{
+		var allPages, asJSON bool
+		c := &cobra.Command{
+			Use:   "bridge-check",
+			Short: "Detect共线合并短路 (bridges) and孤儿桩 (orphans) at wire-tree granularity",
+			Long: `Tree-granularity net-vs-copper consistency check — the盲区 'sch check' can't see.
+
+EasyEDA merges two collinear touching stubs of DIFFERENT nets into ONE wire tree
+that spans several wire primitives. No single wire then carries two net names, so
+'sch check''s per-wire multi-net-wire rule under-reports the short. 'sch drc'
+doesn't flag it either (the merged tree looks like an ordinary wire). Only the
+"one wire tree carries several net names" data view exposes it.
+
+bridge-check groups every page wire into trees by shared vertices (union-find),
+then aggregates the net names of the netflag/netport anchored on each tree:
+
+  • len(set(nets)) > 1                    → BRIDGE (real short)        ERROR
+  • nets empty & tree touches a comp pin  → ORPHAN (dangling stub)     WARN
+
+Each problem tree reports its wire ids / flag ids / touched pins (designator:pin)
+so the fix — delete the whole tree (sch prim-delete) then re-connect each pin to
+its own net (sch connect) — is actionable. This is the third pillar of the S5
+verification gate: layout-lint (placement) + check/drc (structure) + bridge-check
+(network-semantics vs physical-copper).
+
+Exit code: non-zero when any BRIDGE exists (real short → gate). Orphans alone
+exit 0 (they are WARN). Run it after autoconnect / manual routing as a self-heal
+post-step.
+
+NOTE: --all-pages reads non-active pages shallowly (same limit as 'sch check' /
+'sch list' — pins may be empty), so cross-page trees can be under-reported; switch
+to a page for authoritative results.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda sch bridge-check
+  easyeda sch bridge-check --json
+  easyeda sch bridge-check --all-pages`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runSchBridgeCheck(cfg, window, allPages, asJSON, stdout, stderr)
+			},
+		}
+		c.Flags().BoolVar(&allPages, "all-pages", false, "check wire trees across all schematic pages (WARNING: non-active pages return shallow data — pins may be empty; use `doc switch` to that page for accurate results)")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the report in the {id,type,version,ok,result} envelope (trees under result.trees)")
+		sch.AddCommand(c)
+	}
+
 	// ── read ──────────────────────────────────────────────────────────────
 	// schematic.read — one-call semantic snapshot (components + pin nets + nets +
 	// check), so the agent reads the whole circuit at once.
@@ -1058,7 +1111,7 @@ check for a faster read.`,
 	// too-tight spacing (WARN) so layout overlap is mechanically caught, not
 	// eyeballed. Exits non-zero when overlaps exist → usable as a gate.
 	{
-		var minGap float64
+		var minGap, pinEps float64
 		var asJSON, allPages, includeNonParts bool
 		c := &cobra.Command{
 			Use:   "layout-lint",
@@ -1068,8 +1121,15 @@ check for a faster read.`,
 Pulls every component's rendered extent (schematic.components.list --include-bbox)
 and runs two pairwise checks in Go:
 
-  • overlap  — two component bounding boxes intersect            → ERROR
-  • spacing  — bbox gap is below --min-gap (default 2.54mm)      → WARN
+  • overlap          — two component bounding boxes intersect            → ERROR
+  • pin-coincidence  — two pins of DIFFERENT parts land on the same point → ERROR
+  • spacing          — bbox gap is below --min-gap (default 2.54mm)       → WARN
+
+Pin coincidence is an implicit short: any wire/stub through the shared point ties
+the two nets together, yet the bboxes may never touch (a small 2-pin part tucked
+against a large one), so bbox-only overlap detection misses it. Pins are compared
+across different components only; a symbol's own pins are expected to sit at fixed
+offsets. Use --pin-eps to treat near-coincident pins (within N mm) as errors too.
 
 Only real parts (componentType "part") are checked by default. The drawing
 sheet / title block (图框) spans the whole page, so including it would false-flag
@@ -1085,10 +1145,11 @@ Exits non-zero when any overlap is found, so it can gate a workflow.`,
   easyeda sch layout-lint --min-gap 5.08
   easyeda sch layout-lint --all-pages --json`,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return runLayoutLint(cfg, window, minGap, allPages, asJSON, includeNonParts, stdout, stderr)
+				return runLayoutLint(cfg, window, minGap, pinEps, allPages, asJSON, includeNonParts, stdout, stderr)
 			},
 		}
 		c.Flags().Float64Var(&minGap, "min-gap", 2.54, "minimum gap between component bboxes in mm (closer = WARN)")
+		c.Flags().Float64Var(&pinEps, "pin-eps", 0, "max distance in mm for two pins of DIFFERENT components to count as coincident (implicit short → ERROR); 0 = strict equality")
 		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
 		c.Flags().BoolVar(&allPages, "all-pages", false, "lint components across all schematic pages (WARNING: non-active pages return shallow data — components with no bbox are SKIPPED from overlap checks, not confirmed clear; use `doc switch` to that page for accurate linting)")
 		c.Flags().BoolVar(&includeNonParts, "include-non-parts", false, "also lint non-part primitives (sheet/title-frame, netflag/netport/…); excluded by default")
