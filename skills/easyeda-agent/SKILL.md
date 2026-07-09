@@ -73,10 +73,14 @@ EasyEDA tooling.
 
 - `easyeda health` shows `windows: []` / `NO_CONNECTOR`, or you changed the
   connector (`extension/`): read `references/environment-setup.md` — with a
-  browser-control tool (chrome-devtools MCP) the agent bootstraps the whole live
-  environment itself (open web editor → open project → verify attach → hot-reload
-  connector via IndexedDB, no uninstall/re-import); only fall back to asking the
-  user when no browser control is available.
+  browser-control tool (chrome-devtools MCP) **AND the user is on the web editor**
+  (`pro.lceda.cn`) the agent bootstraps the whole live environment itself (open web
+  editor → open project → verify attach → hot-reload connector via IndexedDB, no
+  uninstall/re-import). Auto-open/switch project works **only for the web version** —
+  on the **desktop client** chrome-devtools can't reach the app window, so ask the
+  user to open/switch the target project manually (the connector still attaches and
+  all typed actions work identically). Also fall back to asking when no browser
+  control is available.
 - Whole board, from scratch, or >~10 parts: read `references/design-flow.md` first.
 - Architecture trade-off pitfalls (genuine choices, not one right answer — stackup,
   ground strategy, connector orientation, part cost tier): read
