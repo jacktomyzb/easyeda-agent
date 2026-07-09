@@ -7,7 +7,7 @@
   "added": "v0.6.0",
   "updated": "v0.6.0",
   "source": "official-ref:Espressif ESP32-S3-WROOM-1 硬件设计指南 (Hardware Design Guidelines) + 官方最小系统参考",
-  "validated": null,
+  "validated": "ceshi 2026-07-09 by @zhoushoujianwork: place(6件)→wire(18 netflag/netport)→sch check(0 geom-net/0 net-marker mismatch, 仅未用 GPIO WARN)→bridge-check(0/0)→sch drc(0 fatal/0 error)。netlist 逐网核实:3V3=5 / GND=6(含 EPAD)/ EN=3(RC 成型)/ IO0=2 / MCU_TX=MCU_RX=1,合并全对。脚名 sch read 核实:3V3/EN/IO0/TXD0/RXD0/GND 命中,唯热焊盘真实名 EPAD(非 EP)已修正。",
   "parts": {
     "U": {
       "part": "mcu.esp32s3_wroom1",
@@ -42,10 +42,10 @@
       "note": "IO0(boot strapping)上拉 10k → 默认从 flash 启动;下载时由 BOOT 按键/自动下载电路拉低"
     }
   },
-  "_internal_nets_note": "引脚用模组功能名(WROOM-1 数据手册命名),draft 状态未经 sch read 核实——验证时必查真实符号脚名(CH340 的教训:拟名常错)。GND 是多物理脚(pin1 + pin40 + 大 EP 焊盘),tie 全部。",
+  "_internal_nets_note": "引脚用模组真实符号功能名(已 sch read 核实)。GND 是多物理脚:pin1 + pin40 + 热焊盘 EPAD(pin41,真实名 EPAD 非 EP),tie 全部。",
   "internal_nets": [
     ["U.3V3", "C_BULK.1", "C_VDD.1", "R_EN.2", "R_IO0.2", "PORT:3V3"],
-    ["U.GND", "U.EP", "C_BULK.2", "C_VDD.2", "C_EN.2", "PORT:GND"],
+    ["U.GND", "U.EPAD", "C_BULK.2", "C_VDD.2", "C_EN.2", "PORT:GND"],
     ["U.EN", "R_EN.1", "C_EN.1", "PORT:EN"],
     ["U.IO0", "R_IO0.1", "PORT:IO0"]
   ],
@@ -88,8 +88,8 @@
     }
   },
   "schematic_notes": [
-    "⚠️ draft:internal_nets 脚名取自数据手册,尚未 sch read 核实——验证时务必核对真实符号脚名(3V3/EN/IO0/TXD0/RXD0/GND 的实际命名可能不同)。",
-    "EN 上电复位 RC:R_EN(10k 上拉)+ C_EN(1uF 对地),保证 3V3 稳定后再释放复位。这是模组稳定启动的关键,别省 C_EN。",
+    "真实符号脚名(已核实):3V3(2)/EN(3)/IO0(27)/TXD0(37)/RXD0(36)/GND(1,40)/EPAD(41,热焊盘)。未用 GPIO(IO1~IO48)合法悬空,sch check 出 WARN 属正常。",
+    "EN 上电复位 RC:R_EN(10k 上拉)+ C_EN(1uF 对地),保证 3V3 稳定后再释放复位。这是模组稳定启动的关键,别省 C_EN(验证:EN 网正确成 3 脚 U.EN+R_EN+C_EN)。",
     "IO0 = strapping 脚:10k 上拉 → 从 flash 正常启动;下载时拉低(交给 BOOT 按键/自动下载电路,不要在本块里硬接死)。",
     "WROOM-1 内置 flash,不要再外挂 SPI flash;裸芯片方案才需要(见 mcu.esp32s3_chip)。",
     "GND 多脚(pin1 + pin40 + 大 EP 焊盘)全部接地,EP 是主散热+回流路径,必接。",
@@ -126,7 +126,7 @@
     },
     {
       "rule": "ep-thermal-vias",
-      "target": "U.EP",
+      "target": "U.EPAD",
       "constraint": "EP 散热焊盘下打散热过孔阵列接内层/底层 GND",
       "value": "",
       "severity": "should"
