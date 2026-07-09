@@ -282,6 +282,6 @@ Built on / inspired by these open projects — thank you:
 
 ## Star History
 
-Thanks for every star — we just passed 30 ⭐ 🎉
+Thanks for every star — we're at 39 ⭐ 🎉
 
-[![Star History Chart](https://api.star-history.com/svg?repos=zhoushoujianwork/easyeda-agent&type=Date)](https://star-history.com/#zhoushoujianwork/easyeda-agent&Date)
+[![Star History Chart](docs/assets/star-history.svg)](https://www.star-history.com/#zhoushoujianwork/easyeda-agent&Date)
