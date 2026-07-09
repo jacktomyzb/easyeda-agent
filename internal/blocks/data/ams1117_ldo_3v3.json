@@ -11,9 +11,11 @@
   "parts": {
     "U": {
       "part": "ldo.ams1117_3v3",
-      "alt": ["ldo.ams1117_3v3"],
+      "alt": [
+        "ldo.ams1117_3v3"
+      ],
       "qty": 1,
-      "note": "AMS1117-3.3 固定 3.3V 线性稳压, SOT-223, 1A(实际受散热限制)。脚:1=GND, 2=VOUT, 3=VIN, 4=VOUT(SOT-223 散热片, 与 pin2 同网)。压差约 1.1V@1A → 输入 5V 足够稳出 3.3V。若要更低压差/更高效率用 buck(见 block.xl1509_buck_12v_5v 的思路,但那是 12→5)。"
+      "note": "AMS1117-3.3 固定 3.3V 线性稳压, SOT-223, 1A(实际受散热限制)。脚:1=GND, 2=VOUT, 3=VIN, 4=VOUT(SOT-223 散热片, 与 pin2 同网, 两个焊盘都要连 3V3)。压差约 1.1V@1A → 输入 5V 足够稳出 3.3V。若要更低压差/更高效率用 buck(见 block.xl1509_buck_12v_5v 的思路,但那是 12→5)。"
     },
     "C_IN": {
       "part": "cap.10uf_0805",
@@ -22,7 +24,9 @@
     },
     "C_OUT": {
       "part": "cap.22uf_0805",
-      "alt": ["cap.10uf_0805"],
+      "alt": [
+        "cap.10uf_0805"
+      ],
       "qty": 1,
       "note": "输出去耦, 贴 U.VOUT。AMS1117 需要输出电容维持环路稳定(≥10µF 钽/陶瓷);barrier 用 22µF。"
     },
@@ -33,9 +37,24 @@
     }
   },
   "internal_nets": [
-    ["U.VIN", "C_IN.1", "PORT:VIN_5V"],
-    ["U.VOUT", "C_OUT.1", "C_BYP.1", "PORT:3V3"],
-    ["U.GND", "C_IN.2", "C_OUT.2", "C_BYP.2", "PORT:GND"]
+    [
+      "U.VIN",
+      "C_IN.1",
+      "PORT:VIN_5V"
+    ],
+    [
+      "U.VOUT",
+      "C_OUT.1",
+      "C_BYP.1",
+      "PORT:3V3"
+    ],
+    [
+      "U.GND",
+      "C_IN.2",
+      "C_OUT.2",
+      "C_BYP.2",
+      "PORT:GND"
+    ]
   ],
   "ports": {
     "VIN_5V": {
@@ -60,6 +79,7 @@
   "schematic_notes": [
     "AMS1117 是线性稳压:输入输出压差 × 电流 = 功耗全部发热。5V→3.3V @ 300mA ≈ 0.5W,SOT-223 铺散热铜可接受;大电流(>500mA)或电池供电优先用 buck。",
     "VOUT 在 pin2 与 pin4(散热片)两处同网 —— 接线时两脚都要落到 3V3。",
+    "AMS1117 VOUT 节点有两个同名焊盘(pin2 + pin4 散热片),二者内部同网;internal_nets 的 U.VOUT 指整个 VOUT 节点 —— 装配/接线时该功能名下的两个焊盘都要连到 3V3(同理多脚 GND)。漏连一个 = 该焊盘悬空(2026-07-09 块驱动实测,demo 装配器只连了单个同名脚)。",
     "输出电容不可省:AMS1117 靠输出电容补偿环路,裸输出会振荡。C_OUT ≥10µF。",
     "netflag 必须经真实导线连到引脚(坐标重叠不算连接,DRC 不认)。",
     "只做主控供电(轻载)时 C_OUT 22µF + C_BYP 100nF 足够;带大负载再加体电容。"
