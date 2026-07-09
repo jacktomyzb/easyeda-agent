@@ -131,3 +131,97 @@ func TestPartsExistInStandardParts(t *testing.T) {
 		}
 	}
 }
+
+// Constraint-map validators — the extensible layout dimensions (placement, signals).
+// A block carries these as top-level maps; adding a future dimension follows the same
+// shape. The loader keeps unknown maps in Raw (forward-compatible); these tests validate
+// the KNOWN ones so a contribution can't ship a malformed board-edge / diff-pair spec.
+
+var okConstraintSeverity = map[string]bool{"must": true, "should": true, "": true}
+var okPlacementEdge = map[string]bool{
+	"any": true, "user-facing": true, "top": true, "bottom": true, "left": true, "right": true, "": true,
+}
+var okPlacementSide = map[string]bool{"top": true, "bottom": true, "either": true, "": true}
+
+// TestPlacementMap: placement is keyed by <ROLE> (which structural part sits at a board
+// edge / on which copper side). Every role must exist in parts; edge/side/severity are
+// enum-checked. The `_doc` key is skipped (it's the map's inline doc string).
+func TestPlacementMap(t *testing.T) {
+	all, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range all {
+		var wrap struct {
+			Placement map[string]json.RawMessage `json:"placement"`
+			Parts     map[string]json.RawMessage `json:"parts"`
+		}
+		if err := json.Unmarshal(b.Raw, &wrap); err != nil {
+			t.Errorf("%s: parse placement: %v", b.ID, err)
+			continue
+		}
+		for role, raw := range wrap.Placement {
+			if role == "_doc" {
+				continue
+			}
+			if _, ok := wrap.Parts[role]; !ok {
+				t.Errorf("%s: placement role %q not in parts", b.ID, role)
+			}
+			var rec struct{ Severity, Edge, Side string }
+			if err := json.Unmarshal(raw, &rec); err != nil {
+				t.Errorf("%s placement %s: %v", b.ID, role, err)
+				continue
+			}
+			if !okConstraintSeverity[rec.Severity] {
+				t.Errorf("%s placement %s: bad severity %q", b.ID, role, rec.Severity)
+			}
+			if !okPlacementEdge[rec.Edge] {
+				t.Errorf("%s placement %s: bad edge %q (want any/user-facing/top/bottom/left/right)", b.ID, role, rec.Edge)
+			}
+			if !okPlacementSide[rec.Side] {
+				t.Errorf("%s placement %s: bad side %q (want top/bottom/either)", b.ID, role, rec.Side)
+			}
+		}
+	}
+}
+
+// TestSignalsMap: signals is keyed by <signal-group>; each record needs a type + nets so
+// a diff-pair / RF / high-speed spec is machine-usable. severity is enum-checked.
+func TestSignalsMap(t *testing.T) {
+	all, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range all {
+		var wrap struct {
+			Signals map[string]json.RawMessage `json:"signals"`
+		}
+		if err := json.Unmarshal(b.Raw, &wrap); err != nil {
+			t.Errorf("%s: parse signals: %v", b.ID, err)
+			continue
+		}
+		for name, raw := range wrap.Signals {
+			if name == "_doc" {
+				continue
+			}
+			var rec struct {
+				Type     string   `json:"type"`
+				Severity string   `json:"severity"`
+				Nets     []string `json:"nets"`
+			}
+			if err := json.Unmarshal(raw, &rec); err != nil {
+				t.Errorf("%s signal %s: %v", b.ID, name, err)
+				continue
+			}
+			if rec.Type == "" {
+				t.Errorf("%s signal %s: missing type", b.ID, name)
+			}
+			if len(rec.Nets) == 0 {
+				t.Errorf("%s signal %s: missing nets", b.ID, name)
+			}
+			if !okConstraintSeverity[rec.Severity] {
+				t.Errorf("%s signal %s: bad severity %q", b.ID, name, rec.Severity)
+			}
+		}
+	}
+}

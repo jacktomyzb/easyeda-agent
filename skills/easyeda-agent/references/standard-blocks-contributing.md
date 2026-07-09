@@ -19,8 +19,16 @@
 - **引脚一律用功能名**(`CH340.TXD`),不用引脚编号 —— 符号级稳定,复用零改号。
 - **器件指回 `standard-parts.json`**:块不重复存 LCSC C 号,料号单一来源。
 
-字段完整定义见 `internal/blocks/data/_schema.json`。六段:`parts` / `internal_nets`
-/ `ports` / `schematic_notes`(原理图链接注意)/ `pcb_layout`(PCB 电气特性)/ 元信息。
+字段完整定义见 `internal/blocks/data/_schema.json`。核心段:`parts` / `internal_nets`
+/ `ports` / `schematic_notes`(原理图链接注意)/ 元信息,外加一族**可拓展的约束 map**:
+
+- `pcb_layout` —— 通用布局规则(列表 `{rule,target,constraint,value,severity}`)。
+- `placement` —— **结构件摆放**(按 `<ROLE>` 键):连接器/端子/USB/天线/按键/指示灯等
+  **要不要靠板边、靠哪条边(`edge`)、放哪个铜面(`side` top/bottom)**、朝向。
+- `signals` —— **信号特性**(按信号组键):差分对/高速/RF/敏感网络的阻抗、等长、隔离等
+  (如 USB D± 90Ω 差分、RS-485 A/B 120Ω、RF 50Ω)。
+- **加新维度 = 加一张新顶层 map**(如将来 `thermal`/`emc`),同样按 role/net/signal 键、
+  每条带 `severity`+`reason`。loader 前向兼容透传,未知 map 不报错;`go test` 校验已知 map。
 
 ---
 
@@ -86,7 +94,9 @@ internal/blocks/data/
 - [ ] source 填了,且是官方 ref / datasheet / 验证过的开源板(非凭记忆)
 - [ ] 用到的新器件已进 standard-parts.json(带真实 LCSC C 号)
 - [ ] 引脚全部用功能名,不含引脚编号(并在验证时用 sch read 核实真实符号脚名)
-- [ ] 六段齐全;pcb_layout 是结构化规则(每条带 severity)
+- [ ] 核心段齐全;pcb_layout 结构化(每条带 severity)
+- [ ] 有结构件(连接器/端子/天线/按键/指示灯)的块填了 `placement`(板边+正反面)
+- [ ] 有差分/高速/RF 网络的块填了 `signals`(阻抗/等长/隔离)
 - [ ] 已在 ceshi 跑过 place→wire→sch check→DRC=0,validated 已填(或明确标 draft)
 - [ ] author/added/updated 已填;改他人块时把自己加进 contributors
 - [ ] 一个 PR 只含一个块

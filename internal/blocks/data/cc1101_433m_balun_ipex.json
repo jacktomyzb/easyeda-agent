@@ -380,5 +380,34 @@
       "severity": "should"
     }
   ],
+  "placement": {
+    "J_ANT2": {
+      "board_edge": true,
+      "edge": "any",
+      "side": "top",
+      "orientation": "IPEX/U.FL 天线座置于板边,天线走线短且直",
+      "severity": "must",
+      "reason": "射频天线接口须在板边,缩短 RF 走线、减少干扰"
+    },
+    "X2": {
+      "board_edge": false,
+      "side": "top",
+      "orientation": "26MHz 晶振紧贴 CC1101,晶振帽电容对称",
+      "severity": "should",
+      "reason": "时钟晶振靠近芯片,走线短、下方地平面完整"
+    }
+  },
+  "signals": {
+    "RF_ANT": {
+      "nets": ["ANT"],
+      "type": "rf",
+      "impedance_ohm": 50,
+      "impedance_kind": "single-ended",
+      "route": "50Ω 单端微带:CC1101→分立巴伦/匹配网络→天线座,尽量短直、无过孔、下方完整地平面",
+      "keepout": "巴伦/匹配网络(L621/L631/C62x)紧凑靠近芯片;RF 路径两侧护地 + 密集缝合过孔",
+      "severity": "must",
+      "reason": "433MHz RF 50Ω 阻抗,巴伦匹配网络对布局极敏感"
+    }
+  },
   "bom_note": "共 25 件:1× CC1101 QFN-20 + 1× NX3225GA 26MHz 晶振 + 1× U.FL/IPEX 座 + 1× BLM15HG102 磁珠 + 1× 56k 0402 + 20× 0402 电容/电感。全部 0402(含 1µF 体电容也用 0402 键 cap.1uf_0402)。分立巴伦 + 两级滤波共 5× 电感(4×27nH + 1×22nH)+ 精密射频电容(3.9/8.2/5.6pF、220pF×5、10nF×2、100nF×2、12/15pF 晶振帽)。这些射频料多为扩展料(非 JLC 基础料),打样注意上料费。"
 }

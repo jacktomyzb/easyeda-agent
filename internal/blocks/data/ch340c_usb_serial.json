@@ -133,5 +133,29 @@
       "severity": "must"
     }
   ],
+  "placement": {
+    "J_USB": {
+      "board_edge": true,
+      "edge": "user-facing",
+      "side": "top",
+      "orientation": "开口朝板外,便于插拔",
+      "severity": "must",
+      "reason": "USB-C 端子需插拔,必须置于板边;CC 下拉电阻靠近端子"
+    }
+  },
+  "signals": {
+    "USB_D": {
+      "nets": ["USB_DP", "USB_DM"],
+      "type": "diff_pair",
+      "impedance_ohm": 90,
+      "impedance_kind": "differential",
+      "length_match_mm": 0.15,
+      "max_via": 2,
+      "route": "D+/D- 紧耦合等长、尽量短、少过孔;ESD(D_ESD)串在端子与 CH340 之间",
+      "keepout": "别跨越铺铜分割/参考平面断口,远离开关电源",
+      "severity": "should",
+      "reason": "USB2.0 全速 D+/D- 高速差分"
+    }
+  },
   "bom_note": "全 0402 无源 + 1× CH340C(扩展料)+ 1× USB-C + 1× SM712 ESD;约 7 种料"
 }

@@ -199,5 +199,27 @@
       "severity": "should"
     }
   ],
+  "placement": {
+    "J4": {
+      "board_edge": true,
+      "edge": "user-facing",
+      "side": "top",
+      "orientation": "5.08 接线端子接线口朝板外",
+      "severity": "must",
+      "reason": "RS-485 需外部接线,端子置于板边;TVS(D701)靠近端子"
+    }
+  },
+  "signals": {
+    "RS485_AB": {
+      "nets": ["A", "B"],
+      "type": "diff_pair",
+      "impedance_ohm": 120,
+      "impedance_kind": "differential",
+      "route": "A/B 紧耦合等长走线,路径 端子→TVS→收发器;远离数字/开关噪声",
+      "keepout": "120Ω 终端(R703,经 JP701)仅总线两端装;偏置电阻整条总线仅一处装",
+      "severity": "should",
+      "reason": "RS-485 差分总线,120Ω 特性阻抗匹配"
+    }
+  },
   "bom_note": "SP3485 SOIC-8(扩展料 C8963)+ SM712/PSM712 TVS(C32677)+ 3P 5.08 端子 + 2P 跳线;R701/R702 680R 偏置默认 DNF(整条总线仅一处装)、R703 120R 终端仅在两端装(经 JP701)、R706 10k DE 下拉常装;C701 100nF 0402。多数为可选/位置相关贴装,单节点实装料通常仅 U7+C701+R706+D701+J4(+按位置的偏置/终端)。"
 }
