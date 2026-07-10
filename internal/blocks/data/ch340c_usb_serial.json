@@ -128,8 +128,8 @@
     {
       "rule": "connector-edge",
       "target": "J_USB",
-      "constraint": "USB-C 端子置于板边,CC 下拉电阻靠近端子",
-      "value": "",
+      "constraint": "USB-C 端子置于板边且壳体前沿突出/探出板框(mating 面探出板外,插头才能插到底);板框在端子正下方内缩让位。CC 下拉电阻靠近端子",
+      "value": "壳体前沿越过板框边缘 ~0.5–1mm",
       "severity": "must"
     }
   ],
@@ -138,9 +138,9 @@
       "board_edge": true,
       "edge": "user-facing",
       "side": "top",
-      "orientation": "开口朝板外,便于插拔",
+      "orientation": "开口朝板外;壳体前沿突出/探出板框边缘(mating 面越过板边 ~0.5–1mm,插头才能插到底),板框在端子正下方内缩为其让位——不可整体内缩到板内",
       "severity": "must",
-      "reason": "USB-C 端子需插拔,必须置于板边;CC 下拉电阻靠近端子"
+      "reason": "USB-C 端子需插拔:不仅要置于板边,前沿必须突出板框,否则插头插不到底;CC 下拉电阻靠近端子"
     }
   },
   "signals": {
