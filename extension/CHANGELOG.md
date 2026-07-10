@@ -6,6 +6,12 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-10
+
+功能版本(minor):**电路块库 `easyeda blocks` 上线**——从「器件→块→流程」三层
+库的拓扑层落地为可离线查询的旗舰能力,配套 skill 自动同步、PCB 引脚级丝印批注、
+整板批量落图脚本与切页竞态收口。
+
 ### Added
 - **`easyeda blocks` — 离线电路块库查询(embedded)**:`ls` / `show <id>` /
   `search <query>`,块库 JSON 用 `go:embed` 编进二进制,**零 daemon / 零窗口 /
