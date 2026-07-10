@@ -115,10 +115,13 @@ func planStitchViasForNet(net string, padsAll []pcbPadP, tracks []pcbTrack, vias
 		}
 		return true
 	}
-	// The stub is short, but it can still graze an adjacent other-net pad —
-	// reject a candidate whose stub does.
-	stubClear := func(px, py, vx, vy float64) bool {
-		band := ctx.clearance + nominalPadHalf + ctx.stubW/2
+	// The stub is short, but it can still graze an adjacent other-net pad, an
+	// other-net via (through-hole → clashes on the stub's layer), or an other-net
+	// track on the same layer — reject a candidate whose stub does. layer is the
+	// stub's copper layer (the pad's layer); track checks are layer-scoped, while
+	// pads/vias are treated as present on every layer (conservative for shorts).
+	stubClear := func(px, py, vx, vy float64, layer int) bool {
+		padB := ctx.clearance + nominalPadHalf + ctx.stubW/2
 		for _, o := range padsAll {
 			if o.Net == net {
 				continue
@@ -126,7 +129,40 @@ func planStitchViasForNet(net string, padsAll []pcbPadP, tracks []pcbTrack, vias
 			if samePoint(o.X, o.Y, px, py) {
 				continue
 			}
-			if segPtDist(o.X, o.Y, px, py, vx, vy) < band {
+			if segPtDist(o.X, o.Y, px, py, vx, vy) < padB {
+				return false
+			}
+		}
+		// Vias are through-hole: an other-net via clashes with the stub copper on
+		// any layer. The stub's own via endpoint (vx,vy) is same-net, skipped below.
+		viaHit := func(cx, cy, r float64) bool {
+			if samePoint(cx, cy, vx, vy) {
+				return false // the stub's own endpoint via
+			}
+			return segPtDist(cx, cy, px, py, vx, vy) < ctx.clearance+r+ctx.stubW/2
+		}
+		for _, v := range vias {
+			if v.Net == net {
+				continue
+			}
+			if viaHit(v.X, v.Y, v.Dia/2) {
+				return false
+			}
+		}
+		for _, pv := range priorVias {
+			if pv.Net == net {
+				continue
+			}
+			if viaHit(pv.X, pv.Y, viaR) {
+				return false
+			}
+		}
+		// Other-net tracks on the same layer: segment-to-segment distance.
+		for _, t := range tracks {
+			if t.Net == net || t.Layer != layer {
+				continue
+			}
+			if segSegDist(px, py, vx, vy, t.X1, t.Y1, t.X2, t.Y2) < ctx.clearance+t.Width/2+ctx.stubW/2 {
 				return false
 			}
 		}
@@ -145,7 +181,7 @@ func planStitchViasForNet(net string, padsAll []pcbPadP, tracks []pcbTrack, vias
 		// Share: a same-net via already planned (this run) within reach → fan in.
 		shared := false
 		for _, pv := range planned {
-			if math.Hypot(p.X-pv.x, p.Y-pv.y) <= ctx.shareDist && stubClear(p.X, p.Y, pv.x, pv.y) {
+			if math.Hypot(p.X-pv.x, p.Y-pv.y) <= ctx.shareDist && stubClear(p.X, p.Y, pv.x, pv.y, p.Layer) {
 				res.Stubs = append(res.Stubs, rtSeg{Net: net, X1: p.X, Y1: p.Y, X2: pv.x, Y2: pv.y, Layer: p.Layer, Width: ctx.stubW})
 				res.Shared++
 				shared = true
@@ -155,7 +191,7 @@ func planStitchViasForNet(net string, padsAll []pcbPadP, tracks []pcbTrack, vias
 		if !shared {
 			// Or an existing same-net board via (a routing via is through-hole too).
 			for _, v := range vias {
-				if v.Net == net && math.Hypot(p.X-v.X, p.Y-v.Y) <= ctx.shareDist && stubClear(p.X, p.Y, v.X, v.Y) {
+				if v.Net == net && math.Hypot(p.X-v.X, p.Y-v.Y) <= ctx.shareDist && stubClear(p.X, p.Y, v.X, v.Y, p.Layer) {
 					res.Stubs = append(res.Stubs, rtSeg{Net: net, X1: p.X, Y1: p.Y, X2: v.X, Y2: v.Y, Layer: p.Layer, Width: ctx.stubW})
 					res.Shared++
 					shared = true
@@ -171,7 +207,7 @@ func planStitchViasForNet(net string, padsAll []pcbPadP, tracks []pcbTrack, vias
 		for _, off := range ctx.offsets {
 			for _, d := range stitchDirs {
 				vx, vy := p.X+d[0]*off, p.Y+d[1]*off
-				if !viaClear(vx, vy) || !stubClear(p.X, p.Y, vx, vy) {
+				if !viaClear(vx, vy) || !stubClear(p.X, p.Y, vx, vy, p.Layer) {
 					continue
 				}
 				res.Vias = append(res.Vias, rtVia{Net: net, X: vx, Y: vy})

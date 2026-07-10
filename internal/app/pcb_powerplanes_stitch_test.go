@@ -91,6 +91,65 @@ func TestStitchAvoidsExistingVias(t *testing.T) {
 	}
 }
 
+// A stub must not graze an other-net via. An other-net via sits between the pad
+// and its first (E, offset 30) candidate via spot; the stub to that spot would
+// run 0mil from it, so the planner must pick a different direction — and the
+// chosen stub must clear the foreign via.
+func TestStitchStubAvoidsOtherNetVia(t *testing.T) {
+	pads := []pcbPadP{{Designator: "C1", Number: "1", Net: "+5V", Layer: 1, X: 0, Y: 0}}
+	// Foreign via just past the pad on the +X axis: the E/offset-50 stub would
+	// pass right over it. viaClear also dodges it, but the stub is the point here.
+	vias := []pcbViaP{{ID: "v1", Net: "GND", X: 40, Y: 0, Dia: 24}}
+	ctx := stitchCtxForTest()
+	res := planStitchViasForNet("+5V", pads, nil, vias, nil, ctx)
+	if len(res.Vias) != 1 {
+		t.Fatalf("want 1 via, got %d", len(res.Vias))
+	}
+	v := res.Vias[0]
+	// The chosen stub (pad→via) must clear the GND via by clearance+viaR+stubW/2.
+	band := ctx.clearance + ctx.viaDia/2 + ctx.stubW/2
+	if d := segPtDist(40, 0, 0, 0, v.X, v.Y); d < band {
+		t.Errorf("stub runs %.1fmil from the GND via — under the %.1f band", d, band)
+	}
+}
+
+// A stub must not run alongside an other-net track on the same layer. A GND
+// track lies along +X just off the pad; the E-direction stub would parallel it
+// under clearance, so the planner picks another direction that clears the track.
+func TestStitchStubAvoidsOtherNetTrack(t *testing.T) {
+	pads := []pcbPadP{{Designator: "C1", Number: "1", Net: "+5V", Layer: 1, X: 0, Y: 0}}
+	tracks := []pcbTrack{{ID: "t1", Net: "GND", Layer: 1, X1: 30, Y1: 6, X2: 70, Y2: 6, Width: 10}}
+	ctx := stitchCtxForTest()
+	res := planStitchViasForNet("+5V", pads, tracks, nil, nil, ctx)
+	if len(res.Vias) != 1 {
+		t.Fatalf("want 1 via, got %d", len(res.Vias))
+	}
+	v := res.Vias[0]
+	band := ctx.clearance + 10.0/2 + ctx.stubW/2
+	if d := segSegDist(0, 0, v.X, v.Y, 30, 6, 70, 6); d < band {
+		t.Errorf("stub runs %.1fmil from the GND track — under the %.1f band", d, band)
+	}
+}
+
+// A stub sharing a via into a same-net board via must still clear a foreign via
+// that sits along the share path — otherwise the share stub itself shorts.
+func TestStitchShareStubAvoidsOtherNetVia(t *testing.T) {
+	pads := []pcbPadP{{Designator: "U1", Number: "1", Net: "GND", Layer: 1, X: 0, Y: 0}}
+	// Same-net board via within shareDist along +X, plus a foreign via right on
+	// the share stub path → the share must be rejected, planner offsets a new via.
+	vias := []pcbViaP{
+		{ID: "g1", Net: "GND", X: 70, Y: 0, Dia: 24},
+		{ID: "f1", Net: "+3V3", X: 35, Y: 0, Dia: 24},
+	}
+	ctx := stitchCtxForTest()
+	res := planStitchViasForNet("GND", pads, nil, vias, nil, ctx)
+	// The share stub (0,0)→(70,0) would run 0mil from the +3V3 via at (35,0), so
+	// it must NOT be taken as a plain shared stub with no new via.
+	if res.Shared != 0 {
+		t.Errorf("share stub grazes a foreign via — must not share, shared=%d", res.Shared)
+	}
+}
+
 // A pad boxed in on all candidates is left unstitched (reported), never violated
 // into place.
 func TestStitchLeavesBoxedInPadUnplaced(t *testing.T) {
