@@ -301,7 +301,8 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	// ── list ─────────────────────────────────────────────────────────────
 	// schematic.components.list
 	{
-		var allPages, includeBBox, includePins bool
+		var allPages, includeBBox, includePins, stay bool
+		var page string
 		c := &cobra.Command{
 			Use:   "list",
 			Short: "List components on the active (or all) schematic page(s)",
@@ -324,6 +325,19 @@ before feeding it back into ` + "`sch place --uuid`" + `.`,
   easyeda sch list --include-bbox
   easyeda sch list --include-pins`,
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if page != "" && allPages {
+					return fmt.Errorf("--page and --all-pages are mutually exclusive")
+				}
+				if page != "" {
+					scope, err := switchToPage(cfg, window, page)
+					if err != nil {
+						return err
+					}
+					if !stay {
+						defer func() { _ = scope.restore(cfg) }()
+					}
+					window = scope.window
+				}
 				payload := map[string]any{}
 				if allPages {
 					payload["allPages"] = true
@@ -341,6 +355,8 @@ before feeding it back into ` + "`sch place --uuid`" + `.`,
 			},
 		}
 		c.Flags().BoolVar(&allPages, "all-pages", false, "list components across all schematic pages (WARNING: non-active pages return shallow data — pins/bbox may be empty; use `doc switch` to that page for accurate data)")
+		c.Flags().StringVar(&page, "page", "", "switch to this page (name|uuid), wait for it to settle, then list — makes the page an explicit parameter instead of relying on the active tab (issue #67)")
+		c.Flags().BoolVar(&stay, "stay", false, "with --page, stay on the target page after listing instead of switching back")
 		c.Flags().BoolVar(&includeBBox, "include-bbox", false, "attach each component's rendered extent {minX,minY,maxX,maxY}")
 		c.Flags().BoolVar(&includePins, "include-pins", false, "attach each pin's {pinName,pinNumber,x,y,noConnected,net} — the data plane for routing/connectivity checks (net is the pin's current authoritative net, null when the netlist is unavailable; output grows, esp. with --all-pages)")
 		sch.AddCommand(c)
@@ -349,7 +365,7 @@ before feeding it back into ` + "`sch place --uuid`" + `.`,
 	// ── place ─────────────────────────────────────────────────────────────
 	// schematic.component.place
 	{
-		var lib, uuid string
+		var lib, uuid, designator string
 		var x, y, rotation float64
 		var mirror bool
 		c := &cobra.Command{
@@ -362,9 +378,16 @@ before feeding it back into ` + "`sch place --uuid`" + `.`,
 the uuid-looking fields ` + "`component`/`symbol`/`footprint`/`uniqueId`" + ` that
 ` + "`easyeda sch list`" + ` reports — those are placed-INSTANCE ids and are not valid
 ` + "`sch place`" + ` inputs. Passing an instance uuid makes the EasyEDA API hang; this
-command fails fast after a short timeout with a hint instead of stalling.`,
+command fails fast after a short timeout with a hint instead of stalling.
+
+Pass --designator to atomically assign the final designator on the connector
+side right after create, so you skip the place→` + "`sch list`" + `→` + "`sch modify`" + ` round-trip
+and the coordinate-based primitiveId re-matching that batch placement otherwise
+needs. The response's ` + "`primitiveId`" + ` and ` + "`component.designator`" + ` reflect the
+final placed state.`,
 			Example: `  easyeda sch place --lib <libraryUuid> --uuid <deviceUuid> --x 100 --y 200
-  easyeda sch place --lib <l> --uuid <u> --x 100 --y 200 --rotation 90 --mirror`,
+  easyeda sch place --lib <l> --uuid <u> --x 100 --y 200 --rotation 90 --mirror
+  easyeda sch place --lib <l> --uuid <u> --x 100 --y 200 --designator R12`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if lib == "" {
 					return fmt.Errorf("--lib is required")
@@ -384,6 +407,9 @@ command fails fast after a short timeout with a hint instead of stalling.`,
 				if cmd.Flags().Changed("mirror") {
 					payload["mirror"] = mirror
 				}
+				if cmd.Flags().Changed("designator") {
+					payload["designator"] = designator
+				}
 				err := dispatchTimed(cfg, "schematic.component.place", window, payload, placeTimeout, stdout, stderr)
 				if err != nil && errors.Is(err, context.DeadlineExceeded) {
 					return placeUUIDHint(placeTimeout)
@@ -397,6 +423,7 @@ command fails fast after a short timeout with a hint instead of stalling.`,
 		c.Flags().Float64Var(&y, "y", 0, "Y coordinate")
 		c.Flags().Float64Var(&rotation, "rotation", 0, "rotation in degrees (0/90/180/270)")
 		c.Flags().BoolVar(&mirror, "mirror", false, "mirror the component")
+		c.Flags().StringVar(&designator, "designator", "", "final designator to assign atomically after placement, e.g. R12 (avoids the place→list→modify round-trip; the response's component.designator reflects the assigned value)")
 		sch.AddCommand(c)
 	}
 
@@ -947,7 +974,7 @@ still surfacing warnings for review.`,
 		}
 		c.Flags().BoolVar(&strict, "strict", false, "treat warnings as errors (SDK strict mode)")
 		c.Flags().BoolVar(&verbose, "verbose", false, "also print each violation's raw EDA object")
-		c.Flags().BoolVar(&asJSON, "json", false, "emit the normalized report as JSON")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the normalized report in the {id,type,version,ok,result} envelope (report under result)")
 		sch.AddCommand(c)
 	}
 
@@ -957,7 +984,8 @@ still surfacing warnings for review.`,
 	// only an aggregate, so the itemized findings the UI panel shows are computed
 	// here from primitives. Output (designator + pin numbers) feeds `sch no-connect`.
 	{
-		var allPages, strict, asJSON bool
+		var allPages, strict, asJSON, stay bool
+		var page string
 		c := &cobra.Command{
 			Use:   "check",
 			Short: "Reconstructed per-item design check the SDK DRC can't itemize",
@@ -975,18 +1003,90 @@ The floating-pin output is the exact input 'sch no-connect' takes, so the loop i
 sch check → wire the real ones / sch no-connect the intentional ones → sch check.
 
 Exit code: 0 by default (floating IO pins are normal until NC-marked); --strict
-exits non-zero when there are any findings, to use it as a gate.`,
+exits non-zero when there are any findings, to use it as a gate.
+
+--json wraps the report in the same {id,type,version,ok,result} envelope the
+other sch commands emit; the findings are under result.findings (v0.10.0+;
+prior versions emitted a bare {passed,summary,findings}).`,
 			Args: cobra.NoArgs,
 			Example: `  easyeda sch check
   easyeda sch check --json
   easyeda sch check --strict      # non-zero exit if any findings`,
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if page != "" && allPages {
+					return fmt.Errorf("--page and --all-pages are mutually exclusive")
+				}
+				if page != "" {
+					scope, err := switchToPage(cfg, window, page)
+					if err != nil {
+						return err
+					}
+					if !stay {
+						defer func() { _ = scope.restore(cfg) }()
+					}
+					window = scope.window
+				}
 				return runSchCheck(cfg, window, allPages, strict, asJSON, stdout, stderr)
 			},
 		}
 		c.Flags().BoolVar(&allPages, "all-pages", false, "check components across all schematic pages (WARNING: non-active pages return shallow data — pins/bbox may be empty; use `doc switch` to that page for accurate data)")
+		c.Flags().StringVar(&page, "page", "", "switch to this page (name|uuid), wait for it to settle, then check — makes the page an explicit parameter instead of relying on the active tab (issue #67)")
+		c.Flags().BoolVar(&stay, "stay", false, "with --page, stay on the target page after checking instead of switching back")
 		c.Flags().BoolVar(&strict, "strict", false, "exit non-zero when there are findings (gate mode)")
-		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the report in the {id,type,version,ok,result} envelope (findings under result.findings)")
+		sch.AddCommand(c)
+	}
+
+	// ── bridge-check ────────────────────────────────────────────────────────
+	// schematic.bridgeCheck — tree-granularity net-vs-copper consistency gate.
+	// `sch check`'s multi-net-wire rule is per SINGLE wire; when EasyEDA merges
+	// collinear touching stubs of DIFFERENT nets into one tree the short spans
+	// several wires and no single wire carries two names, so it under-reports.
+	// bridge-check groups wires into trees (shared-vertex union-find) and
+	// aggregates the netflag/netport net names per tree: >1 net → BRIDGE (real
+	// short, ERROR, non-zero exit = gate); empty + touches a pin → ORPHAN (WARN).
+	{
+		var allPages, asJSON bool
+		c := &cobra.Command{
+			Use:   "bridge-check",
+			Short: "Detect共线合并短路 (bridges) and孤儿桩 (orphans) at wire-tree granularity",
+			Long: `Tree-granularity net-vs-copper consistency check — the盲区 'sch check' can't see.
+
+EasyEDA merges two collinear touching stubs of DIFFERENT nets into ONE wire tree
+that spans several wire primitives. No single wire then carries two net names, so
+'sch check''s per-wire multi-net-wire rule under-reports the short. 'sch drc'
+doesn't flag it either (the merged tree looks like an ordinary wire). Only the
+"one wire tree carries several net names" data view exposes it.
+
+bridge-check groups every page wire into trees by shared vertices (union-find),
+then aggregates the net names of the netflag/netport anchored on each tree:
+
+  • len(set(nets)) > 1                    → BRIDGE (real short)        ERROR
+  • nets empty & tree touches a comp pin  → ORPHAN (dangling stub)     WARN
+
+Each problem tree reports its wire ids / flag ids / touched pins (designator:pin)
+so the fix — delete the whole tree (sch prim-delete) then re-connect each pin to
+its own net (sch connect) — is actionable. This is the third pillar of the S5
+verification gate: layout-lint (placement) + check/drc (structure) + bridge-check
+(network-semantics vs physical-copper).
+
+Exit code: non-zero when any BRIDGE exists (real short → gate). Orphans alone
+exit 0 (they are WARN). Run it after autoconnect / manual routing as a self-heal
+post-step.
+
+NOTE: --all-pages reads non-active pages shallowly (same limit as 'sch check' /
+'sch list' — pins may be empty), so cross-page trees can be under-reported; switch
+to a page for authoritative results.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda sch bridge-check
+  easyeda sch bridge-check --json
+  easyeda sch bridge-check --all-pages`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runSchBridgeCheck(cfg, window, allPages, asJSON, stdout, stderr)
+			},
+		}
+		c.Flags().BoolVar(&allPages, "all-pages", false, "check wire trees across all schematic pages (WARNING: non-active pages return shallow data — pins may be empty; use `doc switch` to that page for accurate results)")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the report in the {id,type,version,ok,result} envelope (trees under result.trees)")
 		sch.AddCommand(c)
 	}
 
@@ -994,7 +1094,8 @@ exits non-zero when there are any findings, to use it as a gate.`,
 	// schematic.read — one-call semantic snapshot (components + pin nets + nets +
 	// check), so the agent reads the whole circuit at once.
 	{
-		var allPages, noCheck bool
+		var allPages, noCheck, stay bool
+		var page string
 		c := &cobra.Command{
 			Use:   "read",
 			Short: "One-call semantic snapshot of the circuit (components + nets + check)",
@@ -1011,6 +1112,19 @@ check for a faster read.`,
   easyeda sch read --all-pages
   easyeda sch read --no-check`,
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if page != "" && allPages {
+					return fmt.Errorf("--page and --all-pages are mutually exclusive")
+				}
+				if page != "" {
+					scope, err := switchToPage(cfg, window, page)
+					if err != nil {
+						return err
+					}
+					if !stay {
+						defer func() { _ = scope.restore(cfg) }()
+					}
+					window = scope.window
+				}
 				payload := map[string]any{}
 				if allPages {
 					payload["allPages"] = true
@@ -1022,6 +1136,8 @@ check for a faster read.`,
 			},
 		}
 		c.Flags().BoolVar(&allPages, "all-pages", false, "read components across all schematic pages (WARNING: non-active pages return shallow data — pins/bbox may be empty; use `doc switch` to that page for accurate data)")
+		c.Flags().StringVar(&page, "page", "", "switch to this page (name|uuid), wait for it to settle, then read — makes the page an explicit parameter instead of relying on the active tab (issue #67)")
+		c.Flags().BoolVar(&stay, "stay", false, "with --page, stay on the target page after reading instead of switching back")
 		c.Flags().BoolVar(&noCheck, "no-check", false, "skip the geometric design check for a faster read")
 		sch.AddCommand(c)
 	}
@@ -1043,7 +1159,7 @@ check for a faster read.`,
 	// too-tight spacing (WARN) so layout overlap is mechanically caught, not
 	// eyeballed. Exits non-zero when overlaps exist → usable as a gate.
 	{
-		var minGap float64
+		var minGap, pinEps float64
 		var asJSON, allPages, includeNonParts bool
 		c := &cobra.Command{
 			Use:   "layout-lint",
@@ -1053,8 +1169,15 @@ check for a faster read.`,
 Pulls every component's rendered extent (schematic.components.list --include-bbox)
 and runs two pairwise checks in Go:
 
-  • overlap  — two component bounding boxes intersect            → ERROR
-  • spacing  — bbox gap is below --min-gap (default 2.54mm)      → WARN
+  • overlap          — two component bounding boxes intersect            → ERROR
+  • pin-coincidence  — two pins of DIFFERENT parts land on the same point → ERROR
+  • spacing          — bbox gap is below --min-gap (default 2.54mm)       → WARN
+
+Pin coincidence is an implicit short: any wire/stub through the shared point ties
+the two nets together, yet the bboxes may never touch (a small 2-pin part tucked
+against a large one), so bbox-only overlap detection misses it. Pins are compared
+across different components only; a symbol's own pins are expected to sit at fixed
+offsets. Use --pin-eps to treat near-coincident pins (within N mm) as errors too.
 
 Only real parts (componentType "part") are checked by default. The drawing
 sheet / title block (图框) spans the whole page, so including it would false-flag
@@ -1070,10 +1193,11 @@ Exits non-zero when any overlap is found, so it can gate a workflow.`,
   easyeda sch layout-lint --min-gap 5.08
   easyeda sch layout-lint --all-pages --json`,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return runLayoutLint(cfg, window, minGap, allPages, asJSON, includeNonParts, stdout, stderr)
+				return runLayoutLint(cfg, window, minGap, pinEps, allPages, asJSON, includeNonParts, stdout, stderr)
 			},
 		}
 		c.Flags().Float64Var(&minGap, "min-gap", 2.54, "minimum gap between component bboxes in mm (closer = WARN)")
+		c.Flags().Float64Var(&pinEps, "pin-eps", 0, "max distance in mm for two pins of DIFFERENT components to count as coincident (implicit short → ERROR); 0 = strict equality")
 		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
 		c.Flags().BoolVar(&allPages, "all-pages", false, "lint components across all schematic pages (WARNING: non-active pages return shallow data — components with no bbox are SKIPPED from overlap checks, not confirmed clear; use `doc switch` to that page for accurate linting)")
 		c.Flags().BoolVar(&includeNonParts, "include-non-parts", false, "also lint non-part primitives (sheet/title-frame, netflag/netport/…); excluded by default")
@@ -1112,7 +1236,7 @@ The keepouts[] format is what sch autoconnect / autolayout consume.`,
 				return runSheetGeometry(cfg, window, asJSON, stdout, stderr)
 			},
 		}
-		c.Flags().BoolVar(&asJSON, "json", false, "emit the geometry as JSON")
+		c.Flags().BoolVar(&asJSON, "json", false, "emit the geometry in the {id,type,version,ok,result} envelope (geometry under result)")
 		sch.AddCommand(c)
 	}
 

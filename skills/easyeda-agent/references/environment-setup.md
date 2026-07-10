@@ -1,9 +1,25 @@
 # 环境自举 — agent 自己把「可用的 EasyEDA 环境」拉起来
 
-`NO_CONNECTOR` / `windows: []` 不是终点。有 chrome-devtools MCP 时,agent 可以
-**自己**完成:开 web 编辑器 → 打开目标工程 → 确认连接器附着 → (需要时)热重载新
-连接器。全流程 2026-07-07 在 ceshi 工程真机跑通。没有浏览器控制工具时才退回
-「请用户手工打开 EasyEDA」。
+`NO_CONNECTOR` / `windows: []` 不是终点。有 chrome-devtools MCP **且用户用的是网页版**
+时,agent 可以**自己**完成:开 web 编辑器 → 打开目标工程 → 确认连接器附着 →
+(需要时)热重载新连接器。全流程 2026-07-07 在 ceshi 工程真机跑通。没有浏览器控制
+工具、**或用户用的是桌面客户端**时,才退回「请用户手工打开 / 切换 EasyEDA 工程」。
+
+## 桌面版 vs 网页版 —— 自动开工程能力的边界(先判这一条)
+
+**连接器本身对两者一视同仁**:`.eext` 装进 EasyEDA(桌面或网页都行),后台端口扫描
+`49620-49629` 附着 daemon,附着后所有 `easyeda` typed action **完全一样**。区别只在
+**「打开 / 切换工程」这一步能不能自动化**:
+
+| 宿主 | 自动开/切工程 | 说明 |
+|---|---|---|
+| **网页版**(Chrome 里的 `pro.lceda.cn/editor`) | ✅ 可自动 | chrome-devtools MCP `navigate_page` 改 `#id=<uuid>` + reload,连接器 15-30s 自附着;切文档再 `easyeda doc switch`。见下方 §1。 |
+| **桌面客户端**(嘉立创EDA专业版 App) | ❌ 不能自动 | chrome-devtools MCP 控制的是浏览器,**够不到桌面 App 窗口**——没有 API 能让 agent 替用户点开工程。**必须请用户在 App 里手动打开/切换目标工程**,之后连接器照常附着,CLI 动作照常工作。 |
+
+**判定**:`easyeda daemon health` 的 `windows[].easyedaVersion` 能连上但 `context` 不是
+目标工程,且你**无法用 chrome-devtools 把它切过去**(navigate 无效果 = 大概率桌面版)
+→ 停下来请用户手动切,别在桌面版上空跑 navigate。跨工程抄电路(如抄立创官方板的
+自动下载电路)时尤其注意:桌面版下要让用户先把那块参考板打开。
 
 ## 0. 判定当前环境
 

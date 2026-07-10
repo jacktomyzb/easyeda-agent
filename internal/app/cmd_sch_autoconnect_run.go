@@ -178,8 +178,35 @@ func buildScene(result map[string]any) acScene {
 			}
 		}
 	}
+	scene.Wires = buildWireSegments(result)
 	scene.TitleBlock, scene.TitleBlockProvisional = titleBlockKeepout(sheet)
 	return scene
+}
+
+// buildWireSegments parses the extension's `wires` payload (issue #64) into the
+// scene's wire segments. The extension emits one entry per polyline edge:
+// {x0,y0,x1,y1, net}. Missing/malformed entries are skipped so a partial payload
+// degrades gracefully rather than panicking the scorer.
+func buildWireSegments(result map[string]any) []wireSegment {
+	raw, _ := result["wires"].([]any)
+	if len(raw) == 0 {
+		return nil
+	}
+	segs := make([]wireSegment, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		segs = append(segs, wireSegment{
+			X0:  asFloat(m["x0"]),
+			Y0:  asFloat(m["y0"]),
+			X1:  asFloat(m["x1"]),
+			Y1:  asFloat(m["y1"]),
+			Net: asString(m["net"]),
+		})
+	}
+	return segs
 }
 
 // titleBlockKeepout derives the title-block keep-out for the autoconnect scorer.
@@ -256,7 +283,10 @@ func runAutoconnect(cfg *appConfig, window string, conns []acConnSpec, rules aut
 	res, err := requestAction(cfg, "schematic.components.list", window, map[string]any{
 		"includeBBox": true,
 		"includePins": true,
-		"allPages":    allPages,
+		// includeWires attaches existing wire segments (issue #64) so the scorer can
+		// hard-reject any stub that would touch a foreign-net wire (silent merge).
+		"includeWires": true,
+		"allPages":     allPages,
 		// With --all-pages, parts on non-active pages come through pin-less; tagPages
 		// attributes each to its owning page so an off-page pin ref yields a precise
 		// `doc switch` hint instead of a misleading "not placed".
@@ -343,10 +373,21 @@ func runAutoconnect(cfg *appConfig, window string, conns []acConnSpec, rules aut
 			}
 		}
 
-		all := planConnection(pin, canonicalKind, scene, rules)
+		all := planConnection(pin, canonicalKind, c.Net, scene, rules)
 		selected := all[0]
 		cr.Selected = &selected
 		cr.Rejected = summarizeRejected(all, selected)
+
+		// Hard-reject guard (issue #64): if even the best candidate would cross a
+		// non-target pin or touch a foreign-net wire, EVERY direction/offset is a
+		// silent-short hazard. Refuse to place a stub — report it as a failure so a
+		// human resolves the layout instead of the tool creating a wrong connection.
+		if candidateHardRejected(selected) {
+			cr.Error = fmt.Sprintf("no safe candidate: every direction/offset would short (%s) — resolve the layout (move the part, clear the wire) and retry", dominantReason(selected))
+			report.OK = false
+			report.Connections = append(report.Connections, cr)
+			continue
+		}
 
 		if !dryRun {
 			payload := map[string]any{

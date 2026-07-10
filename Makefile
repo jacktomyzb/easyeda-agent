@@ -58,7 +58,7 @@ DEV_LDFLAGS := -X 'github.com/zhoushoujianwork/easyeda-agent/internal/version.Ve
 # Where `make install` drops the binary (matches install.sh's default).
 PREFIX ?= /usr/local
 
-build: ## build bin/easyeda (version-stamped via git describe)
+build: ## build bin/easyeda (version-stamped via git describe; embeds block library)
 	go build -ldflags "$(DEV_LDFLAGS)" -o bin/easyeda ./cmd/easyeda
 
 install: build ## build + install to $(PREFIX)/bin (default /usr/local/bin; may need sudo)

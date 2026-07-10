@@ -1,826 +1,854 @@
 {
-	"_doc": [
-		"Curated STANDARD PARTS for the easyeda-agent library-first workflow (器件标准化).",
-		"Place from here FIRST — it is deterministic, BOM-ready, and LCSC-orderable. Fall back",
-		"to schematic.library.search only for a category not listed here. Each part places via",
-		"schematic.component.place with { libraryUuid, uuid: deviceUuid }. The lcsc field is the",
-		"立创 C-number for direct ordering. All deviceUuid/lcsc values were captured from live",
-		"lib_Device.search and validated by placing on real boards (ESP32-S3 system + USB-C",
-		"power). Prefer JLC basic parts (basic:true) to avoid extended-part feeder fees.",
-		"When a needed category is missing, search it, pick the best candidate, then ADD it here",
-		"with its real C-number so the next design is reproducible."
-	],
-	"libraryUuid": "0819f05c4eef4c71ace90d822a990e87",
-	"parts": {
-		"mcu.esp32s3_wroom1": {
-			"value": "ESP32-S3-WROOM-1",
-			"mpn": "ESP32-S3-WROOM-1",
-			"lcsc": "C9900163599",
-			"manufacturer": "Espressif",
-			"deviceUuid": "ebc5227ec05f4bcbbb5581e49a5f7cc6",
-			"footprint": "WIRELM-SMD_ESP32-S3-WROOM-1",
-			"basic": false,
-			"desc": "ESP32-S3 Wi-Fi+BLE module (flash+xtal+antenna integrated)"
-		},
-		"ic.ch340c": {
-			"value": "CH340C",
-			"mpn": "CH340C",
-			"lcsc": "C84681",
-			"manufacturer": "WCH",
-			"deviceUuid": "4951b3094e3e48a7b4c8c708b64932e4",
-			"footprint": "SOP-16_L10.0-W3.9-P1.27-LS6.0-BL",
-			"basic": false,
-			"desc": "USB-to-UART bridge, SOP-16, no external crystal (built-in); V3 tied to VCC at 3.3V"
-		},
-		"conn.screw_terminal_2p": {
-			"value": "KF301-5.0-2P",
-			"mpn": "KF301-5.0-2P",
-			"lcsc": "C474881",
-			"manufacturer": "Cheng Du Kai Hong",
-			"deviceUuid": "41ddecaaf01b4c1aa92ec4bfe22149b7",
-			"footprint": "CONN-TH_P5.00_KF301-5.0-2P",
-			"basic": false,
-			"desc": "2-pin 5.0mm pitch screw terminal (external 5V input)"
-		},
-		"ldo.ams1117_3v3": {
-			"value": "AMS1117-3.3",
-			"mpn": "AMS1117-3.3",
-			"lcsc": "C6186",
-			"manufacturer": "AMS",
-			"deviceUuid": "9f9c6cb41c7449fd8acf96aceed2661a",
-			"footprint": "SOT-223-3",
-			"basic": false,
-			"desc": "5V→3.3V linear regulator, 1A, SOT-223"
-		},
-		"conn.usb_c_16p": {
-			"value": "TYPE-C-16P",
-			"mpn": "USB3.1TYPE-C16P",
-			"lcsc": "C9900012665",
-			"manufacturer": "Korean Hroparts",
-			"deviceUuid": "fafc5d2de09d4595b0cc7abedc0530e6",
-			"footprint": "USB-C-SMD_TYPE-C-16PIN",
-			"basic": false,
-			"desc": "USB Type-C 16-pin SMD receptacle (VBUS/GND/CC/DP/DN)"
-		},
-		"sw.tact_smd": {
-			"value": "TS-1088",
-			"mpn": "TS-1088-AR02016",
-			"lcsc": "C720477",
-			"manufacturer": "XUNPU",
-			"deviceUuid": "cff07d923b95482c818b184e98b80db7",
-			"footprint": "SW-SMD_L3.9-W3.0-P4.45",
-			"basic": false,
-			"desc": "SMD tactile push button (reset/boot)"
-		},
-		"res.10k_0402": {
-			"value": "10kΩ",
-			"mpn": "0402WGF1002TCE",
-			"lcsc": "C25744",
-			"manufacturer": "UNI-ROYAL",
-			"deviceUuid": "c3b9baa5ef2e4070a4c0f9e9cd04fe6e",
-			"footprint": "R0402",
-			"basic": true,
-			"desc": "10k 1% 0402 (pull-up/down)"
-		},
-		"res.5k1_0402": {
-			"value": "5.1kΩ",
-			"mpn": "0402WGF5101TCE",
-			"lcsc": "C25905",
-			"manufacturer": "UNI-ROYAL",
-			"deviceUuid": "ef1f93374e0c4079b48a2d1a3cec8f6b",
-			"footprint": "R0402",
-			"basic": true,
-			"desc": "5.1k 1% 0402 (USB-C CC pulldown)"
-		},
-		"res.330_0402": {
-			"value": "330Ω",
-			"mpn": "0402WGF3300TCE",
-			"lcsc": "C25104",
-			"manufacturer": "UNI-ROYAL",
-			"deviceUuid": "a60160c6e65140998078961749427162",
-			"footprint": "R0402",
-			"basic": true,
-			"desc": "330R 1% 0402 (LED current limit)"
-		},
-		"cap.100nf_0402": {
-			"value": "100nF",
-			"mpn": "CL05B104KO5NNNC",
-			"lcsc": "C1525",
-			"manufacturer": "SAMSUNG",
-			"deviceUuid": "87bb635d0b2f489a9f60e7cd225beb3c",
-			"footprint": "C0402",
-			"basic": true,
-			"desc": "100nF X7R 0402 (HF decoupling)"
-		},
-		"cap.10uf_0805": {
-			"value": "10µF",
-			"mpn": "GRM21BR61H106KE43L",
-			"lcsc": "C440198",
-			"manufacturer": "muRata",
-			"deviceUuid": "6e5726223dd84f70bc3b626fc7d1f72c",
-			"footprint": "C0805",
-			"basic": false,
-			"desc": "10µF 50V X5R 0805 (bulk decoupling)"
-		},
-		"cap.22uf_0805": {
-			"value": "22µF",
-			"mpn": "CL21A226MAQNNNE",
-			"lcsc": "C45783",
-			"manufacturer": "SAMSUNG",
-			"deviceUuid": "159c3da60be9490abf4e97599788a0d5",
-			"footprint": "C0805",
-			"basic": false,
-			"desc": "22µF 25V X5R 0805 (LDO output)"
-		},
-		"led.red_0805": {
-			"value": "RED",
-			"mpn": "KT-0805Y",
-			"lcsc": "C2296",
-			"manufacturer": "Hubei KENTO",
-			"deviceUuid": "06303f8c50b646d88d0dd08d2ec9692c",
-			"footprint": "LED0805-R-RD",
-			"basic": false,
-			"desc": "0805 indicator LED"
-		},
-		"ind.15uh_12x12mm": {
-			"value": "15µH",
-			"mpn": "YPRH1207C-150M",
-			"lcsc": "C22387937",
-			"deviceUuid": "bcfcdf636b8c49129584814defeb269b",
-			"package": "12x12mm",
-			"class": "ind",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"diode.b340ass34_sma": {
-			"value": "B340A/SS34",
-			"mpn": "B340A",
-			"lcsc": "C47283673",
-			"deviceUuid": "64c1acd8597c4b0ca569d84d1117b645",
-			"package": "SMA",
-			"class": "diode",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"diode.smbj33a_smb": {
-			"value": "SMBJ33A",
-			"mpn": "SMBJ33A",
-			"lcsc": "C726834",
-			"deviceUuid": "4e5e35f0bedc48efa4bdf3fe659de2df",
-			"package": "SMB",
-			"class": "diode",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"fuse.2a_1206": {
-			"value": "2A",
-			"mpn": "CFS12V6T2R0",
-			"lcsc": "C163132",
-			"deviceUuid": "dc120c572b1544619b5c0f3313259566",
-			"package": "1206",
-			"class": "fuse",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"bjt.pmos40v_sot23": {
-			"value": "P-MOS≥40V",
-			"mpn": "AP40P05",
-			"lcsc": "C2886385",
-			"deviceUuid": "a5b875b8efdd4240924292761b85b5ab",
-			"package": "SOT-23",
-			"class": "bjt",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"cap.10uf50v_1210": {
-			"value": "10µF/50V",
-			"mpn": "CS3225X7R106K500NRL",
-			"lcsc": "C2918502",
-			"deviceUuid": "b3393b158d5c431c9276b3204ed4bb2f",
-			"package": "1210",
-			"class": "cap",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"cap.100nf_0603": {
-			"value": "100nF",
-			"mpn": "CC0603KRX7R9BB104",
-			"lcsc": "C14663",
-			"deviceUuid": "96b39256cc3f4d80bd3b503deb4f3328",
-			"package": "0603",
-			"class": "cap",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"res.453k_0402": {
-			"value": "453k",
-			"mpn": "GR0402F453KTAG00",
-			"lcsc": "C49653416",
-			"deviceUuid": "e3c1e8857b4549ddac2bd93217c56ff0",
-			"package": "0402",
-			"class": "res",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"res.887k_0402": {
-			"value": "88.7k",
-			"mpn": "WR04X8872FTL",
-			"lcsc": "C170366",
-			"deviceUuid": "65cecbe588014ef9a202f25cfeb1111c",
-			"package": "0402",
-			"class": "res",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"res.162k_0402": {
-			"value": "162k",
-			"mpn": "GR0402F162KTAG00",
-			"lcsc": "C49654427",
-			"deviceUuid": "8280856062f84a9aac732e3406d34fc9",
-			"package": "0402",
-			"class": "res",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"res.47k_0402": {
-			"value": "4.7k",
-			"mpn": "0402WGF4701TCE",
-			"lcsc": "C25900",
-			"deviceUuid": "9b2474b02bb94569a00ded395421ea45",
-			"package": "0402",
-			"class": "res",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"cap.47nf_0402": {
-			"value": "4.7nF",
-			"mpn": "0402B472K500NT",
-			"lcsc": "C1538",
-			"deviceUuid": "88ba64913a9f4ffb9911e335cae85be6",
-			"package": "0402",
-			"class": "cap",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"cap.47pf_0402": {
-			"value": "47pF",
-			"mpn": "0402CG470J500NT",
-			"lcsc": "C1567",
-			"deviceUuid": "78a35e024f4443968767ed86ca57ecb7",
-			"package": "0402",
-			"class": "cap",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"res.523k_0402": {
-			"value": "52.3k",
-			"mpn": "WR04X5232FTL",
-			"lcsc": "C170333",
-			"deviceUuid": "c6bb55cf9b1342eeae23d37df21c5154",
-			"package": "0402",
-			"class": "res",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"res.178k_0402": {
-			"value": "1.78k",
-			"mpn": "0402WGF1781TCE",
-			"lcsc": "C113478",
-			"deviceUuid": "980c4ffcca354deabf7473c4b9e4b53f",
-			"package": "0402",
-			"class": "res",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"res.16k_0402": {
-			"value": "1.6k",
-			"mpn": "0402WGJ0162TCE",
-			"lcsc": "C25931",
-			"deviceUuid": "88a7aa8a00bd445fa2783b42a9836e26",
-			"package": "0402",
-			"class": "res",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"cap.1uf_0402": {
-			"value": "1µF",
-			"mpn": "CL05A105KA5NQNC",
-			"lcsc": "C52923",
-			"deviceUuid": "992c7b7e1330424dbc2a0bbf52aedab3",
-			"package": "0402",
-			"class": "cap",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"ind.1uh_1210": {
-			"value": "1µH",
-			"mpn": "NLCV32T-1R0M-EF",
-			"lcsc": "C250225",
-			"deviceUuid": "683f9c0af1e3404ca105328c4c4b94c3",
-			"package": "1210",
-			"class": "ind",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"res.665k_0402": {
-			"value": "665k",
-			"mpn": "SCR0402F665K",
-			"lcsc": "C3015995",
-			"deviceUuid": "2c0cec537087487c81f118ee2a719aac",
-			"package": "0402",
-			"class": "res",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"res.100k_0402": {
-			"value": "100k",
-			"mpn": "0402WGF1003TCE",
-			"lcsc": "C25741",
-			"deviceUuid": "acc294b6661948399f609b41c77ed19f",
-			"package": "0402",
-			"class": "res",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"ind.22uh_1210": {
-			"value": "2.2µH",
-			"mpn": "NLCV32T-2R2M-PF",
-			"lcsc": "C250183",
-			"deviceUuid": "7bd4ff00682f4a949fb4f4c7273ae493",
-			"package": "1210",
-			"class": "ind",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"res.453k_0402__2": {
-			"value": "45.3k",
-			"mpn": "GR0402F45K3TAG00",
-			"lcsc": "C49653562",
-			"deviceUuid": "7733547db9f24b2b98cb0ab3617f83a9",
-			"package": "0402",
-			"class": "res",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"conn.activegnssantennaufl_ipex": {
-			"value": "Active GNSS antenna (u.FL)",
-			"mpn": "U.FL-R-SMT-1",
-			"lcsc": "C9900006828",
-			"deviceUuid": "d4823212e40a402dbac1cc3a043936ec",
-			"package": "IPEX",
-			"class": "conn",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"bjt.s8050_sot23": {
-			"value": "S8050",
-			"mpn": "S8050 J3Y",
-			"lcsc": "C2146",
-			"deviceUuid": "3c065a4fa3474f809e6f1da8871401be",
-			"package": "SOT-23",
-			"class": "bjt",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"cap.18pf_0402": {
-			"value": "18pF",
-			"mpn": "0402CG180J500NT",
-			"lcsc": "C1549",
-			"deviceUuid": "9bdc81ad34c84ff492bdda9b7d9754c1",
-			"package": "0402",
-			"class": "cap",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"ic.pc817_sop4": {
-			"value": "PC817",
-			"mpn": "PC817",
-			"lcsc": "(onboard)",
-			"deviceUuid": "c6918731b6b742cdb577ca79180969f1",
-			"package": "SOP-4",
-			"class": "ic",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"res.1k_0402": {
-			"value": "1k",
-			"mpn": "0402WGF1001TCE",
-			"lcsc": "C11702",
-			"deviceUuid": "65abbad5fa864933b552e0f016ece0db",
-			"package": "0402",
-			"class": "res",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"diode.33v_sod323": {
-			"value": "3.3V",
-			"mpn": "BZT52C3V3S",
-			"lcsc": "C353527",
-			"deviceUuid": "f10bd037964a4c8cb3d5ea455b9801f5",
-			"package": "SOD-323",
-			"class": "diode",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"cap.100uf_tantc": {
-			"value": "100µF",
-			"mpn": "TAJC107K006RNJ",
-			"lcsc": "C63711",
-			"deviceUuid": "20fe05d399dd44e5ae12d10e5ef7dab1",
-			"package": "TANT-C",
-			"class": "cap",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"cap.33pf_0402": {
-			"value": "33pF",
-			"mpn": "0402CG330J500NT",
-			"lcsc": "C1562",
-			"deviceUuid": "d3ee21025f72499e9a597c3c0d67eafe",
-			"package": "0402",
-			"class": "cap",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"cap.10pf_0402": {
-			"value": "10pF",
-			"mpn": "CL05C100JB5NNNC",
-			"lcsc": "C32949",
-			"deviceUuid": "471f8a8c98844b45a65295f1cbe1ec67",
-			"package": "0402",
-			"class": "cap",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"conn.simcardsocket_sim6p": {
-			"value": "SIM card socket",
-			"mpn": "MICRO SIM 6P H1.35",
-			"lcsc": "C7529380",
-			"deviceUuid": "f75aa28fcd744feda89e2026287bdb75",
-			"package": "SIM-6P",
-			"class": "conn",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"conn.4gantenna_ipex": {
-			"value": "4G antenna",
-			"mpn": "IPEX-1",
-			"lcsc": "C2987682",
-			"deviceUuid": "e29f4faae95242efa3ba3d760f72f8d0",
-			"package": "IPEX",
-			"class": "conn",
-			"basic": false,
-			"desc": "auto-added from box-v2 realization 2026-06-26"
-		},
-		"mcu.esp32s3_chip": {
-			"value": null,
-			"mpn": "ESP32-S3",
-			"lcsc": "C2913192",
-			"manufacturer": "ESPRESSIF(乐鑫)",
-			"deviceUuid": "9e0ed3f3b23744baaa755898c300ed66",
-			"footprint": "QFN-56_L7.0-W7.0-P0.40-TL-EP4.0",
-			"basic": false,
-			"desc": ""
-		},
-		"ic.w25q64_flash": {
-			"value": null,
-			"mpn": "W25Q64JVSSIQ",
-			"lcsc": "C179171",
-			"manufacturer": "Winbond(华邦)",
-			"deviceUuid": "da24d6cf9cb64b0281929764ad5a4ad8",
-			"footprint": "SOIC-8_L5.3-W5.3-P1.27-LS8.0-BL",
-			"basic": false,
-			"desc": ""
-		},
-		"xtal.40mhz_3225_12pf": {
-			"value": "40MHz",
-			"mpn": "40MHZ/3225/12PF/10PPM",
-			"lcsc": "C47089401",
-			"manufacturer": "CJ(江苏长电/长晶)",
-			"deviceUuid": "623e113eed364ff4b720c853614bbbb0",
-			"footprint": "CRYSTAL-SMD_4P-L3.2-W2.5-BL",
-			"basic": false,
-			"desc": ""
-		},
-		"xtal.26mhz_3225_10pf": {
-			"value": "26MHz",
-			"mpn": "NX3225GA-26MHZ-TI",
-			"lcsc": "C1985752",
-			"manufacturer": "NDK",
-			"deviceUuid": "c28fabaf6b0c416688ded0228ebedfdc",
-			"footprint": "CRYSTAL-SMD_4P-L3.2-W2.5-BL",
-			"basic": false,
-			"desc": ""
-		},
-		"ic.cc1101_qfn20": {
-			"value": null,
-			"mpn": "CC1101RGPT",
-			"lcsc": "C2654650",
-			"manufacturer": "TI(德州仪器)",
-			"deviceUuid": "3f683812a391434c99cde1617a5f4014",
-			"footprint": "QFN-20_L4.0-W4.0-P0.50-BL-EP2.4",
-			"basic": false,
-			"desc": ""
-		},
-		"ic.sp3485_sop8": {
-			"value": null,
-			"mpn": "SP3485EN-L/TR",
-			"lcsc": "C8963",
-			"manufacturer": "MaxLinear(迈凌)",
-			"deviceUuid": "b117181a324c401c8efb877412bc34c2",
-			"footprint": "SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL",
-			"basic": false,
-			"desc": ""
-		},
-		"ic.mp1584en_buck": {
-			"value": null,
-			"mpn": "MP1584EN-LF",
-			"lcsc": "C21999497",
-			"manufacturer": "MPS(芯源)",
-			"deviceUuid": "fdf01fb89a0041b7ac601641e27ada0f",
-			"footprint": "SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL-EP3.3-1",
-			"basic": false,
-			"desc": ""
-		},
-		"conn.ufl_ipex": {
-			"value": "6GHz",
-			"mpn": "U.FL-R-SMT(10)",
-			"lcsc": "C434808",
-			"manufacturer": "HRS(广濑)",
-			"deviceUuid": "baac005597c04811b289654b69dad396",
-			"footprint": "ANT-SMD_U.FL-R-SMT10",
-			"basic": false,
-			"desc": ""
-		},
-		"conn.tf_socket_pushpush": {
-			"value": null,
-			"mpn": "TF-5010-03自弹卡座",
-			"lcsc": "C9900003603",
-			"manufacturer": "",
-			"deviceUuid": "0985e4a7bda549ab95e6455dfb8eabd4",
-			"footprint": "TF-SMD_TF-012",
-			"basic": false,
-			"desc": ""
-		},
-		"conn.terminal_3p_508": {
-			"value": null,
-			"mpn": "LC-3P-S-5.08-W",
-			"lcsc": "C9900019072",
-			"manufacturer": "",
-			"deviceUuid": "d1d3e801c5c6433ea8cbdc9bd2e1b973",
-			"footprint": "CONN-TH_3P-P5.08_2EHDR-03P",
-			"basic": false,
-			"desc": ""
-		},
-		"conn.sip4_254": {
-			"value": null,
-			"mpn": "SIP4",
-			"lcsc": "C9900010184",
-			"manufacturer": "",
-			"deviceUuid": "5b6c1e0431574187983e99df44da4a63",
-			"footprint": "HDR-TH_4P-P2.54-V-M-3",
-			"basic": false,
-			"desc": ""
-		},
-		"ic.xl1509_5v_buck": {
-			"value": null,
-			"mpn": "XL1509-5.0E1",
-			"lcsc": "C61063",
-			"manufacturer": "XLSEMI(芯龙)",
-			"deviceUuid": "aa38039ffb7144df89b006eb6329c5ad",
-			"footprint": "SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL",
-			"basic": false,
-			"desc": ""
-		},
-		"diode.ss34_sma": {
-			"value": null,
-			"mpn": "SS34",
-			"lcsc": "C8678",
-			"manufacturer": "MDD(辰达半导体)",
-			"deviceUuid": "009407eaaa604eb9b6f73cc3868f316d",
-			"footprint": "SMA_L4.3-W2.6-LS5.2-RD",
-			"basic": false,
-			"desc": ""
-		},
-		"ind.68uh_3a": {
-			"value": "68uH",
-			"mpn": "CYH125-68UH",
-			"lcsc": "C7431083",
-			"manufacturer": "SHOU HAN(首韩)",
-			"deviceUuid": "ee8310b61c1745a59168f90e371658b2",
-			"footprint": "IND-SMD_L12.5-W12.5",
-			"basic": false,
-			"desc": ""
-		},
-		"cap.220p_0402": {
-			"value": "220pF",
-			"mpn": "0402B221K500NT",
-			"lcsc": "C1530",
-			"manufacturer": "FH(风华)",
-			"deviceUuid": "9107c10522464a9f937b03120c81f81e",
-			"footprint": "C0402",
-			"basic": false,
-			"desc": "容值:220pF;精度:±10%;额定电压:50V;温度系数:X7R;"
-		},
-		"cap.10n_0402": {
-			"value": "10nF",
-			"mpn": "CL05B103KB5NNNC",
-			"lcsc": "C15195",
-			"manufacturer": "SAMSUNG(三星)",
-			"deviceUuid": "8336204f19ca418294856efd9d6f6580",
-			"footprint": "C0402",
-			"basic": false,
-			"desc": "容值:10nF;精度:±10%;额定电压:50V;温度系数:X7R;"
-		},
-		"cap.12p_0402": {
-			"value": "12pF",
-			"mpn": "0402CG120J500NT",
-			"lcsc": "C1547",
-			"manufacturer": "FH(风华)",
-			"deviceUuid": "e905fbae89674448b731f2bb70b25e7a",
-			"footprint": "C0402",
-			"basic": false,
-			"desc": "容值:12pF;精度:±5%;额定电压:50V;温度系数:C0G;"
-		},
-		"cap.15p_0402": {
-			"value": "15pF",
-			"mpn": "0402CG150J500NT",
-			"lcsc": "C1548",
-			"manufacturer": "FH(风华)",
-			"deviceUuid": "a2c156947c7646728bef570483cc98db",
-			"footprint": "C0402",
-			"basic": false,
-			"desc": "容值:15pF;精度:±5%;额定电压:50V;温度系数:C0G;"
-		},
-		"fb.blm15hg102": {
-			"value": "BLM15HG102SN1D",
-			"mpn": "BLM15HG102SN1D",
-			"lcsc": "C76889",
-			"manufacturer": "muRata(村田)",
-			"deviceUuid": "c3bcf8c29f43413dace7f0d8ec5c57ab",
-			"footprint": "L0402",
-			"basic": false,
-			"desc": "阻抗@频率:1kΩ@100MHz;误差:±25%;直流电阻(DCR):1.1Ω;"
-		},
-		"tvs.sm712_sot23": {
-			"value": "PSM712-LF-T7",
-			"mpn": "PSM712-LF-T7",
-			"lcsc": "C32677",
-			"manufacturer": "PROTEK",
-			"deviceUuid": "46f638b2935c42718f09eb74f6058737",
-			"footprint": "SOT-23-3_L3.0-W1.7-P0.95-LS2.9-BR",
-			"basic": false,
-			"desc": "极性:单向;反向截止电压(Vrwm):12V;钳位电压:19V;峰值脉冲电流(Ipp):34A@8/20us；30A@8/20us;峰值脉冲功率(Ppp):600W@8/20us;击穿电压(VBR):13.3V;"
-		},
-		"res.15k_0402": {
-			"value": "15kΩ",
-			"mpn": "0402WGF1502TCE",
-			"lcsc": "C25756",
-			"manufacturer": "UNI-ROYAL(厚声)",
-			"deviceUuid": "6d104587f1cd4b509c6a5fb272570507",
-			"footprint": "R0402",
-			"basic": false,
-			"desc": "电阻类型:厚膜电阻;阻值:15kΩ;精度:±1%;功率:62.5mW;最大工作电压:50V;温度系数:±100ppm/℃;"
-		},
-		"res.0r_0402": {
-			"value": "0Ω",
-			"mpn": "0402WGF0000TCE",
-			"lcsc": "C17168",
-			"manufacturer": "UNI-ROYAL(厚声)",
-			"deviceUuid": "b4609725881a44fab1d65d4001f053a7",
-			"footprint": "R0402",
-			"basic": false,
-			"desc": "电阻类型:厚膜电阻;阻值:0Ω;精度:±1%;功率:62.5mW;工作电压:50V;温度系数:±800ppm/℃;"
-		},
-		"res.120r_1206": {
-			"value": "120Ω",
-			"mpn": "1206W4F1200T5E",
-			"lcsc": "C17909",
-			"manufacturer": "UNI-ROYAL(厚声)",
-			"deviceUuid": "ed04490edc2d4d7b8e55ab3d0d65529f",
-			"footprint": "R1206",
-			"basic": false,
-			"desc": "电阻类型:厚膜电阻;阻值:120Ω;精度:±1%;功率:250mW;工作电压:200V;温度系数:±100ppm/℃;"
-		},
-		"cap.3p9_0402": {
-			"value": "3.9pF",
-			"mpn": "0402CG3R9C500NT",
-			"lcsc": "C1566",
-			"manufacturer": "FH(风华)",
-			"deviceUuid": "1e9940a1dbb24edb885acb4f35cc29e5",
-			"footprint": "C0402",
-			"basic": false,
-			"desc": "容值:3.9pF;额定电压:50V;温度系数:C0G;"
-		},
-		"cap.8p2_0402": {
-			"value": "8.2pF",
-			"mpn": "0402CG8R2C500NT",
-			"lcsc": "C1579",
-			"manufacturer": "FH(风华)",
-			"deviceUuid": "0c953dfc0e5247cfbde4bf0c3e97e8ee",
-			"footprint": "C0402",
-			"basic": false,
-			"desc": "容值:8.2pF;额定电压:50V;温度系数:C0G;"
-		},
-		"cap.5p6_0402": {
-			"value": "5.6pF",
-			"mpn": "0402CG5R6C500NT",
-			"lcsc": "C1574",
-			"manufacturer": "FH(风华)",
-			"deviceUuid": "4cb22463198f486f84b19ed1a4b231ff",
-			"footprint": "C0402",
-			"basic": false,
-			"desc": "容值:5.6pF;额定电压:50V;温度系数:C0G;"
-		},
-		"cap.1p5_0402": {
-			"value": "1.5pF",
-			"mpn": "0402CG1R5C500NT",
-			"lcsc": "C1552",
-			"manufacturer": "FH(风华)",
-			"deviceUuid": "0b1f83e4b60641bdb1242dcf97dc983b",
-			"footprint": "C0402",
-			"basic": false,
-			"desc": "容值:1.5pF;额定电压:50V;温度系数:C0G;"
-		},
-		"ind.27nh_0402": {
-			"value": "27nH",
-			"mpn": "LQG15HS27NJ02D",
-			"lcsc": "C12669",
-			"manufacturer": "muRata(村田)",
-			"deviceUuid": "bdc3fa172f40479798c05b43c41aa262",
-			"footprint": "L0402-RD",
-			"basic": false,
-			"desc": "电感值:27nH;精度:±5%;额定电流:350mA;饱和电流(Isat):-;直流电阻(DCR):460mΩ;"
-		},
-		"ind.22nh_0402": {
-			"value": "22nH",
-			"mpn": "LQG15HS22NJ02D",
-			"lcsc": "C12670",
-			"manufacturer": "muRata(村田)",
-			"deviceUuid": "f541cd456b0542289a6b53d319884cb9",
-			"footprint": "L0402",
-			"basic": false,
-			"desc": "电感值:22nH;精度:±5%;额定电流:350mA;饱和电流(Isat):-;直流电阻(DCR):420mΩ;"
-		},
-		"ind.2n0_0402": {
-			"value": "2nH",
-			"mpn": "LQG15HS2N0S02D",
-			"lcsc": "C18216",
-			"manufacturer": "muRata(村田)",
-			"deviceUuid": "5febecfc5b0d48148594fd10c099123d",
-			"footprint": "L0402",
-			"basic": false,
-			"desc": "电感值:2nH;精度:-;额定电流:900mA;饱和电流(Isat):-;直流电阻(DCR):90mΩ;"
-		},
-		"res.680r_0402": {
-			"value": "680Ω",
-			"mpn": "0402WGF6800TCE",
-			"lcsc": "C25130",
-			"manufacturer": "UNI-ROYAL(厚声)",
-			"deviceUuid": "db0fa956af67488fb236dcebfd766801",
-			"footprint": "R0402",
-			"basic": false,
-			"desc": "电阻类型:厚膜电阻;阻值:680Ω;精度:±1%;功率:62.5mW;工作电压:50V;温度系数:±100ppm/℃;"
-		},
-		"res.56k_0402": {
-			"value": "56kΩ",
-			"mpn": "0402WGF5602TCE",
-			"lcsc": "C25796",
-			"manufacturer": "UNI-ROYAL(厚声)",
-			"deviceUuid": "0d85e42011ec4910b1749e936b037dd7",
-			"footprint": "R0402",
-			"basic": false,
-			"desc": "电阻类型:厚膜电阻;阻值:56kΩ;精度:±1%;功率:62.5mW;工作电压:50V;温度系数:±100ppm/℃;"
-		},
-		"cap.470uf35v_smd": {
-			"value": "CAP,铝电解电容,470UF,7*12",
-			"mpn": "CAP,铝电解电容,470UF,7*12",
-			"lcsc": "C9900003002",
-			"manufacturer": "",
-			"deviceUuid": "5dbc405640c0427b85363c187acb124e",
-			"footprint": "CAP-TH_BD6.3-P2.50-D0.5-FD",
-			"basic": false,
-			"desc": ""
-		},
-		"cap.220uf35v_smd": {
-			"value": "220uF 16V 铝电解电容",
-			"mpn": "220uF 16V 铝电解电容",
-			"lcsc": "C9900003178",
-			"manufacturer": "",
-			"deviceUuid": "eb6a58bf7df54b73a54f42bfacb3a5e1",
-			"footprint": "CAP-SMD_BD6.3-L6.6-W6.6-LS7.4-FD",
-			"basic": false,
-			"desc": ""
-		},
-		"conn.sip2_254": {
-			"value": null,
-			"mpn": "SIP2-2.54mm单排针",
-			"lcsc": "C9900009052",
-			"manufacturer": "",
-			"deviceUuid": "232ae76e43074f68bf72aebb8ada545c",
-			"footprint": "HDR-TH_2P-P2.54-V-M-1",
-			"basic": false,
-			"desc": ""
-		}
-	}
+  "_doc": [
+    "Curated STANDARD PARTS for the easyeda-agent library-first workflow (器件标准化).",
+    "Place from here FIRST — it is deterministic, BOM-ready, and LCSC-orderable. Fall back",
+    "to schematic.library.search only for a category not listed here. Each part places via",
+    "schematic.component.place with { libraryUuid, uuid: deviceUuid }. The lcsc field is the",
+    "立创 C-number for direct ordering. All deviceUuid/lcsc values were captured from live",
+    "lib_Device.search and validated by placing on real boards (ESP32-S3 system + USB-C",
+    "power). Prefer JLC basic parts (basic:true) to avoid extended-part feeder fees.",
+    "When a needed category is missing, search it, pick the best candidate, then ADD it here",
+    "with its real C-number so the next design is reproducible."
+  ],
+  "libraryUuid": "0819f05c4eef4c71ace90d822a990e87",
+  "parts": {
+    "mcu.esp32s3_wroom1": {
+      "value": "ESP32-S3-WROOM-1",
+      "mpn": "ESP32-S3-WROOM-1",
+      "lcsc": "C9900163599",
+      "manufacturer": "Espressif",
+      "deviceUuid": "ebc5227ec05f4bcbbb5581e49a5f7cc6",
+      "footprint": "WIRELM-SMD_ESP32-S3-WROOM-1",
+      "basic": false,
+      "desc": "ESP32-S3 Wi-Fi+BLE module (flash+xtal+antenna integrated)"
+    },
+    "ic.ch340c": {
+      "value": "CH340C",
+      "mpn": "CH340C",
+      "lcsc": "C84681",
+      "manufacturer": "WCH",
+      "deviceUuid": "4951b3094e3e48a7b4c8c708b64932e4",
+      "footprint": "SOP-16_L10.0-W3.9-P1.27-LS6.0-BL",
+      "basic": false,
+      "desc": "USB-to-UART bridge, SOP-16, no external crystal (built-in); V3 tied to VCC at 3.3V"
+    },
+    "conn.screw_terminal_2p": {
+      "value": "KF301-5.0-2P",
+      "mpn": "KF301-5.0-2P",
+      "lcsc": "C474881",
+      "manufacturer": "Cheng Du Kai Hong",
+      "deviceUuid": "41ddecaaf01b4c1aa92ec4bfe22149b7",
+      "footprint": "CONN-TH_P5.00_KF301-5.0-2P",
+      "basic": false,
+      "desc": "2-pin 5.0mm pitch screw terminal (external 5V input)"
+    },
+    "ldo.ams1117_3v3": {
+      "value": "AMS1117-3.3",
+      "mpn": "AMS1117-3.3",
+      "lcsc": "C6186",
+      "manufacturer": "AMS",
+      "deviceUuid": "9f9c6cb41c7449fd8acf96aceed2661a",
+      "footprint": "SOT-223-3",
+      "basic": false,
+      "desc": "5V→3.3V linear regulator, 1A, SOT-223"
+    },
+    "conn.usb_c_16p": {
+      "value": "TYPE-C-16P",
+      "mpn": "USB3.1TYPE-C16P",
+      "lcsc": "C9900012665",
+      "manufacturer": "Korean Hroparts",
+      "deviceUuid": "fafc5d2de09d4595b0cc7abedc0530e6",
+      "footprint": "USB-C-SMD_TYPE-C-16PIN",
+      "basic": false,
+      "desc": "USB Type-C 16-pin SMD receptacle (VBUS/GND/CC/DP/DN)"
+    },
+    "sw.tact_smd": {
+      "value": "TS-1088",
+      "mpn": "TS-1088-AR02016",
+      "lcsc": "C720477",
+      "manufacturer": "XUNPU",
+      "deviceUuid": "cff07d923b95482c818b184e98b80db7",
+      "footprint": "SW-SMD_L3.9-W3.0-P4.45",
+      "basic": false,
+      "desc": "SMD tactile push button (reset/boot)"
+    },
+    "res.10k_0402": {
+      "value": "10kΩ",
+      "mpn": "0402WGF1002TCE",
+      "lcsc": "C25744",
+      "manufacturer": "UNI-ROYAL",
+      "deviceUuid": "c3b9baa5ef2e4070a4c0f9e9cd04fe6e",
+      "footprint": "R0402",
+      "basic": true,
+      "desc": "10k 1% 0402 (pull-up/down)"
+    },
+    "res.4k7_0402": {
+      "value": "4.7kΩ",
+      "mpn": "0402WGJ0472TCE",
+      "lcsc": "C25940",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "deviceUuid": "3c6cd697d7c742bc8177ac96f91ce532",
+      "footprint": "R0402",
+      "basic": true,
+      "desc": "4.7k 0402 —— 三极管基极串阻/通用上拉;立创·ESP32S3 开发板自动下载电路用值"
+    },
+    "bjt.mmbt3904_sot23": {
+      "value": "MMBT3904",
+      "mpn": "MMBT3904",
+      "lcsc": "C20526",
+      "manufacturer": "长晶(CJ)",
+      "deviceUuid": "e84258a7c4c54ed6b903438d47c3f671",
+      "footprint": "SOT-23",
+      "basic": true,
+      "desc": "NPN 40V 200mA 通用三极管(自动下载/电平转换);立创官方板自动下载电路用件,等效 S8050"
+    },
+    "res.5k1_0402": {
+      "value": "5.1kΩ",
+      "mpn": "0402WGF5101TCE",
+      "lcsc": "C25905",
+      "manufacturer": "UNI-ROYAL",
+      "deviceUuid": "ef1f93374e0c4079b48a2d1a3cec8f6b",
+      "footprint": "R0402",
+      "basic": true,
+      "desc": "5.1k 1% 0402 (USB-C CC pulldown)"
+    },
+    "res.330_0402": {
+      "value": "330Ω",
+      "mpn": "0402WGF3300TCE",
+      "lcsc": "C25104",
+      "manufacturer": "UNI-ROYAL",
+      "deviceUuid": "a60160c6e65140998078961749427162",
+      "footprint": "R0402",
+      "basic": true,
+      "desc": "330R 1% 0402 (LED current limit)"
+    },
+    "cap.100nf_0402": {
+      "value": "100nF",
+      "mpn": "CL05B104KO5NNNC",
+      "lcsc": "C1525",
+      "manufacturer": "SAMSUNG",
+      "deviceUuid": "87bb635d0b2f489a9f60e7cd225beb3c",
+      "footprint": "C0402",
+      "basic": true,
+      "desc": "100nF X7R 0402 (HF decoupling)"
+    },
+    "cap.10uf_0805": {
+      "value": "10µF",
+      "mpn": "GRM21BR61H106KE43L",
+      "lcsc": "C440198",
+      "manufacturer": "muRata",
+      "deviceUuid": "6e5726223dd84f70bc3b626fc7d1f72c",
+      "footprint": "C0805",
+      "basic": false,
+      "desc": "10µF 50V X5R 0805 (bulk decoupling)"
+    },
+    "cap.22uf_0805": {
+      "value": "22µF",
+      "mpn": "CL21A226MAQNNNE",
+      "lcsc": "C45783",
+      "manufacturer": "SAMSUNG",
+      "deviceUuid": "159c3da60be9490abf4e97599788a0d5",
+      "footprint": "C0805",
+      "basic": false,
+      "desc": "22µF 25V X5R 0805 (LDO output)"
+    },
+    "led.red_0805": {
+      "value": "RED",
+      "mpn": "KT-0805Y",
+      "lcsc": "C2296",
+      "manufacturer": "Hubei KENTO",
+      "deviceUuid": "06303f8c50b646d88d0dd08d2ec9692c",
+      "footprint": "LED0805-R-RD",
+      "basic": false,
+      "desc": "0805 indicator LED"
+    },
+    "ind.15uh_12x12mm": {
+      "value": "15µH",
+      "mpn": "YPRH1207C-150M",
+      "lcsc": "C22387937",
+      "deviceUuid": "bcfcdf636b8c49129584814defeb269b",
+      "package": "12x12mm",
+      "class": "ind",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "diode.b340ass34_sma": {
+      "value": "B340A/SS34",
+      "mpn": "B340A",
+      "lcsc": "C47283673",
+      "deviceUuid": "64c1acd8597c4b0ca569d84d1117b645",
+      "package": "SMA",
+      "class": "diode",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "diode.smbj33a_smb": {
+      "value": "SMBJ33A",
+      "mpn": "SMBJ33A",
+      "lcsc": "C726834",
+      "deviceUuid": "4e5e35f0bedc48efa4bdf3fe659de2df",
+      "package": "SMB",
+      "class": "diode",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "fuse.2a_1206": {
+      "value": "2A",
+      "mpn": "CFS12V6T2R0",
+      "lcsc": "C163132",
+      "deviceUuid": "dc120c572b1544619b5c0f3313259566",
+      "package": "1206",
+      "class": "fuse",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "bjt.pmos40v_sot23": {
+      "value": "P-MOS≥40V",
+      "mpn": "AP40P05",
+      "lcsc": "C2886385",
+      "deviceUuid": "a5b875b8efdd4240924292761b85b5ab",
+      "package": "SOT-23",
+      "class": "bjt",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "cap.10uf50v_1210": {
+      "value": "10µF/50V",
+      "mpn": "CS3225X7R106K500NRL",
+      "lcsc": "C2918502",
+      "deviceUuid": "b3393b158d5c431c9276b3204ed4bb2f",
+      "package": "1210",
+      "class": "cap",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "cap.100nf_0603": {
+      "value": "100nF",
+      "mpn": "CC0603KRX7R9BB104",
+      "lcsc": "C14663",
+      "deviceUuid": "96b39256cc3f4d80bd3b503deb4f3328",
+      "package": "0603",
+      "class": "cap",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "res.453k_0402": {
+      "value": "453k",
+      "mpn": "GR0402F453KTAG00",
+      "lcsc": "C49653416",
+      "deviceUuid": "e3c1e8857b4549ddac2bd93217c56ff0",
+      "package": "0402",
+      "class": "res",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "res.887k_0402": {
+      "value": "88.7k",
+      "mpn": "WR04X8872FTL",
+      "lcsc": "C170366",
+      "deviceUuid": "65cecbe588014ef9a202f25cfeb1111c",
+      "package": "0402",
+      "class": "res",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "res.162k_0402": {
+      "value": "162k",
+      "mpn": "GR0402F162KTAG00",
+      "lcsc": "C49654427",
+      "deviceUuid": "8280856062f84a9aac732e3406d34fc9",
+      "package": "0402",
+      "class": "res",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "res.47k_0402": {
+      "value": "4.7k",
+      "mpn": "0402WGF4701TCE",
+      "lcsc": "C25900",
+      "deviceUuid": "9b2474b02bb94569a00ded395421ea45",
+      "package": "0402",
+      "class": "res",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "cap.47nf_0402": {
+      "value": "4.7nF",
+      "mpn": "0402B472K500NT",
+      "lcsc": "C1538",
+      "deviceUuid": "88ba64913a9f4ffb9911e335cae85be6",
+      "package": "0402",
+      "class": "cap",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "cap.47pf_0402": {
+      "value": "47pF",
+      "mpn": "0402CG470J500NT",
+      "lcsc": "C1567",
+      "deviceUuid": "78a35e024f4443968767ed86ca57ecb7",
+      "package": "0402",
+      "class": "cap",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "res.523k_0402": {
+      "value": "52.3k",
+      "mpn": "WR04X5232FTL",
+      "lcsc": "C170333",
+      "deviceUuid": "c6bb55cf9b1342eeae23d37df21c5154",
+      "package": "0402",
+      "class": "res",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "res.178k_0402": {
+      "value": "1.78k",
+      "mpn": "0402WGF1781TCE",
+      "lcsc": "C113478",
+      "deviceUuid": "980c4ffcca354deabf7473c4b9e4b53f",
+      "package": "0402",
+      "class": "res",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "res.16k_0402": {
+      "value": "1.6k",
+      "mpn": "0402WGJ0162TCE",
+      "lcsc": "C25931",
+      "deviceUuid": "88a7aa8a00bd445fa2783b42a9836e26",
+      "package": "0402",
+      "class": "res",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "cap.1uf_0402": {
+      "value": "1µF",
+      "mpn": "CL05A105KA5NQNC",
+      "lcsc": "C52923",
+      "deviceUuid": "992c7b7e1330424dbc2a0bbf52aedab3",
+      "package": "0402",
+      "class": "cap",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "ind.1uh_1210": {
+      "value": "1µH",
+      "mpn": "NLCV32T-1R0M-EF",
+      "lcsc": "C250225",
+      "deviceUuid": "683f9c0af1e3404ca105328c4c4b94c3",
+      "package": "1210",
+      "class": "ind",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "res.665k_0402": {
+      "value": "665k",
+      "mpn": "SCR0402F665K",
+      "lcsc": "C3015995",
+      "deviceUuid": "2c0cec537087487c81f118ee2a719aac",
+      "package": "0402",
+      "class": "res",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "res.100k_0402": {
+      "value": "100k",
+      "mpn": "0402WGF1003TCE",
+      "lcsc": "C25741",
+      "deviceUuid": "acc294b6661948399f609b41c77ed19f",
+      "package": "0402",
+      "class": "res",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "ind.22uh_1210": {
+      "value": "2.2µH",
+      "mpn": "NLCV32T-2R2M-PF",
+      "lcsc": "C250183",
+      "deviceUuid": "7bd4ff00682f4a949fb4f4c7273ae493",
+      "package": "1210",
+      "class": "ind",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "res.453k_0402__2": {
+      "value": "45.3k",
+      "mpn": "GR0402F45K3TAG00",
+      "lcsc": "C49653562",
+      "deviceUuid": "7733547db9f24b2b98cb0ab3617f83a9",
+      "package": "0402",
+      "class": "res",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "conn.activegnssantennaufl_ipex": {
+      "value": "Active GNSS antenna (u.FL)",
+      "mpn": "U.FL-R-SMT-1",
+      "lcsc": "C9900006828",
+      "deviceUuid": "d4823212e40a402dbac1cc3a043936ec",
+      "package": "IPEX",
+      "class": "conn",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "bjt.s8050_sot23": {
+      "value": "S8050",
+      "mpn": "S8050 J3Y",
+      "lcsc": "C2146",
+      "deviceUuid": "3c065a4fa3474f809e6f1da8871401be",
+      "package": "SOT-23",
+      "class": "bjt",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "cap.18pf_0402": {
+      "value": "18pF",
+      "mpn": "0402CG180J500NT",
+      "lcsc": "C1549",
+      "deviceUuid": "9bdc81ad34c84ff492bdda9b7d9754c1",
+      "package": "0402",
+      "class": "cap",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "ic.pc817_sop4": {
+      "value": "PC817",
+      "mpn": "PC817",
+      "lcsc": "(onboard)",
+      "deviceUuid": "c6918731b6b742cdb577ca79180969f1",
+      "package": "SOP-4",
+      "class": "ic",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "res.1k_0402": {
+      "value": "1k",
+      "mpn": "0402WGF1001TCE",
+      "lcsc": "C11702",
+      "deviceUuid": "65abbad5fa864933b552e0f016ece0db",
+      "package": "0402",
+      "class": "res",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "diode.33v_sod323": {
+      "value": "3.3V",
+      "mpn": "BZT52C3V3S",
+      "lcsc": "C353527",
+      "deviceUuid": "f10bd037964a4c8cb3d5ea455b9801f5",
+      "package": "SOD-323",
+      "class": "diode",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "cap.100uf_tantc": {
+      "value": "100µF",
+      "mpn": "TAJC107K006RNJ",
+      "lcsc": "C63711",
+      "deviceUuid": "20fe05d399dd44e5ae12d10e5ef7dab1",
+      "package": "TANT-C",
+      "class": "cap",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "cap.33pf_0402": {
+      "value": "33pF",
+      "mpn": "0402CG330J500NT",
+      "lcsc": "C1562",
+      "deviceUuid": "d3ee21025f72499e9a597c3c0d67eafe",
+      "package": "0402",
+      "class": "cap",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "cap.10pf_0402": {
+      "value": "10pF",
+      "mpn": "CL05C100JB5NNNC",
+      "lcsc": "C32949",
+      "deviceUuid": "471f8a8c98844b45a65295f1cbe1ec67",
+      "package": "0402",
+      "class": "cap",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "conn.simcardsocket_sim6p": {
+      "value": "SIM card socket",
+      "mpn": "MICRO SIM 6P H1.35",
+      "lcsc": "C7529380",
+      "deviceUuid": "f75aa28fcd744feda89e2026287bdb75",
+      "package": "SIM-6P",
+      "class": "conn",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "conn.4gantenna_ipex": {
+      "value": "4G antenna",
+      "mpn": "IPEX-1",
+      "lcsc": "C2987682",
+      "deviceUuid": "e29f4faae95242efa3ba3d760f72f8d0",
+      "package": "IPEX",
+      "class": "conn",
+      "basic": false,
+      "desc": "auto-added from box-v2 realization 2026-06-26"
+    },
+    "mcu.esp32s3_chip": {
+      "value": null,
+      "mpn": "ESP32-S3",
+      "lcsc": "C2913192",
+      "manufacturer": "ESPRESSIF(乐鑫)",
+      "deviceUuid": "9e0ed3f3b23744baaa755898c300ed66",
+      "footprint": "QFN-56_L7.0-W7.0-P0.40-TL-EP4.0",
+      "basic": false,
+      "desc": ""
+    },
+    "ic.w25q64_flash": {
+      "value": null,
+      "mpn": "W25Q64JVSSIQ",
+      "lcsc": "C179171",
+      "manufacturer": "Winbond(华邦)",
+      "deviceUuid": "da24d6cf9cb64b0281929764ad5a4ad8",
+      "footprint": "SOIC-8_L5.3-W5.3-P1.27-LS8.0-BL",
+      "basic": false,
+      "desc": ""
+    },
+    "xtal.40mhz_3225_12pf": {
+      "value": "40MHz",
+      "mpn": "40MHZ/3225/12PF/10PPM",
+      "lcsc": "C47089401",
+      "manufacturer": "CJ(江苏长电/长晶)",
+      "deviceUuid": "623e113eed364ff4b720c853614bbbb0",
+      "footprint": "CRYSTAL-SMD_4P-L3.2-W2.5-BL",
+      "basic": false,
+      "desc": ""
+    },
+    "xtal.26mhz_3225_10pf": {
+      "value": "26MHz",
+      "mpn": "NX3225GA-26MHZ-TI",
+      "lcsc": "C1985752",
+      "manufacturer": "NDK",
+      "deviceUuid": "c28fabaf6b0c416688ded0228ebedfdc",
+      "footprint": "CRYSTAL-SMD_4P-L3.2-W2.5-BL",
+      "basic": false,
+      "desc": ""
+    },
+    "ic.cc1101_qfn20": {
+      "value": null,
+      "mpn": "CC1101RGPT",
+      "lcsc": "C2654650",
+      "manufacturer": "TI(德州仪器)",
+      "deviceUuid": "3f683812a391434c99cde1617a5f4014",
+      "footprint": "QFN-20_L4.0-W4.0-P0.50-BL-EP2.4",
+      "basic": false,
+      "desc": ""
+    },
+    "ic.sp3485_sop8": {
+      "value": null,
+      "mpn": "SP3485EN-L/TR",
+      "lcsc": "C8963",
+      "manufacturer": "MaxLinear(迈凌)",
+      "deviceUuid": "b117181a324c401c8efb877412bc34c2",
+      "footprint": "SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL",
+      "basic": false,
+      "desc": ""
+    },
+    "ic.mp1584en_buck": {
+      "value": null,
+      "mpn": "MP1584EN-LF",
+      "lcsc": "C21999497",
+      "manufacturer": "MPS(芯源)",
+      "deviceUuid": "fdf01fb89a0041b7ac601641e27ada0f",
+      "footprint": "SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL-EP3.3-1",
+      "basic": false,
+      "desc": ""
+    },
+    "conn.ufl_ipex": {
+      "value": "6GHz",
+      "mpn": "U.FL-R-SMT(10)",
+      "lcsc": "C434808",
+      "manufacturer": "HRS(广濑)",
+      "deviceUuid": "baac005597c04811b289654b69dad396",
+      "footprint": "ANT-SMD_U.FL-R-SMT10",
+      "basic": false,
+      "desc": ""
+    },
+    "conn.tf_socket_pushpush": {
+      "value": null,
+      "mpn": "TF-5010-03自弹卡座",
+      "lcsc": "C9900003603",
+      "manufacturer": "",
+      "deviceUuid": "0985e4a7bda549ab95e6455dfb8eabd4",
+      "footprint": "TF-SMD_TF-012",
+      "basic": false,
+      "desc": ""
+    },
+    "conn.terminal_3p_508": {
+      "value": null,
+      "mpn": "LC-3P-S-5.08-W",
+      "lcsc": "C9900019072",
+      "manufacturer": "",
+      "deviceUuid": "d1d3e801c5c6433ea8cbdc9bd2e1b973",
+      "footprint": "CONN-TH_3P-P5.08_2EHDR-03P",
+      "basic": false,
+      "desc": ""
+    },
+    "conn.sip4_254": {
+      "value": null,
+      "mpn": "SIP4",
+      "lcsc": "C9900010184",
+      "manufacturer": "",
+      "deviceUuid": "5b6c1e0431574187983e99df44da4a63",
+      "footprint": "HDR-TH_4P-P2.54-V-M-3",
+      "basic": false,
+      "desc": ""
+    },
+    "ic.xl1509_5v_buck": {
+      "value": null,
+      "mpn": "XL1509-5.0E1",
+      "lcsc": "C61063",
+      "manufacturer": "XLSEMI(芯龙)",
+      "deviceUuid": "aa38039ffb7144df89b006eb6329c5ad",
+      "footprint": "SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL",
+      "basic": false,
+      "desc": ""
+    },
+    "diode.ss34_sma": {
+      "value": null,
+      "mpn": "SS34",
+      "lcsc": "C8678",
+      "manufacturer": "MDD(辰达半导体)",
+      "deviceUuid": "009407eaaa604eb9b6f73cc3868f316d",
+      "footprint": "SMA_L4.3-W2.6-LS5.2-RD",
+      "basic": false,
+      "desc": ""
+    },
+    "ind.68uh_3a": {
+      "value": "68uH",
+      "mpn": "CYH125-68UH",
+      "lcsc": "C7431083",
+      "manufacturer": "SHOU HAN(首韩)",
+      "deviceUuid": "ee8310b61c1745a59168f90e371658b2",
+      "footprint": "IND-SMD_L12.5-W12.5",
+      "basic": false,
+      "desc": ""
+    },
+    "cap.220p_0402": {
+      "value": "220pF",
+      "mpn": "0402B221K500NT",
+      "lcsc": "C1530",
+      "manufacturer": "FH(风华)",
+      "deviceUuid": "9107c10522464a9f937b03120c81f81e",
+      "footprint": "C0402",
+      "basic": false,
+      "desc": "容值:220pF;精度:±10%;额定电压:50V;温度系数:X7R;"
+    },
+    "cap.10n_0402": {
+      "value": "10nF",
+      "mpn": "CL05B103KB5NNNC",
+      "lcsc": "C15195",
+      "manufacturer": "SAMSUNG(三星)",
+      "deviceUuid": "8336204f19ca418294856efd9d6f6580",
+      "footprint": "C0402",
+      "basic": false,
+      "desc": "容值:10nF;精度:±10%;额定电压:50V;温度系数:X7R;"
+    },
+    "cap.12p_0402": {
+      "value": "12pF",
+      "mpn": "0402CG120J500NT",
+      "lcsc": "C1547",
+      "manufacturer": "FH(风华)",
+      "deviceUuid": "e905fbae89674448b731f2bb70b25e7a",
+      "footprint": "C0402",
+      "basic": false,
+      "desc": "容值:12pF;精度:±5%;额定电压:50V;温度系数:C0G;"
+    },
+    "cap.15p_0402": {
+      "value": "15pF",
+      "mpn": "0402CG150J500NT",
+      "lcsc": "C1548",
+      "manufacturer": "FH(风华)",
+      "deviceUuid": "a2c156947c7646728bef570483cc98db",
+      "footprint": "C0402",
+      "basic": false,
+      "desc": "容值:15pF;精度:±5%;额定电压:50V;温度系数:C0G;"
+    },
+    "fb.blm15hg102": {
+      "value": "BLM15HG102SN1D",
+      "mpn": "BLM15HG102SN1D",
+      "lcsc": "C76889",
+      "manufacturer": "muRata(村田)",
+      "deviceUuid": "c3bcf8c29f43413dace7f0d8ec5c57ab",
+      "footprint": "L0402",
+      "basic": false,
+      "desc": "阻抗@频率:1kΩ@100MHz;误差:±25%;直流电阻(DCR):1.1Ω;"
+    },
+    "tvs.sm712_sot23": {
+      "value": "PSM712-LF-T7",
+      "mpn": "PSM712-LF-T7",
+      "lcsc": "C32677",
+      "manufacturer": "PROTEK",
+      "deviceUuid": "46f638b2935c42718f09eb74f6058737",
+      "footprint": "SOT-23-3_L3.0-W1.7-P0.95-LS2.9-BR",
+      "basic": false,
+      "desc": "极性:单向;反向截止电压(Vrwm):12V;钳位电压:19V;峰值脉冲电流(Ipp):34A@8/20us；30A@8/20us;峰值脉冲功率(Ppp):600W@8/20us;击穿电压(VBR):13.3V;"
+    },
+    "res.15k_0402": {
+      "value": "15kΩ",
+      "mpn": "0402WGF1502TCE",
+      "lcsc": "C25756",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "deviceUuid": "6d104587f1cd4b509c6a5fb272570507",
+      "footprint": "R0402",
+      "basic": false,
+      "desc": "电阻类型:厚膜电阻;阻值:15kΩ;精度:±1%;功率:62.5mW;最大工作电压:50V;温度系数:±100ppm/℃;"
+    },
+    "res.0r_0402": {
+      "value": "0Ω",
+      "mpn": "0402WGF0000TCE",
+      "lcsc": "C17168",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "deviceUuid": "b4609725881a44fab1d65d4001f053a7",
+      "footprint": "R0402",
+      "basic": false,
+      "desc": "电阻类型:厚膜电阻;阻值:0Ω;精度:±1%;功率:62.5mW;工作电压:50V;温度系数:±800ppm/℃;"
+    },
+    "res.120r_1206": {
+      "value": "120Ω",
+      "mpn": "1206W4F1200T5E",
+      "lcsc": "C17909",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "deviceUuid": "ed04490edc2d4d7b8e55ab3d0d65529f",
+      "footprint": "R1206",
+      "basic": false,
+      "desc": "电阻类型:厚膜电阻;阻值:120Ω;精度:±1%;功率:250mW;工作电压:200V;温度系数:±100ppm/℃;"
+    },
+    "cap.3p9_0402": {
+      "value": "3.9pF",
+      "mpn": "0402CG3R9C500NT",
+      "lcsc": "C1566",
+      "manufacturer": "FH(风华)",
+      "deviceUuid": "1e9940a1dbb24edb885acb4f35cc29e5",
+      "footprint": "C0402",
+      "basic": false,
+      "desc": "容值:3.9pF;额定电压:50V;温度系数:C0G;"
+    },
+    "cap.8p2_0402": {
+      "value": "8.2pF",
+      "mpn": "0402CG8R2C500NT",
+      "lcsc": "C1579",
+      "manufacturer": "FH(风华)",
+      "deviceUuid": "0c953dfc0e5247cfbde4bf0c3e97e8ee",
+      "footprint": "C0402",
+      "basic": false,
+      "desc": "容值:8.2pF;额定电压:50V;温度系数:C0G;"
+    },
+    "cap.5p6_0402": {
+      "value": "5.6pF",
+      "mpn": "0402CG5R6C500NT",
+      "lcsc": "C1574",
+      "manufacturer": "FH(风华)",
+      "deviceUuid": "4cb22463198f486f84b19ed1a4b231ff",
+      "footprint": "C0402",
+      "basic": false,
+      "desc": "容值:5.6pF;额定电压:50V;温度系数:C0G;"
+    },
+    "cap.1p5_0402": {
+      "value": "1.5pF",
+      "mpn": "0402CG1R5C500NT",
+      "lcsc": "C1552",
+      "manufacturer": "FH(风华)",
+      "deviceUuid": "0b1f83e4b60641bdb1242dcf97dc983b",
+      "footprint": "C0402",
+      "basic": false,
+      "desc": "容值:1.5pF;额定电压:50V;温度系数:C0G;"
+    },
+    "ind.27nh_0402": {
+      "value": "27nH",
+      "mpn": "LQG15HS27NJ02D",
+      "lcsc": "C12669",
+      "manufacturer": "muRata(村田)",
+      "deviceUuid": "bdc3fa172f40479798c05b43c41aa262",
+      "footprint": "L0402-RD",
+      "basic": false,
+      "desc": "电感值:27nH;精度:±5%;额定电流:350mA;饱和电流(Isat):-;直流电阻(DCR):460mΩ;"
+    },
+    "ind.22nh_0402": {
+      "value": "22nH",
+      "mpn": "LQG15HS22NJ02D",
+      "lcsc": "C12670",
+      "manufacturer": "muRata(村田)",
+      "deviceUuid": "f541cd456b0542289a6b53d319884cb9",
+      "footprint": "L0402",
+      "basic": false,
+      "desc": "电感值:22nH;精度:±5%;额定电流:350mA;饱和电流(Isat):-;直流电阻(DCR):420mΩ;"
+    },
+    "ind.2n0_0402": {
+      "value": "2nH",
+      "mpn": "LQG15HS2N0S02D",
+      "lcsc": "C18216",
+      "manufacturer": "muRata(村田)",
+      "deviceUuid": "5febecfc5b0d48148594fd10c099123d",
+      "footprint": "L0402",
+      "basic": false,
+      "desc": "电感值:2nH;精度:-;额定电流:900mA;饱和电流(Isat):-;直流电阻(DCR):90mΩ;"
+    },
+    "res.680r_0402": {
+      "value": "680Ω",
+      "mpn": "0402WGF6800TCE",
+      "lcsc": "C25130",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "deviceUuid": "db0fa956af67488fb236dcebfd766801",
+      "footprint": "R0402",
+      "basic": false,
+      "desc": "电阻类型:厚膜电阻;阻值:680Ω;精度:±1%;功率:62.5mW;工作电压:50V;温度系数:±100ppm/℃;"
+    },
+    "res.56k_0402": {
+      "value": "56kΩ",
+      "mpn": "0402WGF5602TCE",
+      "lcsc": "C25796",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "deviceUuid": "0d85e42011ec4910b1749e936b037dd7",
+      "footprint": "R0402",
+      "basic": false,
+      "desc": "电阻类型:厚膜电阻;阻值:56kΩ;精度:±1%;功率:62.5mW;工作电压:50V;温度系数:±100ppm/℃;"
+    },
+    "cap.470uf35v_smd": {
+      "value": "CAP,铝电解电容,470UF,7*12",
+      "mpn": "CAP,铝电解电容,470UF,7*12",
+      "lcsc": "C9900003002",
+      "manufacturer": "",
+      "deviceUuid": "5dbc405640c0427b85363c187acb124e",
+      "footprint": "CAP-TH_BD6.3-P2.50-D0.5-FD",
+      "basic": false,
+      "desc": ""
+    },
+    "cap.220uf35v_smd": {
+      "value": "220uF 16V 铝电解电容",
+      "mpn": "220uF 16V 铝电解电容",
+      "lcsc": "C9900003178",
+      "manufacturer": "",
+      "deviceUuid": "eb6a58bf7df54b73a54f42bfacb3a5e1",
+      "footprint": "CAP-SMD_BD6.3-L6.6-W6.6-LS7.4-FD",
+      "basic": false,
+      "desc": ""
+    },
+    "conn.sip2_254": {
+      "value": null,
+      "mpn": "SIP2-2.54mm单排针",
+      "lcsc": "C9900009052",
+      "manufacturer": "",
+      "deviceUuid": "232ae76e43074f68bf72aebb8ada545c",
+      "footprint": "HDR-TH_2P-P2.54-V-M-1",
+      "basic": false,
+      "desc": ""
+    },
+    "mcu.esp32s3_wroom1u_n8": {
+      "deviceUuid": "42d7925a6d5b4bd19a4fdb3e9e174b14",
+      "libraryUuid": "0819f05c4eef4c71ace90d822a990e87",
+      "lcsc": "C2980297",
+      "name": "ESP32-S3-WROOM-1U-N8",
+      "package": "WIRELM-SMD_ESP32-S3-WROOM-1U",
+      "note": "IPEX 外引天线模组;v0.2 case001 主控;2026-07-09"
+    }
+  }
 }

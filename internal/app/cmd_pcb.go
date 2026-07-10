@@ -1756,6 +1756,91 @@ This is a SEED, not a final layout — verify with 'pcb drc'.
 		pcb.AddCommand(c)
 	}
 
+	// ── place-constrained ─────────────────────────────────────────────────
+	// Tiered constraint-driven placement (daemon-side; see pcb_place_constrained.go).
+	{
+		var mainPins int
+		var edgeMargin, partGap float64
+		var dryRun bool
+		c := &cobra.Command{
+			Use:   "place-constrained",
+			Short: "Tiered placement: edge-must parts (connectors/module/IPEX) → board edge + locked, then legalize the rest",
+			Long: `Constraint-driven TIERED placement — the fix for whack-a-mole layout.
+Position-constrained parts are placed FIRST and treated as fixed, then satellites
+are legalized around them, so a satellite pass can never push an edge connector
+off its edge. Tiers (highest priority first):
+
+  1. mounting holes            — obstacles (from 'pcb slot'), never moved
+  2. edge-must parts           — connectors (USB/terminal/card socket/IPEX) + RF
+                                 modules → snapped flush to their NEAREST board edge
+  3. main chips + crystals     — kept where they are (anchors)
+  4. satellites + LED/buttons  — spiral-legalized around the fixed set, avoiding holes
+
+Categories match the circuit-block library's placement hints (board_edge / user-facing;
+see internal/blocks/data/*.json). Works whether the board was block-assembled or
+built from the schematic — reads what's placed, not how. Run AFTER 'pcb outline-fit'
+(edges must be known) and BEFORE routing; layer-aware (BOTTOM parts stay on BOTTOM).
+A SEED — verify with 'pcb layout-lint'. --dry-run prints the plan.
+
+  easyeda pcb place-constrained --project X --dry-run
+  easyeda pcb place-constrained --project X`,
+			Args: cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				res, err := requestAction(cfg, "pcb.components.list", window,
+					map[string]any{"includePads": true, "includeBBox": true})
+				if err != nil {
+					return err
+				}
+				comps := parseCpComps(res.Result)
+				if len(comps) == 0 {
+					return fmt.Errorf("no components on the active PCB (run `pcb import-changes` / `pcb add-component` first)")
+				}
+				holes := readCpHoles(cfg, window)
+				opt := defaultCpOptions()
+				if mainPins > 0 {
+					opt.mainPins = mainPins
+				}
+				if edgeMargin > 0 {
+					opt.edgeMargin = edgeMargin
+				}
+				if partGap > 0 {
+					opt.partGap = partGap
+				}
+				moves, diags := planConstrainedPlace(comps, holes, opt)
+
+				applied := 0
+				var failures []map[string]any
+				if !dryRun {
+					for _, mv := range moves {
+						patch := map[string]any{"x": mv.NewX, "y": mv.NewY}
+						if mv.SetRot {
+							patch["rotation"] = mv.NewRot
+						}
+						if _, err := requestAction(cfg, "pcb.component.modify", window,
+							map[string]any{"primitiveId": mv.ID, "patch": patch}); err != nil {
+							failures = append(failures, map[string]any{"designator": mv.Designator, "error": err.Error()})
+							continue
+						}
+						applied++
+					}
+				}
+				out := map[string]any{
+					"ok": true, "dryRun": dryRun, "holes": len(holes),
+					"planned": len(moves), "applied": applied,
+					"moves": moves, "diags": diags, "failures": failures,
+				}
+				enc := json.NewEncoder(stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(out)
+			},
+		}
+		c.Flags().IntVar(&mainPins, "main-pins", 0, "distinct-pin threshold for a main chip (default 8)")
+		c.Flags().Float64Var(&edgeMargin, "edge-margin", 0, "gap between an edge part's bbox and the board edge (mil, default 45)")
+		c.Flags().Float64Var(&partGap, "part-gap", 0, "clearance between parts / part-to-hole (mil, default 14)")
+		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the placement plan without moving anything")
+		pcb.AddCommand(c)
+	}
+
 	// ── route-short ───────────────────────────────────────────────────────
 	// Short-trace self-routing (daemon-side; see pcb_shortroute.go).
 	{

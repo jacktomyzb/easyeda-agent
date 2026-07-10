@@ -75,9 +75,9 @@ func runSchDrc(cfg *appConfig, window string, strict, verbose, asJSON bool, stdo
 	}
 
 	if asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(rep); err != nil {
+		// Same {id,type,version,ok,result} envelope as the transparent commands,
+		// so the whole sch family parses uniformly (#66).
+		if err := encodeResultEnvelope(res, rep, stdout); err != nil {
 			return err
 		}
 	} else {

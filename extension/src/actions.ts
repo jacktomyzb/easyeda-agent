@@ -309,7 +309,10 @@ const schematicPageOpen: Handler = async (payload) => {
 	if (tabId === undefined) {
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Failed to open schematic page "${schematicPageUuid}".`);
 	}
-	return { result: { tabId } };
+	// openDocument returns before the page's primitives finish loading; wait for
+	// the data to settle so a read fired right after isn't empty/stale (#67).
+	const ready = await waitSchematicPageSettle();
+	return { result: { tabId, ready } };
 };
 
 // ─── Schematic / page管理 + 明细表 (title block) ───────────────────────
@@ -450,6 +453,44 @@ async function verifySchematicPageName(pageUuid: string, expected: string): Prom
 	return false;
 }
 
+/**
+ * Wait for a just-opened schematic page's data to settle. `openDocument`
+ * resolves as soon as the tab exists — BEFORE the page's primitives finish
+ * (re)loading — so a read fired right after would sample a half-loaded page
+ * (empty findings, stale mixed-page data — issue #67). The SDK exposes no
+ * load-complete signal, so we poll the active page's component count and treat
+ * two identical consecutive reads as settled. A non-empty stable count settles
+ * immediately; a stable 0 only settles after the full delay window, so a page
+ * mid-load (0 → N) is not mistaken for a genuinely empty page. Returns true if
+ * it settled, false on timeout — best-effort, read errors keep polling.
+ */
+async function waitSchematicPageSettle(): Promise<boolean> {
+	const delays = [0, 200, 300, 400, 500, 600]; // ~2s worst case
+	let last: number | undefined;
+	let sawStableEmpty = 0;
+	for (const wait of delays) {
+		if (wait > 0) {
+			await new Promise<void>(resolve => setTimeout(resolve, wait));
+		}
+		let count: number | undefined;
+		try {
+			const comps = await eda.sch_PrimitiveComponent.getAll();
+			count = Array.isArray(comps) ? comps.length : undefined;
+		}
+		catch {
+			count = undefined; // treat as not-yet-settled, keep polling
+		}
+		if (count === undefined) continue;
+		if (last !== undefined && last === count) {
+			if (count > 0) return true;
+			sawStableEmpty++;
+			if (sawStableEmpty >= 2) return true; // stable-empty confirmed
+		}
+		last = count;
+	}
+	return false;
+}
+
 /** Delete a schematic page. */
 const schematicPageDelete: Handler = async (payload) => {
 	const pageUuid = requireString(payload, 'pageUuid');
@@ -511,6 +552,11 @@ const schematicComponentsList: Handler = async (payload) => {
 	// (via eda.sch_Primitive.getPrimitivesBBox) so the agent / `sch layout-lint`
 	// can reason about size, spacing, and overlap — mirrors pcb.components.list.
 	const includeBBox = optionalBoolean(payload, 'includeBBox') === true;
+	// includeWires attaches existing wire segments {x0,y0,x1,y1,net} so `sch
+	// autoconnect` can hard-reject any candidate stub that would touch a foreign-net
+	// wire — EasyEDA merges nets at an endpoint-on-wire junction, a silent short the
+	// post-hoc DRC can't catch. See issue #64.
+	const includeWires = optionalBoolean(payload, 'includeWires') === true;
 	// tagPages attributes each component to its owning page (pageUuid/pageName).
 	// Opt-in because it briefly cycles the active page; autoconnect requests it so
 	// its off-page error can point at the exact `doc switch` target.
@@ -573,10 +619,24 @@ const schematicComponentsList: Handler = async (payload) => {
 		serialized.push(record);
 	}
 
-	return { result: { components: serialized, count: serialized.length } };
+	// Existing wire geometry for the autoconnect scorer (issue #64). Flatten every
+	// wire's polyline into per-edge segments tagged with the wire's net, so the Go
+	// side can hard-reject a stub that would touch a foreign-net wire.
+	const wires: Array<{ x0: number; y0: number; x1: number; y1: number; net: string }> = [];
+	if (includeWires) {
+		let rawWires: Array<{ getState_Line: () => Array<number>; getState_Net?: () => string; getState_PrimitiveId?: () => string }> = [];
+		try { rawWires = (await eda.sch_PrimitiveWire.getAll() ?? []) as typeof rawWires; }
+		catch { rawWires = []; }
+		const segs = collectWireSegments(rawWires);
+		for (const s of segs) {
+			wires.push({ x0: s.seg[0], y0: s.seg[1], x1: s.seg[2], y1: s.seg[3], net: s.net });
+		}
+	}
+
+	return { result: { components: serialized, count: serialized.length, wires } };
 };
 
-const schematicComponentPlace: Handler = async (payload) => {
+export const schematicComponentPlace: Handler = async (payload) => {
 	const libraryUuid = requireString(payload, 'libraryUuid');
 	const uuid = requireString(payload, 'uuid');
 	const x = requireNumber(payload, 'x');
@@ -586,6 +646,7 @@ const schematicComponentPlace: Handler = async (payload) => {
 	const mirror = optionalBoolean(payload, 'mirror');
 	const addIntoBom = optionalBoolean(payload, 'addIntoBom');
 	const addIntoPcb = optionalBoolean(payload, 'addIntoPcb');
+	const designator = optionalString(payload, 'designator');
 
 	let component;
 	try {
@@ -606,6 +667,30 @@ const schematicComponentPlace: Handler = async (payload) => {
 	if (!component) {
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Component placement returned no primitive.');
 	}
+
+	// Atomically assign the final designator on the connector side so batch
+	// placement skips the place→list→modify round-trip (issue #68). The freshly
+	// placed component keeps a placeholder designator (e.g. U?/C?); the modify
+	// return is the authoritative post-assignment state, so overwrite the local
+	// reference with it before serializing.
+	if (designator) {
+		const primitiveId = component.getState_PrimitiveId();
+		let modified;
+		try {
+			modified = await eda.sch_PrimitiveComponent.modify(primitiveId, { designator });
+		}
+		catch (err) {
+			throw edaError(err, `Placed component "${primitiveId}" but failed to assign designator "${designator}".`);
+		}
+		if (!modified) {
+			throw new ActionError(
+				ErrorCodes.EDA_CALL_FAILED,
+				`Placed component "${primitiveId}" but designator assignment "${designator}" returned no primitive.`,
+			);
+		}
+		component = modified;
+	}
+
 	return {
 		result: {
 			primitiveId: component.getState_PrimitiveId(),
@@ -1854,15 +1939,18 @@ const schematicCheck: Handler = async (payload) => {
 		const nets = refs.map(r => r.net).filter(Boolean);
 		if (nets.length <= 1) continue;
 		const unique = [...new Set(nets)];
-		if (unique.length > 1 || nets.length !== unique.length) {
+		// Only distinct net names on one wire is a real short (异名并线).
+		// Repeated same-name flags (e.g. ["GND","GND"] from共线合并的 stub) are
+		// legal — collapse to unique so we don't drown 3 real shorts under 83 dupes.
+		if (unique.length > 1) {
 			multiNetWires++;
 			findings.push({
 				type: 'multi-net-wire',
 				level: 'warn',
 				wirePrimitiveId: wireId,
-				nets,
-				count: nets.length,
-				message: `导线有多个网络名: ${nets.join('、')}`,
+				nets: unique,
+				count: unique.length,
+				message: `导线有多个网络名: ${unique.join('、')}`,
 			});
 		}
 	}
@@ -2089,6 +2177,133 @@ const schematicCheck: Handler = async (payload) => {
 		total: findings.length,
 	};
 	return { result: { passed: findings.length === 0, summary, findings } };
+};
+
+// ─── Bridge check (tree-granularity net-vs-copper consistency) ─────────
+//
+// `sch check`'s multi-net-wire rule works per SINGLE wire primitive, but when
+// EasyEDA merges two collinear touching stubs of DIFFERENT nets into one tree,
+// the short spans SEVERAL wires — no single wire carries two net names, so the
+// per-wire rule under-reports. bridge-check groups wires into trees by shared
+// vertices (union-find) and aggregates the net names of every netflag/netport
+// anchored on that tree:
+//   • len(set(nets)) > 1  → BRIDGE (real short, ERROR)
+//   • nets empty & tree touches a component pin → ORPHAN (dangling stub, WARN)
+// Read-only: reports wire ids / flag ids / touched pins (designator:pin) per
+// problem tree so the fix (integral-tree delete + occupancy-aware reconnect)
+// can be driven by hand or a later --repair pass (issue #73).
+
+interface BridgeTree {
+	kind: 'BRIDGE' | 'ORPHAN';
+	wireIds: Array<string>;
+	flagIds: Array<string>;
+	pins: Array<string>; // "designator:pin"
+	nets: Array<string>;
+}
+
+const schematicBridgeCheck: Handler = async (payload) => {
+	const allPages = optionalBoolean(payload, 'allPages') === true;
+	let components, wires;
+	try {
+		components = await eda.sch_PrimitiveComponent.getAll(undefined, allPages);
+		wires = await eda.sch_PrimitiveWire.getAll();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read schematic for bridge check.');
+	}
+	const wireSegs = collectWireSegments((wires ?? []) as Array<{ getState_Line: () => Array<number>; getState_Net?: () => string; getState_PrimitiveId?: () => string }>);
+	const COINCIDE_TOL = CHECK_EPS * 8;
+
+	// Netflags/netports/netlabels carry the net name we aggregate per tree.
+	const NET_MARKER_TYPES = new Set(['netflag', 'netport', 'netlabel', 'short_symbol']);
+	const markers: Array<{ x: number; y: number; net: string; primitiveId: string }> = [];
+	const pins: Array<{ designator: string; number: string; x: number; y: number }> = [];
+	for (const c of components ?? []) {
+		let type: string;
+		try { type = String(c.getState_ComponentType?.() ?? ''); }
+		catch { continue; }
+		if (NET_MARKER_TYPES.has(type)) {
+			try {
+				markers.push({ x: c.getState_X(), y: c.getState_Y(), net: String(c.getState_Net?.() ?? ''), primitiveId: String(c.getState_PrimitiveId?.() ?? '') });
+			}
+			catch { /* marker without coords */ }
+			continue;
+		}
+		const primitiveId = c.getState_PrimitiveId();
+		let compPins;
+		try { compPins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(primitiveId); }
+		catch { continue; }
+		if (!compPins || compPins.length === 0) continue;
+		const designator = String(c.getState_Designator?.() ?? '');
+		for (const p of compPins) {
+			try { pins.push({ designator, number: String(p.getState_PinNumber?.() ?? ''), x: p.getState_X(), y: p.getState_Y() }); }
+			catch { /* pin without coords */ }
+		}
+	}
+
+	// ── Union-find over wires: two wires join a tree when they share a vertex. ──
+	const wireList = wireSegs.length > 0
+		? [...new Map(wireSegs.filter(w => w.wirePrimitiveId).map(w => [w.wirePrimitiveId, w])).keys()]
+		: [];
+	// Vertices per wire primitive id (from every segment endpoint).
+	const wireVerts = new Map<string, Array<[number, number]>>();
+	for (const ws of wireSegs) {
+		if (!ws.wirePrimitiveId) continue;
+		const arr = wireVerts.get(ws.wirePrimitiveId) ?? [];
+		arr.push([ws.seg[0], ws.seg[1]], [ws.seg[2], ws.seg[3]]);
+		wireVerts.set(ws.wirePrimitiveId, arr);
+	}
+	const idx = new Map<string, number>();
+	wireList.forEach((id, i) => idx.set(id, i));
+	const parent = wireList.map((_, i) => i);
+	const find = (a: number): number => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+	const union = (a: number, b: number) => { parent[find(a)] = find(b); };
+	for (let i = 0; i < wireList.length; i++) {
+		for (let j = i + 1; j < wireList.length; j++) {
+			const vi = wireVerts.get(wireList[i]) ?? [];
+			const vj = wireVerts.get(wireList[j]) ?? [];
+			const touch = vi.some(a => vj.some(b => Math.hypot(a[0] - b[0], a[1] - b[1]) <= COINCIDE_TOL));
+			if (touch) union(i, j);
+		}
+	}
+
+	// ── Aggregate each tree's wires + anchored flags/pins + net names. ──
+	const treeMap = new Map<number, { wireIds: Set<string>; verts: Array<[number, number]> }>();
+	for (const id of wireList) {
+		const root = find(idx.get(id)!);
+		const t = treeMap.get(root) ?? { wireIds: new Set<string>(), verts: [] };
+		t.wireIds.add(id);
+		t.verts.push(...(wireVerts.get(id) ?? []));
+		treeMap.set(root, t);
+	}
+
+	const trees: Array<BridgeTree> = [];
+	for (const t of treeMap.values()) {
+		const onTree = (x: number, y: number) => t.verts.some(v => Math.hypot(v[0] - x, v[1] - y) <= COINCIDE_TOL);
+		const flagIds: Array<string> = [];
+		const nets = new Set<string>();
+		for (const m of markers) {
+			if (!onTree(m.x, m.y)) continue;
+			if (m.primitiveId) flagIds.push(m.primitiveId);
+			if (m.net) nets.add(m.net);
+		}
+		const touchedPins: Array<string> = [];
+		for (const p of pins) {
+			if (onTree(p.x, p.y)) touchedPins.push(`${p.designator}:${p.number}`);
+		}
+		const netList = [...nets];
+		if (netList.length > 1) {
+			trees.push({ kind: 'BRIDGE', wireIds: [...t.wireIds], flagIds, pins: [...new Set(touchedPins)], nets: netList });
+		}
+		else if (netList.length === 0 && touchedPins.length > 0) {
+			trees.push({ kind: 'ORPHAN', wireIds: [...t.wireIds], flagIds, pins: [...new Set(touchedPins)], nets: netList });
+		}
+	}
+
+	const bridges = trees.filter(t => t.kind === 'BRIDGE').length;
+	const orphans = trees.filter(t => t.kind === 'ORPHAN').length;
+	const summary = { trees: trees.length, bridges, orphans, wireTreesTotal: treeMap.size };
+	return { result: { passed: bridges === 0 && orphans === 0, summary, trees } };
 };
 
 // ─── Save ─────────────────────────────────────────────────────────────
@@ -3134,7 +3349,21 @@ const documentOpen: Handler = async (payload) => {
 	if (tabId === undefined) {
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Failed to open document "${uuid}".`);
 	}
-	return { result: { tabId } };
+	// openDocument returns before the document finishes loading. For schematic
+	// pages, wait for the primitive data to settle so a read fired right after
+	// isn't empty/stale (#67). A PCB has no components.list to poll, so we skip
+	// the wait and report ready:true optimistically.
+	let ready = true;
+	try {
+		const doc = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+		if (doc && documentTypeLabel(doc.documentType) === 'schematic') {
+			ready = await waitSchematicPageSettle();
+		}
+	}
+	catch {
+		/* type probe is best-effort — leave ready:true */
+	}
+	return { result: { tabId, ready } };
 };
 
 // ─── PCB (Phase 2 — read-only skeleton) ──────────────────────────────
@@ -6748,6 +6977,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.snapshot': schematicSnapshot,
 	'schematic.drc.check': schematicDrcCheck,
 	'schematic.check': schematicCheck,
+	'schematic.bridgeCheck': schematicBridgeCheck,
 	'schematic.read': schematicRead,
 	'schematic.save': schematicSave,
 	'schematic.export.netlist': schematicExportNetlist,

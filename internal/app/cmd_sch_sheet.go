@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -205,9 +204,10 @@ func runSheetGeometry(cfg *appConfig, window string, asJSON bool, stdout, stderr
 	g := deriveSheetGeometry(sheet, showTB)
 
 	if asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(g)
+		// Wrap in the same {id,type,version,ok,result} envelope the rest of the
+		// sch family emits (#66). Envelope metadata comes from the primary
+		// components.list response (res).
+		return encodeResultEnvelope(res, g, stdout)
 	}
 	renderSheetGeometry(g, stdout)
 	return nil

@@ -6,6 +6,33 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`easyeda blocks` — 离线电路块库查询(embedded)**:`ls` / `show <id>` /
+  `search <query>`,块库 JSON 用 `go:embed` 编进二进制,**零 daemon / 零窗口 /
+  零 skill 文件**——异地/裸机 `easyeda` 安装即可查已验证外设电路(CH340/自动下载/
+  buck/RS485/CC1101/microSD…),不必下载 GitHub 库。skill 的 `references/blocks/*.json`
+  仍是社区源(PR 进这里),`make sync-blocks` 构建前拷进 `internal/blocks/data/`
+  再 embed;`internal/blocks` 带漂移守卫测试(embed 副本 ≠ skill 源即 CI 失败)。
+  本次同时从 case001 提炼 4 新块入库(XL1509 buck / SP3485 RS485 / CC1101 巴伦 /
+  microSD),再补最小系统 3 块(AMS1117 LDO 5→3.3 / BOOT+RESET 按键 / GPIO LED 指示),
+  块库达 **10 ready**——esp32MiniRequire 最小系统已 100% 块覆盖(模组+CH340+自动下载+
+  LDO+按键+LED)。
+- **Skill 目录自动同步 + 连接器落后提示**(免手动升级):`daemon start` 默认带
+  `--auto-update-skill`,启动时后台把已存在的 skill 目录(`~/.claude`、`~/.codex`)
+  拉齐到最新 release 并逐步打日志(尊重 `EASYEDA_SKILL_PRESERVE`)。新增
+  `easyeda skill status` / `easyeda skill sync`(`--version`/`--preserve`/`--client`/
+  `--create-missing`/`--json`)手动查看与触发同一机制。连接器一注册即比对版本,落后
+  时打**可操作日志**(重导 `.eext` + 彻底重启 EasyEDA)——sideload `.eext` 无原地
+  自动更新(市场专属能力),故只检测+提示、不静默替换。install.sh 装完 skill 写
+  `.version` 标记与 daemon 对齐避免重复下载。**连接器代码未变,升级无需重导 `.eext`。**
+
+### Fixed
+- **切页竞态收口(#67)**:`document.open` / `schematic.page.open` 现在在返回前
+  轮询活动页器件数直到 settle(连续两次相同即视为装载完成,`0 → N` 的装载中态
+  不会被误判为空页),并在 result 中带 `ready:true/false`。修复「`doc switch`
+  返回成功后立即 `sch check` 拿到空 findings、隔 2-4 秒才完整」的问题。PCB 无
+  components 可轮询,乐观返回 `ready:true`。
+
 ## [0.9.0] - 2026-07-08
 
 自 0.8.3 以来的整体收口版本:PCB 布线/DRC 从「能放」走到「能连、能查、能救」,
