@@ -125,11 +125,21 @@ flag/netport, never a netflag on a bare pin), but it still makes YOU pick
 `--direction` and `--offset`, so layout quality depends on judgment. **`sch
 autoconnect` removes that judgment**: it pulls the real geometry (part bboxes,
 pin coords, existing flag/port/label bboxes, title-block keep-out), scores every
-`up/down/left/right × offset` candidate with a deterministic cost function (part
-overlap / title-block / pin-crossing / flag-collision / through-part penalties,
-shortest-offset + outward-side + kind-default bonuses), picks the lowest-cost
-one, and delegates the mutation to `connect_pin`. Same schematic state + spec →
-same selection (deterministic).
+`up/down/left/right × offset` candidate with a deterministic cost function
+(flag-collision / through-part penalties, shortest-offset + outward-side +
+kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
+`connect_pin`. Same schematic state + spec → same selection (deterministic).
+
+**Hard rejects (issue #64):** two hazards are never soft penalties — they make a
+candidate *unusable* no matter the offset, because EasyEDA would silently merge
+nets and the post-hoc DRC can't see it: (1) a stub whose endpoint or path touches
+an existing **foreign-net wire** (endpoint-on-wire = junction = net merge), and
+(2) a stub **crossing a non-target pin** (EasyEDA trims+connects there, and the
+wire-over-pin rule exempts pin endpoints). autoconnect now pulls existing wire
+geometry into the scene automatically; a wire already on the target net is fine
+(that's the connection point). If EVERY direction/offset is a
+hard reject, autoconnect refuses to place the stub and reports the connection as
+failed — resolve the layout (move the part / clear the wire) and retry.
 
 ```bash
 # single pin by designator:pin (number OR name)

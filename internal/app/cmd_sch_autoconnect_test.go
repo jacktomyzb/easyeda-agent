@@ -35,7 +35,7 @@ func TestPlanConnection_GroundPrefersDownShortest(t *testing.T) {
 	// A pin below its owner center → outward = down; kind gnd default = down.
 	// Both bonuses stack on 'down', and the shortest offset wins ties.
 	pin := acPin{X: 100, Y: 200, OwnerBBox: bb(80, 150, 120, 190)}
-	all := planConnection(pin, "ground", clearScene(), rulesFor())
+	all := planConnection(pin, "ground", "GND", clearScene(), rulesFor())
 	sel := all[0]
 	if sel.Direction != "down" {
 		t.Fatalf("expected down (outward + kind default), got %s", sel.Direction)
@@ -55,7 +55,7 @@ func TestScoreCandidate_PartOverlapDominates(t *testing.T) {
 	// A part bbox sits right where the 'down' endpoint would land → +10000.
 	pin := acPin{X: 100, Y: 100}
 	scene := acScene{Parts: []layoutBBox{bb(90, 115, 110, 135).deref()}}
-	c := scoreCandidate(pin, "down", 24, "ground", scene, rulesFor())
+	c := scoreCandidate(pin, "down", 24, "ground", "GND", scene, rulesFor())
 	if c.Score < costPartOverlap {
 		t.Fatalf("expected part-overlap penalty (>=%d), got %.2f", costPartOverlap, c.Score)
 	}
@@ -65,7 +65,7 @@ func TestScoreCandidate_StubCrossesPin(t *testing.T) {
 	pin := acPin{X: 100, Y: 100}
 	// Another pin sits on the downward stub path (x=100, between y=100 and 130).
 	scene := acScene{Pins: []acPin{{X: 100, Y: 115, Designator: "U2", PinNumber: "1"}}}
-	c := scoreCandidate(pin, "down", 30, "ground", scene, rulesFor())
+	c := scoreCandidate(pin, "down", 30, "ground", "GND", scene, rulesFor())
 	hasCross := false
 	for _, r := range c.Reasons {
 		if r.Cost == costPinCross {
@@ -77,11 +77,92 @@ func TestScoreCandidate_StubCrossesPin(t *testing.T) {
 	}
 }
 
+// TestScoreCandidate_PinCrossIsHardReject: a stub crossing a non-target pin must
+// be a HARD reject (issue #64), not a soft penalty a long offset could out-vote.
+func TestScoreCandidate_PinCrossIsHardReject(t *testing.T) {
+	pin := acPin{X: 100, Y: 100}
+	scene := acScene{Pins: []acPin{{X: 100, Y: 115, Designator: "U2", PinNumber: "1"}}}
+	c := scoreCandidate(pin, "down", 30, "ground", "GND", scene, rulesFor())
+	if !candidateHardRejected(c) {
+		t.Fatalf("pin-cross should hard-reject, score=%.2f reasons=%+v", c.Score, c.Reasons)
+	}
+}
+
+// TestScoreCandidate_StubTouchesForeignWireHardRejects: a stub whose endpoint or
+// path lands on an existing wire of a DIFFERENT net is a silent net merge — must
+// hard-reject (issue #64).
+func TestScoreCandidate_StubTouchesForeignWireHardRejects(t *testing.T) {
+	pin := acPin{X: 100, Y: 100}
+	// A +5V wire runs horizontally across y=130; the downward stub endpoint (100,130)
+	// lands on it → foreign-net junction.
+	scene := acScene{Wires: []wireSegment{{X0: 50, Y0: 130, X1: 200, Y1: 130, Net: "+5V"}}}
+	c := scoreCandidate(pin, "down", 30, "ground", "GND", scene, rulesFor())
+	if !candidateHardRejected(c) {
+		t.Fatalf("stub touching a foreign-net wire should hard-reject, reasons=%+v", c.Reasons)
+	}
+}
+
+// TestScoreCandidate_SameNetWireNotRejected: touching a wire ALREADY on the
+// target net is the whole point of connecting — it must NOT hard-reject.
+func TestScoreCandidate_SameNetWireNotRejected(t *testing.T) {
+	pin := acPin{X: 100, Y: 100}
+	scene := acScene{Wires: []wireSegment{{X0: 50, Y0: 130, X1: 200, Y1: 130, Net: "GND"}}}
+	c := scoreCandidate(pin, "down", 30, "ground", "GND", scene, rulesFor())
+	if candidateHardRejected(c) {
+		t.Fatalf("same-net wire touch must NOT hard-reject, reasons=%+v", c.Reasons)
+	}
+}
+
+// TestScoreCandidate_UnnamedWireIsForeign: a wire with no resolvable net is
+// treated conservatively as foreign — touching it hard-rejects.
+func TestScoreCandidate_UnnamedWireIsForeign(t *testing.T) {
+	pin := acPin{X: 100, Y: 100}
+	scene := acScene{Wires: []wireSegment{{X0: 50, Y0: 130, X1: 200, Y1: 130, Net: ""}}}
+	c := scoreCandidate(pin, "down", 30, "ground", "GND", scene, rulesFor())
+	if !candidateHardRejected(c) {
+		t.Fatalf("unnamed (foreign) wire touch should hard-reject, reasons=%+v", c.Reasons)
+	}
+}
+
+// TestPlanConnection_AvoidsForeignWireDirection: with a foreign-net wire blocking
+// the 'down' endpoint but the other directions clear, the planner must pick a
+// non-rejected direction.
+func TestPlanConnection_AvoidsForeignWireDirection(t *testing.T) {
+	pin := acPin{X: 100, Y: 100}
+	scene := acScene{Wires: []wireSegment{{X0: 50, Y0: 130, X1: 200, Y1: 130, Net: "+5V"}}}
+	all := planConnection(pin, "ground", "GND", scene, rulesFor())
+	if candidateHardRejected(all[0]) {
+		t.Fatalf("planner picked a hard-rejected candidate: %+v", all[0])
+	}
+}
+
+// TestBuildScene_ParsesWires verifies wires flow from the extension payload into
+// the scene (issue #64).
+func TestBuildScene_ParsesWires(t *testing.T) {
+	result := map[string]any{
+		"components": []any{},
+		"wires": []any{
+			map[string]any{"x0": 10.0, "y0": 20.0, "x1": 30.0, "y1": 20.0, "net": "+5V"},
+			map[string]any{"x0": 30.0, "y0": 20.0, "x1": 30.0, "y1": 40.0, "net": ""},
+		},
+	}
+	scene := buildScene(result)
+	if len(scene.Wires) != 2 {
+		t.Fatalf("expected 2 wire segments, got %d", len(scene.Wires))
+	}
+	if scene.Wires[0].Net != "+5V" || scene.Wires[0].X1 != 30 {
+		t.Errorf("wire 0 parsed wrong: %+v", scene.Wires[0])
+	}
+	if scene.Wires[1].Net != "" {
+		t.Errorf("wire 1 net should be empty, got %q", scene.Wires[1].Net)
+	}
+}
+
 func TestPlanConnection_AvoidsOverlappingDirection(t *testing.T) {
 	// A wall of parts blocks 'down'; 'up' is clear. Planner must not pick down.
 	pin := acPin{X: 100, Y: 100}
 	scene := acScene{Parts: []layoutBBox{bb(80, 110, 120, 200).deref()}}
-	all := planConnection(pin, "ground", scene, rulesFor())
+	all := planConnection(pin, "ground", "GND", scene, rulesFor())
 	if all[0].Direction == "down" {
 		t.Fatalf("planner chose blocked direction down; scene=%+v score=%.2f", scene, all[0].Score)
 	}
@@ -89,8 +170,8 @@ func TestPlanConnection_AvoidsOverlappingDirection(t *testing.T) {
 
 func TestPlanConnection_Deterministic(t *testing.T) {
 	pin := acPin{X: 100, Y: 100, OwnerBBox: bb(80, 80, 120, 95)}
-	a := planConnection(pin, "power", clearScene(), rulesFor())
-	b := planConnection(pin, "power", clearScene(), rulesFor())
+	a := planConnection(pin, "power", "+5V", clearScene(), rulesFor())
+	b := planConnection(pin, "power", "+5V", clearScene(), rulesFor())
 	if len(a) != len(b) {
 		t.Fatalf("candidate count differs: %d vs %d", len(a), len(b))
 	}
@@ -107,7 +188,7 @@ func TestPlanConnection_TieBreakStable(t *testing.T) {
 	// the lexical tie-break must order down<left<right<up. Confirm offsets too:
 	// shortest first within a direction.
 	pin := acPin{X: 0, Y: 0}
-	all := planConnection(pin, "ground", clearScene(), rulesFor())
+	all := planConnection(pin, "ground", "GND", clearScene(), rulesFor())
 	if all[0].Direction != "down" || all[0].Offset != 18 {
 		t.Fatalf("expected down@18 first, got %s@%.0f", all[0].Direction, all[0].Offset)
 	}

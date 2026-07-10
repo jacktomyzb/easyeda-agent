@@ -80,12 +80,22 @@ type acComponent struct {
 	PageName   string
 }
 
+// wireSegment is one existing schematic wire segment (a single polyline edge),
+// tagged with its net when known. autoconnect uses these to HARD-REJECT any
+// candidate stub that would touch a foreign-net wire — EasyEDA merges nets at an
+// endpoint-on-wire junction, a silent short the post-hoc DRC can't catch. See #64.
+type wireSegment struct {
+	X0, Y0, X1, Y1 float64
+	Net            string // "" when the wire carries no resolvable net name
+}
+
 // acScene is the full geometric context one autoconnect run reasons against.
 // Flags grows as connections are placed so later labels stagger off earlier ones.
 type acScene struct {
 	Parts                 []layoutBBox  // real part bboxes (componentType "part")
 	Pins                  []acPin       // every pin across all parts
 	Flags                 []layoutBBox  // existing netflag/netport/netlabel bboxes
+	Wires                 []wireSegment // existing wire segments (issue #64)
 	Components            []acComponent // every part seen (by designator), even pin-less off-page ones
 	TitleBlock            *layoutBBox   // derived keep-out (nil if not applied)
 	TitleBlockProvisional bool          // true when no sheet bbox was found (keep-out NOT geometrically applied)
@@ -116,18 +126,31 @@ type acCandidate struct {
 // Cost-table constants (issue #24). Kept as named constants so the scorer reads
 // like the table and the unit tests can assert exact figures.
 const (
-	costPartOverlap   = 10000 // endpoint/label bbox overlaps a real part bbox
-	costTitleBlock    = 10000 // endpoint/label bbox enters the title-block keep-out
-	costPinCross      = 5000  // stub crosses a non-target pin
-	costFlagCollision = 1000  // endpoint/label collides with an existing flag/port/label
-	costThroughPart   = 500   // stub passes through another component bbox
-	costFanoutChannel = 100   // too close to a preserved pin-fanout channel
-	costOffsetPerUnit = 0.1   // +offset * 0.1 — prefer shorter stubs
-	bonusOutwardSide  = -20   // direction matches the pin's outward side
-	bonusKindDefault  = -10   // direction matches the kind default (GND down / power up / port outward)
-	acLabelHalfExtent = 4.0   // nominal half-size of a placed flag/label marker box (schematic units)
-	acCoordEps        = 0.01  // coordinate-equality tolerance
-	acOverlapEps      = 1e-6  // positive-length threshold for interval/area overlap
+	// costHardReject is a sentinel far above any reachable sum of penalties +
+	// offset cost, so a candidate carrying it is effectively UNUSABLE — the planner
+	// only falls back to it when EVERY option is a hard reject. Used for hazards
+	// EasyEDA would silently turn into a wrong connection (endpoint/path on a
+	// foreign-net wire, stub crossing a non-target pin). See issue #64.
+	costHardReject  = 1e9
+	costPartOverlap = 10000 // endpoint/label bbox overlaps a real part bbox
+	costTitleBlock  = 10000 // endpoint/label bbox enters the title-block keep-out
+	// costPinCross is a HARD reject (issue #64 rec 2): a stub crossing a non-target
+	// pin gets trimmed+connected by EasyEDA, and the post-hoc wire-over-pin rule
+	// exempts endpoints on pins, so the short goes unnoticed. Never a soft penalty.
+	costPinCross = costHardReject
+	// costWireTouch is a HARD reject (issue #64 rec 1): a candidate stub whose
+	// endpoint or path touches an existing foreign-net wire merges the two nets at
+	// the junction. Never a soft penalty.
+	costWireTouch     = costHardReject
+	costFlagCollision = 1000 // endpoint/label collides with an existing flag/port/label
+	costThroughPart   = 500  // stub passes through another component bbox
+	costFanoutChannel = 100  // too close to a preserved pin-fanout channel
+	costOffsetPerUnit = 0.1  // +offset * 0.1 — prefer shorter stubs
+	bonusOutwardSide  = -20  // direction matches the pin's outward side
+	bonusKindDefault  = -10  // direction matches the kind default (GND down / power up / port outward)
+	acLabelHalfExtent = 4.0  // nominal half-size of a placed flag/label marker box (schematic units)
+	acCoordEps        = 0.01 // coordinate-equality tolerance
+	acOverlapEps      = 1e-6 // positive-length threshold for interval/area overlap
 )
 
 // endpointFor computes where connect_pin will land the stub end for a given
@@ -252,11 +275,81 @@ func boxesOverlap(a, b layoutBBox) bool {
 	return ox > acOverlapEps && oy > acOverlapEps
 }
 
+// orient2D is the signed area (cross product) of (b-a)×(c-a): >0 left turn,
+// <0 right turn, ~0 collinear. Used by the general segment-touch test so a stub
+// can be checked against an arbitrarily-oriented existing wire.
+func orient2D(ax, ay, bx, by, cx, cy float64) float64 {
+	return (bx-ax)*(cy-ay) - (by-ay)*(cx-ax)
+}
+
+// pointOnSeg reports whether (px,py) lies on segment (x0,y0)-(x1,y1), endpoints
+// INCLUDED. Any contact counts, because EasyEDA merges nets wherever a stub end
+// or path meets a wire (junction), not just at a proper interior crossing.
+func pointOnSeg(px, py, x0, y0, x1, y1 float64) bool {
+	if math.Abs(orient2D(x0, y0, x1, y1, px, py)) > acCoordEps*math.Max(1, math.Hypot(x1-x0, y1-y0)) {
+		return false
+	}
+	return px >= math.Min(x0, x1)-acCoordEps && px <= math.Max(x0, x1)+acCoordEps &&
+		py >= math.Min(y0, y1)-acCoordEps && py <= math.Max(y0, y1)+acCoordEps
+}
+
+// segmentsTouch reports whether segments A(a0→a1) and B(b0→b1) share ANY point —
+// a proper crossing, a shared/touching endpoint, or a collinear overlap. This is
+// deliberately inclusive: for wire-merge hazard detection any contact is a short.
+func segmentsTouch(ax0, ay0, ax1, ay1, bx0, by0, bx1, by1 float64) bool {
+	d1 := orient2D(bx0, by0, bx1, by1, ax0, ay0)
+	d2 := orient2D(bx0, by0, bx1, by1, ax1, ay1)
+	d3 := orient2D(ax0, ay0, ax1, ay1, bx0, by0)
+	d4 := orient2D(ax0, ay0, ax1, ay1, bx1, by1)
+	if ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+		((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)) {
+		return true // proper crossing
+	}
+	// Collinear / endpoint-touch cases: any endpoint lying on the other segment.
+	return pointOnSeg(ax0, ay0, bx0, by0, bx1, by1) ||
+		pointOnSeg(ax1, ay1, bx0, by0, bx1, by1) ||
+		pointOnSeg(bx0, by0, ax0, ay0, ax1, ay1) ||
+		pointOnSeg(bx1, by1, ax0, ay0, ax1, ay1)
+}
+
+// stubTouchesForeignWire reports whether a candidate stub (target pin → endpoint)
+// touches any existing wire that would merge into a FOREIGN net. A wire already
+// on the SAME target net is skipped — connecting to it is the whole point. Wires
+// with no resolvable net ("") are treated as foreign (unknown → conservative hard
+// reject), since a silent cross-net merge is the worse outcome. Degenerate
+// zero-length wires are ignored. See issue #64.
+func stubTouchesForeignWire(pinX, pinY, endX, endY float64, targetNet string, wires []wireSegment) bool {
+	// Trim the stub start a hair away from the pin. A foreign wire that touches
+	// ONLY at the pin coordinate is a PRE-EXISTING condition (the pin already sits
+	// on that net) — the idempotency net check classifies that as a conflict, so it
+	// must not hard-reject every direction here. We only care about contact along
+	// the rest of the stub, including its far endpoint.
+	dx, dy := endX-pinX, endY-pinY
+	length := math.Hypot(dx, dy)
+	if length < acCoordEps {
+		return false // degenerate stub
+	}
+	trimX := pinX + dx/length*(acCoordEps*4)
+	trimY := pinY + dy/length*(acCoordEps*4)
+	for _, w := range wires {
+		if w.Net != "" && w.Net == targetNet {
+			continue // same net — legitimate connection target, not a hazard
+		}
+		if math.Abs(w.X1-w.X0) < acCoordEps && math.Abs(w.Y1-w.Y0) < acCoordEps {
+			continue // degenerate zero-length wire
+		}
+		if segmentsTouch(trimX, trimY, endX, endY, w.X0, w.Y0, w.X1, w.Y1) {
+			return true
+		}
+	}
+	return false
+}
+
 // scoreCandidate is the PURE deterministic core: given a pin, a direction, an
 // offset, the canonical kind, the scene, and the rules, return the scored
 // candidate with its signed cost breakdown. No I/O, no mutation — the whole
 // reason this is unit-testable.
-func scoreCandidate(pin acPin, dir string, offset float64, canonicalKind string, scene acScene, rules autoconnectRules) acCandidate {
+func scoreCandidate(pin acPin, dir string, offset float64, canonicalKind, targetNet string, scene acScene, rules autoconnectRules) acCandidate {
 	endX, endY := endpointFor(pin.X, pin.Y, offset, dir)
 	lbl := labelBox(endX, endY)
 	var reasons []acReason
@@ -274,15 +367,23 @@ func scoreCandidate(pin acPin, dir string, offset float64, canonicalKind string,
 		reasons = append(reasons, acReason{costTitleBlock, "label enters title-block keep-out"})
 	}
 
-	// +5000 stub crosses a non-target pin.
+	// HARD REJECT: stub crosses a non-target pin (issue #64). EasyEDA trims and
+	// connects the stub at that pin, and the wire-over-pin DRC exempts endpoints on
+	// pins, so the short is invisible after the fact. Never a soft penalty.
 	for _, op := range scene.Pins {
 		if math.Abs(op.X-pin.X) < acCoordEps && math.Abs(op.Y-pin.Y) < acCoordEps {
 			continue // the target pin itself
 		}
 		if pinOnSegment(pin.X, pin.Y, endX, endY, op.X, op.Y) {
-			reasons = append(reasons, acReason{costPinCross, "stub crosses a non-target pin"})
+			reasons = append(reasons, acReason{costPinCross, "stub crosses a non-target pin (hard reject)"})
 			break
 		}
+	}
+
+	// HARD REJECT: stub endpoint or path touches an existing foreign-net wire
+	// (issue #64). EasyEDA merges the two nets at the junction — a silent short.
+	if stubTouchesForeignWire(pin.X, pin.Y, endX, endY, targetNet, scene.Wires) {
+		reasons = append(reasons, acReason{costWireTouch, "stub touches an existing (foreign-net) wire (hard reject)"})
 	}
 
 	// +1000 endpoint/label collides with an existing flag/port/label.
@@ -369,12 +470,12 @@ var acDirections = []string{"up", "down", "left", "right"}
 // and returns them sorted best-first. Deterministic tie-break: score asc, then
 // direction lexical (down<left<right<up), then offset asc — so the same scene +
 // spec always yields the same selection (acceptance: "deterministic result").
-func planConnection(pin acPin, canonicalKind string, scene acScene, rules autoconnectRules) []acCandidate {
+func planConnection(pin acPin, canonicalKind, targetNet string, scene acScene, rules autoconnectRules) []acCandidate {
 	offsets := candidateOffsets(rules)
 	all := make([]acCandidate, 0, len(acDirections)*len(offsets))
 	for _, dir := range acDirections {
 		for _, off := range offsets {
-			all = append(all, scoreCandidate(pin, dir, off, canonicalKind, scene, rules))
+			all = append(all, scoreCandidate(pin, dir, off, canonicalKind, targetNet, scene, rules))
 		}
 	}
 	sort.SliceStable(all, func(i, j int) bool {
@@ -387,6 +488,19 @@ func planConnection(pin acPin, canonicalKind string, scene acScene, rules autoco
 		return all[i].Offset < all[j].Offset
 	})
 	return all
+}
+
+// candidateHardRejected reports whether a candidate carries a hard-reject cost
+// (pin-cross or foreign-wire touch, issue #64). When the BEST candidate is still
+// hard-rejected, every direction/offset was a hazard — the caller must refuse to
+// mutate rather than place a stub it knows would short two nets.
+func candidateHardRejected(c acCandidate) bool {
+	for _, r := range c.Reasons {
+		if r.Cost >= costHardReject {
+			return true
+		}
+	}
+	return false
 }
 
 // ── idempotency: three-state pin/net decision (issue #50) ───────────────────
