@@ -123,6 +123,14 @@
           "reason": "为什么须这样摆(如 USB-C 需插拔)"
         }
       },
+      "keepout": {
+        "_doc": "RF/天线禁铜区(可选,仅带 PCB 天线的模组/器件才列)。由 `easyeda pcb antenna-keepout` 消费:在天线器件长轴上无焊盘的一端(几何确定)生成覆盖全铜层的 no-copper region;深度取本条 end_frac 上限并被无焊盘区裁剪,绝不压到接地焊盘。",
+        "role": "antenna",
+        "match": "器件名子串(小写包含匹配,如 wroom)——把已放置件按 manufacturerId 映射到本条",
+        "end_frac": "0..1 —— 禁铜深度占模组长轴的比例(如 0.3);实际深度 = min(end_frac×长轴, 无焊盘条带)",
+        "layers": "all —— 目前仅支持全铜层",
+        "reason": "为什么(如 模组 PCB 天线下方全层需净空避免失谐)"
+      },
       "signals": {
         "_doc": "CONSTRAINT MAP『信号特性』——按 <信号组名> 键。高速/差分/敏感/大电流网络的布线特性需求(差分阻抗、等长、隔离、线宽…)。普通信号不必列。",
         "<信号组名>": {

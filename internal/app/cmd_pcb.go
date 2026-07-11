@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
 )
 
 // newPcbCmd returns the "pcb" subcommand group with all PCB actions.
@@ -1987,6 +1988,139 @@ A SEED — verify with 'pcb layout-lint'. --dry-run prints the plan.
 		c.Flags().Float64Var(&edgeMargin, "edge-margin", 0, "gap between an edge part's bbox and the board edge (mil, default 45)")
 		c.Flags().Float64Var(&partGap, "part-gap", 0, "clearance between parts / part-to-hole (mil, default 14)")
 		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the placement plan without moving anything")
+		pcb.AddCommand(c)
+	}
+
+	// ── antenna-keepout ─────────────────────────────────────────────────────
+	// Auto-generate the all-layer no-copper keep-out over each RF part's antenna
+	// end (defect #4; geometry in pcb_antenna_keepout.go, depth block-declared).
+	{
+		var dryRun bool
+		var margin float64
+		c := &cobra.Command{
+			Use:   "antenna-keepout",
+			Short: "Auto-generate the all-layer no-copper keep-out over each RF/antenna part's antenna end",
+			Long: `Generates the no-copper keep-out (禁铜/禁地/禁走线) an antenna part needs on EVERY
+copper layer — but ONLY over the module's PAD-FREE end (physically where the PCB
+antenna sits), never the whole footprint (that would strand the module's ground
+pads). Antenna parts = the RF allowlist (WROOM/WROVER/ANTENNA/ESP32-C3-MINI/ESP8266
+or an ANT* designator). The keep-out DEPTH is block-declared (internal/blocks/data
+'keepout.end_frac'); the pad-free strip always caps it so it can never reach a pad.
+One region per part on the MULTI layer (spans all copper layers). Run AFTER
+placement; re-run 'pcb check' to confirm the antenna-keepout warning clears.
+
+  easyeda pcb antenna-keepout --project X --dry-run
+  easyeda pcb antenna-keepout --project X`,
+			Args: cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				res, err := requestAction(cfg, "pcb.components.list", window,
+					map[string]any{"includeBBox": true, "includePads": true})
+				if err != nil {
+					return err
+				}
+				keepouts, _ := blocks.LoadAntennaKeepouts()
+				// Idempotency: collect existing no-copper keep-out regions so a re-run
+				// doesn't stack duplicates over an antenna already protected.
+				var existingKO []cpRect
+				if rres, rerr := requestAction(cfg, "pcb.region.list", window, nil); rerr == nil && rres != nil {
+					for _, rr := range mnavSlice(rres.Result, "regions") {
+						rm, ok := rr.(map[string]any)
+						if !ok {
+							continue
+						}
+						noCopper := false
+						for _, rt := range toFloatSlice(rm["ruleType"]) {
+							if rt == 5 || rt == 6 || rt == 7 || rt == 8 { // no-wires/fills/pours/inner-electrical
+								noCopper = true
+							}
+						}
+						bb, ok := rm["bbox"].(map[string]any)
+						if !noCopper || !ok {
+							continue
+						}
+						existingKO = append(existingKO, cpRect{asFloat(bb["minX"]), asFloat(bb["minY"]), asFloat(bb["maxX"]), asFloat(bb["maxY"])})
+					}
+				}
+				type akPlan struct {
+					Designator string     `json:"designator"`
+					Device     string     `json:"device"`
+					Rect       [4]float64 `json:"rect"`
+					Created    bool       `json:"created"`
+				}
+				var plan []akPlan
+				var skipped []map[string]any
+				for _, rc := range mnavSlice(res.Result, "components") {
+					cm, ok := rc.(map[string]any)
+					if !ok {
+						continue
+					}
+					device := cpDeviceName(cm)
+					desig := asString(cm["designator"])
+					if !isAntennaDevice(device, desig) {
+						continue
+					}
+					bb, ok := cm["bbox"].(map[string]any)
+					if !ok {
+						skipped = append(skipped, map[string]any{"designator": desig, "reason": "no bbox"})
+						continue
+					}
+					var pads [][2]float64
+					for _, pi := range mnavSlice(cm, "pads") {
+						if pm, ok := pi.(map[string]any); ok {
+							pads = append(pads, [2]float64{asFloat(pm["x"]), asFloat(pm["y"])})
+						}
+					}
+					x0, y0, x1, y1, ok := antennaKeepoutRect(
+						asFloat(bb["minX"]), asFloat(bb["minY"]), asFloat(bb["maxX"]), asFloat(bb["maxY"]),
+						pads, antennaKeepoutFrac(keepouts, device), margin)
+					if !ok {
+						skipped = append(skipped, map[string]any{"designator": desig, "reason": "no pad-free antenna strip found"})
+						continue
+					}
+					myRect := cpRect{x0, y0, x1, y1}
+					covered := false
+					for _, er := range existingKO {
+						if er.overlaps(myRect) {
+							covered = true
+							break
+						}
+					}
+					if covered {
+						skipped = append(skipped, map[string]any{"designator": desig, "reason": "already covered by an existing no-copper keep-out"})
+						continue
+					}
+					plan = append(plan, akPlan{Designator: desig, Device: device, Rect: [4]float64{x0, y0, x1, y1}})
+				}
+				created := 0
+				for i := range plan {
+					if dryRun {
+						continue
+					}
+					points := rectCorners(plan[i].Rect[0], plan[i].Rect[1], plan[i].Rect[2], plan[i].Rect[3])
+					if _, err := requestAction(cfg, "pcb.region.create", window, map[string]any{
+						"points":   points,
+						"layer":    pcbLayerMulti,
+						"ruleType": []any{5, 6, 7, 8}, // no-wires/no-fills/no-pours + no-inner-electrical → all layers
+						"name":     "antenna-" + plan[i].Designator,
+					}); err != nil {
+						skipped = append(skipped, map[string]any{"designator": plan[i].Designator, "reason": err.Error()})
+						continue
+					}
+					plan[i].Created = true
+					created++
+				}
+				out := map[string]any{
+					"ok": true, "dryRun": dryRun, "layer": pcbLayerMulti,
+					"planned": len(plan), "created": created,
+					"regions": plan, "skipped": skipped,
+				}
+				enc := json.NewEncoder(stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(out)
+			},
+		}
+		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the keep-out plan without creating regions")
+		c.Flags().Float64Var(&margin, "margin", 20, "expand the keep-out outward (away from pads) by this many mil")
 		pcb.AddCommand(c)
 	}
 

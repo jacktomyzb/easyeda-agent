@@ -1,0 +1,93 @@
+package app
+
+import (
+	"math"
+	"strings"
+
+	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+)
+
+// pcb_antenna_keepout.go — auto-generate the all-layer no-copper keep-out for an
+// RF/antenna part (defect #4). The keep-out goes ONLY over the module's pad-free
+// (antenna) end, never the whole footprint — a full-bbox keep-out would strand the
+// module's ground pads. "Which part + how deep" is block-declared (approach A, see
+// internal/blocks/data/*.json `keepout`); "which end" is deterministic geometry
+// (the end of the long axis with no pads is physically where a PCB antenna sits).
+
+// antennaKeepoutFrac returns the block-declared keep-out depth fraction for a
+// device, or 0 when no block declares one (→ the generator uses the full pad-free
+// strip).
+func antennaKeepoutFrac(ks []blocks.AntennaKeepout, device string) float64 {
+	d := strings.ToLower(strings.TrimSpace(device))
+	if d == "" {
+		return 0
+	}
+	for _, k := range ks {
+		if k.Match != "" && strings.Contains(d, strings.ToLower(k.Match)) {
+			return k.EndFrac
+		}
+	}
+	return 0
+}
+
+// padExtent returns the min/max of pad coordinates along axis (0=X, 1=Y).
+func padExtent(pads [][2]float64, axis int) (lo, hi float64, ok bool) {
+	lo, hi = math.Inf(1), math.Inf(-1)
+	for _, p := range pads {
+		v := p[axis]
+		lo, hi = math.Min(lo, v), math.Max(hi, v)
+	}
+	if math.IsInf(lo, 1) {
+		return 0, 0, false
+	}
+	return lo, hi, true
+}
+
+// antennaKeepoutRect computes the no-copper keep-out rectangle for an antenna part:
+// the pad-free strip at one end of the module's LONG axis. endFrac (>0, block-
+// declared) caps the depth to a fraction of the long axis; the pad-free strip
+// ALWAYS caps it too, so the keep-out can never reach the pads (no stranded
+// grounds). margin expands the three OUTER sides (never the pad-facing side).
+// Returns ok=false when there is no usable strip (e.g. no pads).
+func antennaKeepoutRect(minX, minY, maxX, maxY float64, pads [][2]float64, endFrac, margin float64) (x0, y0, x1, y1 float64, ok bool) {
+	w, h := maxX-minX, maxY-minY
+	if w <= 0 || h <= 0 {
+		return
+	}
+	axis, span, bmin, bmax := 1, h, minY, maxY // default long axis = Y
+	if w > h {
+		axis, span, bmin, bmax = 0, w, minX, maxX
+	}
+	lo, hi, pok := padExtent(pads, axis)
+	if !pok {
+		return
+	}
+	lowGap, highGap := lo-bmin, bmax-hi // pad-free strips at each end
+	highEnd := highGap >= lowGap
+	depth := lowGap
+	if highEnd {
+		depth = highGap
+	}
+	if endFrac > 0 {
+		depth = math.Min(depth, endFrac*span) // block caps depth; strip already bounds it
+	}
+	if depth <= 1 {
+		return // no meaningful pad-free strip
+	}
+	if axis == 1 { // Y long axis
+		x0, x1 = minX-margin, maxX+margin
+		if highEnd {
+			y0, y1 = bmax-depth, bmax+margin
+		} else {
+			y0, y1 = bmin-margin, bmin+depth
+		}
+	} else { // X long axis
+		y0, y1 = minY-margin, maxY+margin
+		if highEnd {
+			x0, x1 = bmax-depth, bmax+margin
+		} else {
+			x0, x1 = bmin-margin, bmin+depth
+		}
+	}
+	return x0, y0, x1, y1, true
+}
