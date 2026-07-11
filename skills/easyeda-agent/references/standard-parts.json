@@ -880,6 +880,16 @@
       "basic": false,
       "desc": "小信号 P-MOS 高侧开关(-20V/-2.3A,低 Vgs(th));配 NPN 驱动做 GPIO 高有效门控。auto-added from 车机V2-fable realization 2026-07-09 (box-v2 评审修正版)"
     },
+    "pmu.axp2101_qfn40": {
+      "value": "AXP2101",
+      "mpn": "AXP2101",
+      "lcsc": "C3036461",
+      "deviceUuid": null,
+      "package": "QFN-40 5x5 EP",
+      "class": "pmu",
+      "basic": false,
+      "desc": "X-Powers 单节锂电 NVDC PMU:充电+power-path + 5×DCDC(buck,需外部电感)+11×LDO(线性) + 库仑计 + PWRON 电源键(长按硬关机=硬件行为)+ I2C(7-bit 0x34)。DRAFT: deviceUuid=null 待 ceshi 验证时 `easyeda lib by-lcsc C3036461` 捕获回填(采集时连接器离线)。用于 block.axp2101_pmu(AXP2101 datasheet + M5 CoreS3/Core2v1.1 + LilyGo T-Beam v1.2 harvest 2026-07-11)"
+    },
     "diode.b360a_sma": {
       "value": "B360A 60V/3A",
       "mpn": "B360A 60V/3A",
