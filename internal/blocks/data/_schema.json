@@ -115,6 +115,7 @@
         "_doc": "CONSTRAINT MAP『结构件摆放』——按 <ROLE> 键。结构元器件(连接器/端子/USB/天线/按键/指示灯/屏蔽罩)常须靠板边、并指定放哪个铜面。非结构件(电阻电容)不必列。",
         "<ROLE>": {
           "board_edge": true,
+          "anchor": "bool(可选)——非板边件的『刻意归位』标记。true=place-constrained 必须把它钉在原位(锚定档,不甩到板角),用于 JP701 这类电气上属某处(总线末端)却因位号前缀会被误判为普通卫星的件。board_edge=false 但只是普通建议(如去耦电容放顶面)时 **不要** 设,以免被冻结在坏位。",
           "edge": "any | user-facing | top | bottom | left | right — 靠哪条板边(user-facing=面向用户操作/插拔的那条边)",
           "side": "top | bottom | either — 放哪个铜面(双面板:如矮件/SD 卡座常放底面)",
           "orientation": "自由文本,如 开口朝板外 / 天线端伸出板外 / 长边贴板边",

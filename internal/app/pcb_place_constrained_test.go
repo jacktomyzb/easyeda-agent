@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+)
 
 func mkCP(des, name string, layer int, x, y, w, h float64, pins int) cpComp {
 	c := cpComp{footprint: name, layer: layer}
@@ -38,26 +42,60 @@ func TestClassifyCP(t *testing.T) {
 	}
 }
 
+// TestClassFromHint pins the block-hint → tier semantics: only an EXPLICIT
+// signal decides a tier; an advisory-only hint (a side / orientation note) must
+// fall through (ok=false) so an ordinary part isn't frozen in place.
+func TestClassFromHint(t *testing.T) {
+	if c, ok := classFromHint(blocks.PlacementHint{BoardEdge: true}); !ok || c != cpEdgeMust {
+		t.Errorf("board_edge → (edge-must,true); got (%v,%v)", c, ok)
+	}
+	if c, ok := classFromHint(blocks.PlacementHint{Edge: "user-facing"}); !ok || c != cpUserFacing {
+		t.Errorf("edge=user-facing → (user-facing,true); got (%v,%v)", c, ok)
+	}
+	if c, ok := classFromHint(blocks.PlacementHint{Anchor: true}); !ok || c != cpAnchored {
+		t.Errorf("anchor → (anchored,true); got (%v,%v)", c, ok)
+	}
+	// Advisory-only: board_edge=false, no user-facing, no anchor → no tier forced.
+	if c, ok := classFromHint(blocks.PlacementHint{Side: "top", Orientation: "长边贴板边"}); ok {
+		t.Errorf("advisory-only hint must not force a tier; got (%v,true)", c)
+	}
+}
+
 // TestClassifyCPFromBlockData is the acceptance gate for issue #95 defect #1:
-// classifyCP must consult the block library's placement hints (device name /
-// designator prefix) BEFORE the hardcoded regex. JP701 (RS485 120R terminator
-// jumper) is declared board_edge=false in sp3485_rs485_halfduplex.json, so it
-// must land as an anchored part (kept beside its resistor), NOT be caught by the
-// old J*-but-not-JP* rule and spiraled to a corner as a plain satellite.
+// classifyCP must consult the block library's placement hints BEFORE the regex.
+// Crucially it feeds REAL device names (what a placed part actually reports),
+// NOT block role-ids — the reverse-map keys on the DISTINCTIVE designator prefix,
+// which is how it works on a real board.
 func TestClassifyCPFromBlockData(t *testing.T) {
-	// device name matches the library part id conn.sip2_254 → picked up by
-	// ByDevice regardless of designator.
-	jp := classifyCP(mkCP("JP701", "conn.sip2_254", 1, 0, 0, 60, 40, 2), 8)
-	if jp == cpSatellite {
-		t.Errorf("JP701 (block board_edge=false) must not classify as plain satellite; got %v", jp)
-	}
+	// JP701 on a real board reports its device name "SIP2-2.54mm单排针", never the
+	// block role-id conn.sip2_254. It must still anchor — via the block-declared
+	// "JP" prefix hint (board_edge=false, anchor=true) — NOT be caught by the old
+	// J*-but-not-JP* rule and spiraled to a corner as a plain satellite.
+	jp := classifyCP(mkCP("JP701", "SIP2-2.54mm单排针", 1, 0, 0, 60, 40, 2), 8)
 	if jp != cpAnchored {
-		t.Errorf("JP701 should be block-anchored (deliberate non-edge spot); got %v", jp)
+		t.Errorf("JP701 (block anchor=true, via JP prefix) should be cpAnchored; got %v", jp)
 	}
-	// The 3P terminal J4 IS a board-edge part per the same block → edge-must.
-	j4 := classifyCP(mkCP("J4", "conn.terminal_3p_508", 1, 0, 0, 300, 200, 3), 8)
+
+	// The 3P screw terminal J4 is a board-edge part. Its "J" prefix is generic
+	// (excluded from the index), so it correctly falls to the regex fallback
+	// (terminal footprint + Jxx-not-JPxx) → edge-must.
+	j4 := classifyCP(mkCP("J4", "KF301-5.08-3P 螺钉端子 terminal", 1, 0, 0, 300, 200, 3), 8)
 	if j4 != cpEdgeMust {
-		t.Errorf("J4 (block board_edge=true) should be edge-must; got %v", j4)
+		t.Errorf("J4 (screw terminal, board_edge) should be cpEdgeMust; got %v", j4)
+	}
+
+	// Over-anchor guard (defect #3): an ordinary decoupling cap must NOT be
+	// anchored — no explicit anchor hint reaches it, so it stays a satellite to be
+	// legalized, not frozen wherever it landed.
+	if c := classifyCP(mkCP("C501", "CAP 470uF 35V 电解", 1, 0, 0, 40, 30, 2), 8); c == cpAnchored {
+		t.Errorf("C501 (no explicit anchor) must not be cpAnchored; got %v", c)
+	}
+
+	// The old fiction is dead: feeding a block role-id as the device name is no
+	// longer a match path (device-level precision is a future layer). With an
+	// unknown designator prefix it must not anchor off the role-id string.
+	if c := classifyCP(mkCP("XZ9", "conn.sip2_254", 1, 0, 0, 40, 30, 2), 8); c == cpAnchored {
+		t.Errorf("role-id-as-device-name must not anchor (dead fiction path); got %v", c)
 	}
 }
 
@@ -68,11 +106,11 @@ func TestClassifyCPFromBlockData(t *testing.T) {
 // satellite that gets flung outward.
 func TestConstrainedPlaceKeepsJP701(t *testing.T) {
 	comps := []cpComp{
-		mkCP("U7", "ic.sp3485_sop8", 1, 900, 900, 300, 200, 8),      // main chip, fixed
-		mkCP("J4", "conn.terminal_3p_508", 1, 1500, 900, 300, 200, 3), // edge terminal
-		mkCP("R703", "res.120r_1206", 1, 1300, 900, 80, 50, 2),        // terminator
-		mkCP("JP701", "conn.sip2_254", 1, 1350, 950, 60, 40, 2),       // jumper beside R703/J4
-		mkCP("C701", "cap.100nf_0402", 1, 700, 900, 40, 30, 2),        // decap satellite
+		mkCP("U7", "SP3485EN-L SOP8", 1, 900, 900, 300, 200, 8),         // main chip, fixed
+		mkCP("J4", "KF301-5.08-3P terminal", 1, 1500, 900, 300, 200, 3), // edge terminal
+		mkCP("R703", "RES 120R 1206", 1, 1300, 900, 80, 50, 2),          // terminator
+		mkCP("JP701", "SIP2-2.54mm单排针", 1, 1350, 950, 60, 40, 2),        // jumper beside R703/J4
+		mkCP("C701", "CAP 100nF 0402", 1, 700, 900, 40, 30, 2),          // decap satellite
 	}
 	moves, diags := planConstrainedPlace(comps, nil, defaultCpOptions())
 

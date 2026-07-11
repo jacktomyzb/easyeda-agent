@@ -210,10 +210,11 @@
     },
     "JP701": {
       "board_edge": false,
+      "anchor": true,
       "side": "top",
       "orientation": "紧邻 R703(120R 终端)与 J4 总线末端放置;不是对外插拔件,不要靠板边、更不能被当普通卫星甩到板角",
       "severity": "should",
-      "reason": "RS-485 120R 终端跳线,电气上属总线物理末端(见 pcb_layout.term-at-end),须与 R703/J4 同区便于现场闭合终端。注意:place-constrained 因 JP 前缀会把它误判为普通卫星螺旋甩到角落,须靠本条 placement 显式归位(见 memory improvements-sink-to-blocks)"
+      "reason": "RS-485 120R 终端跳线,电气上属总线物理末端(见 pcb_layout.term-at-end),须与 R703/J4 同区便于现场闭合终端。注意:place-constrained 因 JP 前缀会把它误判为普通卫星螺旋甩到角落,须靠本条 placement 显式归位(anchor=true 把它钉在原位不甩角落;见 memory improvements-sink-to-blocks)"
     }
   },
   "signals": {

@@ -12,6 +12,7 @@ import (
 // part device id or the designator prefix.
 type PlacementHint struct {
 	BoardEdge   bool   `json:"board_edge"`
+	Anchor      bool   `json:"anchor"` // deliberate non-edge position → pin in place (don't spiral)
 	Edge        string `json:"edge"`
 	Side        string `json:"side"`
 	Orientation string `json:"orientation"`
@@ -20,16 +21,24 @@ type PlacementHint struct {
 	Ref         string `json:"-"` // block-internal designator the hint was declared under
 }
 
-// PlacementIndex is the two-level reverse-map the placer consults before falling
-// back to hardcoded regex: device-name → hint and designator-prefix → hint.
+// PlacementIndex is the reverse-map the placer consults before falling back to
+// the hardcoded regex: designator-prefix → block placement hint.
 //
 // ByRefPrefix is deliberately restricted to DISTINCTIVE prefixes (2+ letters
-// such as JP / SW / LED / ANT). Generic single-letter prefixes (U / C / R / X)
-// are excluded: on a real board they denote a whole component class, so blanket
-// prefix-mapping them would misfile (e.g. snapping every U* IC to a board edge).
-// Those are handled by the precise ByDevice layer or the regex fallback.
+// such as JP / SW / LED / ANT). Generic single-letter prefixes (U / C / R / X /
+// J) are excluded: on a real board they denote a whole component class, so
+// blanket prefix-mapping them would misfile (e.g. snapping every U* IC to a
+// board edge). Those fall through to the regex fallback.
+//
+// NOTE — device-level precision is a deliberate FUTURE layer, not indexed here.
+// A block's parts[ref].part is an internal role-id ("conn.sip2_254"), which a
+// PLACED component never exposes — it reports the real device name / deviceUuid
+// (e.g. "SIP2-2.54mm单排针"). Matching those requires the role-id → device bridge
+// in standard-parts.json, which lives in the skill tree and can't be go:embed'd
+// here (go:embed can't reach `..`). Until that bridge is embedded, the
+// designator prefix (itself block-declared, per the improvements-sink-to-blocks
+// rule) is the real matcher; keying on the raw role-id would match nothing.
 type PlacementIndex struct {
-	ByDevice    map[string]PlacementHint // lower-cased library part id → hint
 	ByRefPrefix map[string]PlacementHint // upper-cased alpha designator prefix → hint
 }
 
@@ -59,7 +68,6 @@ func refPrefix(ref string) string {
 // source-of-truth. A malformed single block is skipped, not fatal.
 func LoadPlacementIndex() (PlacementIndex, error) {
 	idx := PlacementIndex{
-		ByDevice:    map[string]PlacementHint{},
 		ByRefPrefix: map[string]PlacementHint{},
 	}
 	all, err := Load()
@@ -67,7 +75,7 @@ func LoadPlacementIndex() (PlacementIndex, error) {
 		return idx, err
 	}
 	// A prefix that resolves to conflicting board_edge across blocks is
-	// ambiguous → drop it, let device-name / regex decide instead.
+	// ambiguous → drop it, let the regex fallback decide instead.
 	prefixConflict := map[string]bool{}
 	for _, b := range all {
 		var raw blockPlacementRaw
@@ -77,13 +85,7 @@ func LoadPlacementIndex() (PlacementIndex, error) {
 		for ref, hint := range raw.Placement {
 			hint.Ref = ref
 			if p, ok := raw.Parts[ref]; ok {
-				hint.Device = p.Part
-			}
-			if hint.Device != "" {
-				key := strings.ToLower(hint.Device)
-				if _, seen := idx.ByDevice[key]; !seen {
-					idx.ByDevice[key] = hint
-				}
+				hint.Device = p.Part // kept for diagnostics / the future device-bridge layer
 			}
 			prefix := refPrefix(ref)
 			// Skip generic single-letter prefixes (see PlacementIndex doc).

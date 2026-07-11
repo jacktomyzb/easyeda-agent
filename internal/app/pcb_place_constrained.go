@@ -26,9 +26,9 @@ import (
 //
 // Classification CONSUMES the circuit-block library's declarative placement hints
 // (internal/blocks/data/*.json → placement.<REF>.{board_edge,edge,...}): a placed
-// part is reverse-mapped to its block role by device name / designator prefix, and
-// only falls back to the hardcoded footprint/designator regex when no block role
-// matches. The block data is the single source-of-truth (see the
+// part is reverse-mapped to its block role by its distinctive designator prefix,
+// and only falls back to the hardcoded footprint/designator regex when no block
+// role matches. The block data is the single source-of-truth (see the
 // improvements-sink-to-blocks rule) — the regex merely mirrors it as a safety net.
 // A board that was block-assembled or built from the schematic both work: we read
 // what's placed, not how it got there (placed parts carry no block link, hence the
@@ -80,29 +80,38 @@ func placementIndex() blocks.PlacementIndex {
 	return cpIdx
 }
 
-// classFromHint maps a block placement hint to a placement tier:
-//   - board_edge=true                     → edge-must (tier 2), snapped to an edge.
-//   - user-facing (and NOT board_edge)    → tier 4 user-facing (LED / button).
-//   - any other DELIBERATE non-edge decl  → anchored (tier 3): the block pinned it
-//     to a specific spot next to another part (e.g. JP701 by its 120R terminator),
-//     so keep it put rather than spiral it to a board corner.
+// classFromHint maps a block placement hint to a placement tier. It decides ONLY
+// on an EXPLICIT signal; an advisory hint (a side/orientation note with no
+// board_edge / user-facing / anchor) returns ok=false so classifyCP falls through
+// to the regex/pin-count heuristic — an ordinary decoupling cap that merely
+// carries a "side: top" note must NOT be frozen in place.
+//
+//   - board_edge=true                  → edge-must (tier 2), snapped to an edge.
+//   - edge="user-facing" (not edge)    → tier 4 user-facing (LED / button).
+//   - anchor=true (deliberate non-edge)→ anchored (tier 3): the block pinned it to
+//     a specific spot beside another part (e.g. JP701 by its 120R terminator), so
+//     keep it put rather than spiral it to a board corner.
+//   - otherwise                        → (_, false): advisory only, no tier forced.
 //
 // The hint only ever promotes a part to a stronger placement role; it never
 // demotes a main chip (which the pin-count fallback still catches).
-func classFromHint(h blocks.PlacementHint) cpClass {
-	if h.BoardEdge {
-		return cpEdgeMust
+func classFromHint(h blocks.PlacementHint) (cpClass, bool) {
+	switch {
+	case h.BoardEdge:
+		return cpEdgeMust, true
+	case strings.EqualFold(strings.TrimSpace(h.Edge), "user-facing"):
+		return cpUserFacing, true
+	case h.Anchor:
+		return cpAnchored, true
+	default:
+		return 0, false
 	}
-	if strings.EqualFold(strings.TrimSpace(h.Edge), "user-facing") {
-		return cpUserFacing
-	}
-	return cpAnchored
 }
 
 // Footprint / designator patterns for the position-constrained categories. These
 // only MIRROR the block library's placement hints — they are the FALLBACK, used
-// when classifyCP can't reverse-map a placed part to a block role by device name
-// or designator prefix (see placementIndex). The block data is the source-of-truth.
+// when classifyCP can't reverse-map a placed part to a block role by its
+// designator prefix (see placementIndex). The block data is the source-of-truth.
 var (
 	cpReEdgeConn = regexp.MustCompile(`(?i)usb|type-?c|micro-?sd|tf[-_ ]?card|sd[-_]?card|push-?push|ipex|u\.?fl|sma|ufl|kf301|kf128|kf2edg|terminal|screw|hdr|header|pin-?header|conn`)
 	cpReModule   = regexp.MustCompile(`(?i)wroom|wrover|esp32.*(module|wifi|smd)`)
@@ -125,20 +134,25 @@ type cpComp struct {
 //
 // Block-data FIRST: the declarative placement hints in internal/blocks/data/*.json
 // are the source-of-truth (see improvements-sink-to-blocks). We reverse-map the
-// placed part to a block role by device name, then by DISTINCTIVE designator
-// prefix (a placed part carries no block link, so we can only match on what it
-// exposes). Only when neither matches do we fall through to the hardcoded regex
-// heuristic below — that regex is the fallback, not the primary path.
+// placed part to a block role by its DISTINCTIVE designator prefix (a placed part
+// carries no block link, so we can only match on what it exposes; device-level
+// precision is a future layer — see blocks.PlacementIndex). Only when the prefix
+// yields no explicit hint do we fall through to the hardcoded regex heuristic
+// below — that regex is the fallback, not the primary path.
 func classifyCP(c cpComp, mainPins int) cpClass {
 	fp := c.footprint
 	des := strings.ToUpper(c.designator)
 
+	// Block data FIRST: reverse-map the placed part to a block role by DISTINCTIVE
+	// designator prefix (JP/SW/LED/ANT…). The prefix is itself block-declared, so
+	// this consumes the source-of-truth (per improvements-sink-to-blocks). Only an
+	// EXPLICIT hint (board_edge/user-facing/anchor) decides a tier; an advisory
+	// hint falls through to the regex heuristic below.
 	idx := placementIndex()
-	if h, ok := idx.ByDevice[strings.ToLower(strings.TrimSpace(fp))]; ok {
-		return classFromHint(h)
-	}
 	if h, ok := idx.ByRefPrefix[refPrefixCP(des)]; ok {
-		return classFromHint(h)
+		if cls, decided := classFromHint(h); decided {
+			return cls
+		}
 	}
 	// A connector/module footprint, OR a Jxx designator that isn't a plain header
 	// resistor — treat as edge-must.

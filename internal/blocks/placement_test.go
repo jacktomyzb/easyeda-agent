@@ -1,6 +1,9 @@
 package blocks
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLoadPlacementIndex(t *testing.T) {
 	idx, err := LoadPlacementIndex()
@@ -8,27 +11,31 @@ func TestLoadPlacementIndex(t *testing.T) {
 		t.Fatalf("LoadPlacementIndex: %v", err)
 	}
 
-	// JP701's part (conn.sip2_254) is declared board_edge=false in the RS485
-	// block — the exact misfire issue #95 fixes.
-	jp, ok := idx.ByDevice["conn.sip2_254"]
+	// JP701 (RS485 120R terminator jumper) is board_edge=false + anchor=true in
+	// the RS485 block — the exact misfire issue #95 fixes. Its DISTINCTIVE "JP"
+	// prefix must resolve to that anchored, non-edge hint (a placed part never
+	// exposes the block role-id, so the prefix is what the placer matches on).
+	jp, ok := idx.ByRefPrefix["JP"]
 	if !ok {
-		t.Fatal("conn.sip2_254 (JP701) missing from ByDevice index")
+		t.Fatal("JP prefix (JP701) missing from ByRefPrefix index")
 	}
 	if jp.BoardEdge {
-		t.Errorf("JP701 part should be board_edge=false; got true")
+		t.Errorf("JP701 hint should be board_edge=false; got true")
+	}
+	if !jp.Anchor {
+		t.Errorf("JP701 hint should be anchor=true (deliberate non-edge); got false")
 	}
 
-	// The 3P terminal is an edge part.
-	if j4, ok := idx.ByDevice["conn.terminal_3p_508"]; !ok || !j4.BoardEdge {
-		t.Errorf("conn.terminal_3p_508 (J4) should be indexed board_edge=true; ok=%v edge=%v", ok, j4.BoardEdge)
+	// ANT (RF u.FL) is a board-edge part; SW (tactile buttons) are user-facing.
+	if ant, ok := idx.ByRefPrefix["ANT"]; !ok || !ant.BoardEdge {
+		t.Errorf("ANT prefix should be indexed board_edge=true; ok=%v edge=%v", ok, ant.BoardEdge)
+	}
+	if sw, ok := idx.ByRefPrefix["SW"]; !ok || !strings.EqualFold(strings.TrimSpace(sw.Edge), "user-facing") {
+		t.Errorf("SW prefix should be user-facing; ok=%v edge=%q", ok, sw.Edge)
 	}
 
-	// Distinctive prefixes are indexed; the JP prefix resolves to a non-edge hint.
-	if jpP, ok := idx.ByRefPrefix["JP"]; ok && jpP.BoardEdge {
-		t.Errorf("JP prefix should map to a non-edge hint; got board_edge=true")
-	}
 	// Generic single-letter prefixes must NOT be indexed (would misfile whole
-	// component classes).
+	// component classes — e.g. snapping every U* IC to a board edge).
 	for _, p := range []string{"U", "C", "R", "X", "J"} {
 		if _, ok := idx.ByRefPrefix[p]; ok {
 			t.Errorf("generic prefix %q must not be in ByRefPrefix", p)
