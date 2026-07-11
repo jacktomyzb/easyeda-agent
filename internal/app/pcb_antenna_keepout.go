@@ -14,6 +14,17 @@ import (
 // internal/blocks/data/*.json `keepout`); "which end" is deterministic geometry
 // (the end of the long axis with no pads is physically where a PCB antenna sits).
 
+// resolveAntennaDevice picks the device string used for antenna detection: the
+// silk Device attribute (what pcb check keys on) when present, else the placed
+// part's real device via cpDeviceName (manufacturerId / non-template name). Used
+// by BOTH pcb check and `pcb antenna-keepout` so they detect the SAME RF parts.
+func resolveAntennaDevice(silkDevice string, cm map[string]any) string {
+	if s := strings.TrimSpace(silkDevice); s != "" {
+		return s
+	}
+	return cpDeviceName(cm)
+}
+
 // antennaKeepoutFrac returns the block-declared keep-out depth fraction for a
 // device, or 0 when no block declares one (→ the generator uses the full pad-free
 // strip).
@@ -49,7 +60,7 @@ func padExtent(pads [][2]float64, axis int) (lo, hi float64, ok bool) {
 // ALWAYS caps it too, so the keep-out can never reach the pads (no stranded
 // grounds). margin expands the three OUTER sides (never the pad-facing side).
 // Returns ok=false when there is no usable strip (e.g. no pads).
-func antennaKeepoutRect(minX, minY, maxX, maxY float64, pads [][2]float64, endFrac, margin float64) (x0, y0, x1, y1 float64, ok bool) {
+func antennaKeepoutRect(minX, minY, maxX, maxY float64, pads [][2]float64, endFrac, margin, padClear float64) (x0, y0, x1, y1 float64, ok bool) {
 	w, h := maxX-minX, maxY-minY
 	if w <= 0 || h <= 0 {
 		return
@@ -62,17 +73,22 @@ func antennaKeepoutRect(minX, minY, maxX, maxY float64, pads [][2]float64, endFr
 	if !pok {
 		return
 	}
-	lowGap, highGap := lo-bmin, bmax-hi // pad-free strips at each end
+	// The pad-free strip is measured to the nearest pad's CENTER (pad width/height
+	// isn't exposed), so pull the keep-out's pad-facing edge back by padClear to
+	// clear the pad BODIES — otherwise the region would cover the antenna-facing
+	// half of the outermost pad row and could strand its copper.
+	lowGap, highGap := lo-bmin, bmax-hi // pad-free strips at each end (to pad centers)
 	highEnd := highGap >= lowGap
-	depth := lowGap
+	strip := lowGap
 	if highEnd {
-		depth = highGap
+		strip = highGap
 	}
+	depth := strip - padClear
 	if endFrac > 0 {
 		depth = math.Min(depth, endFrac*span) // block caps depth; strip already bounds it
 	}
 	if depth <= 1 {
-		return // no meaningful pad-free strip
+		return // no meaningful pad-free strip after clearing the pads
 	}
 	if axis == 1 { // Y long axis
 		x0, x1 = minX-margin, maxX+margin

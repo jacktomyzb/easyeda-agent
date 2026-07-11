@@ -42,12 +42,13 @@ type PlacementIndex struct {
 	ByRefPrefix map[string]PlacementHint // upper-cased alpha designator prefix → hint
 }
 
-// blockPlacementRaw mirrors just the fields of a block JSON the index needs.
+// blockPlacementRaw mirrors just the fields of a block JSON the index needs. Both
+// maps are kept as RawMessage so a schema doc key (`_doc`, a STRING value) or any
+// other non-conforming entry can be skipped PER-KEY — unmarshalling straight into
+// map[string]PlacementHint would fail the whole block and silently drop every hint.
 type blockPlacementRaw struct {
-	Parts map[string]struct {
-		Part string `json:"part"`
-	} `json:"parts"`
-	Placement map[string]PlacementHint `json:"placement"`
+	Parts     map[string]json.RawMessage `json:"parts"`
+	Placement map[string]json.RawMessage `json:"placement"`
 }
 
 // refPrefix returns the leading alphabetic run of a designator, upper-cased
@@ -82,10 +83,22 @@ func LoadPlacementIndex() (PlacementIndex, error) {
 		if json.Unmarshal(b.Raw, &raw) != nil {
 			continue
 		}
-		for ref, hint := range raw.Placement {
+		for ref, rawHint := range raw.Placement {
+			if strings.HasPrefix(ref, "_") { // schema doc key (e.g. "_doc"), not a real ref
+				continue
+			}
+			var hint PlacementHint
+			if json.Unmarshal(rawHint, &hint) != nil {
+				continue // a single non-conforming entry — skip it, not the whole block
+			}
 			hint.Ref = ref
-			if p, ok := raw.Parts[ref]; ok {
-				hint.Device = p.Part // kept for diagnostics / the future device-bridge layer
+			if praw, ok := raw.Parts[ref]; ok {
+				var p struct {
+					Part string `json:"part"`
+				}
+				if json.Unmarshal(praw, &p) == nil {
+					hint.Device = p.Part // kept for diagnostics / the future device-bridge layer
+				}
 			}
 			prefix := refPrefix(ref)
 			// Skip generic single-letter prefixes (see PlacementIndex doc).

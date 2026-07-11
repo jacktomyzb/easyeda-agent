@@ -2009,7 +2009,7 @@ A SEED — verify with 'pcb layout-lint'. --dry-run prints the plan.
 	// end (defect #4; geometry in pcb_antenna_keepout.go, depth block-declared).
 	{
 		var dryRun bool
-		var margin float64
+		var margin, padClear float64
 		c := &cobra.Command{
 			Use:   "antenna-keepout",
 			Short: "Auto-generate the all-layer no-copper keep-out over each RF/antenna part's antenna end",
@@ -2032,6 +2032,17 @@ placement; re-run 'pcb check' to confirm the antenna-keepout warning clears.
 					return err
 				}
 				keepouts, _ := blocks.LoadAntennaKeepouts()
+				// Device name per component from the silk Device attribute — the same
+				// source pcb check keys on, so both detect the same RF parts (a placed
+				// part's `name` is often the "={Manufacturer Part}" template).
+				silkDev := map[string]string{}
+				if silk, serr := fetchPcbSilk(cfg, window); serr == nil {
+					for _, s := range silk {
+						if s.Kind == "attribute" && s.Key == "Device" && s.CompID != "" {
+							silkDev[s.CompID] = s.Text
+						}
+					}
+				}
 				// Idempotency: collect existing no-copper keep-out regions so a re-run
 				// doesn't stack duplicates over an antenna already protected.
 				var existingKO []cpRect
@@ -2041,14 +2052,18 @@ placement; re-run 'pcb check' to confirm the antenna-keepout warning clears.
 						if !ok {
 							continue
 						}
-						noCopper := false
+						// Only a MULTI-layer NoOuterCopper region (rules 5/6/7 on layer 12)
+						// actually satisfies `pcb check` for every layer — the exact region we
+						// emit. A top-only / inner-only region does NOT, so it must NOT suppress
+						// generation (else the antenna is left under-protected but "covered").
+						outer := false
 						for _, rt := range toFloatSlice(rm["ruleType"]) {
-							if rt == 5 || rt == 6 || rt == 7 || rt == 8 { // no-wires/fills/pours/inner-electrical
-								noCopper = true
+							if rt == 5 || rt == 6 || rt == 7 { // no-wires/no-fills/no-pours = NoOuterCopper
+								outer = true
 							}
 						}
 						bb, ok := rm["bbox"].(map[string]any)
-						if !noCopper || !ok {
+						if !outer || int(asFloat(rm["layer"])) != pcbLayerMulti || !ok {
 							continue
 						}
 						existingKO = append(existingKO, cpRect{asFloat(bb["minX"]), asFloat(bb["minY"]), asFloat(bb["maxX"]), asFloat(bb["maxY"])})
@@ -2067,7 +2082,7 @@ placement; re-run 'pcb check' to confirm the antenna-keepout warning clears.
 					if !ok {
 						continue
 					}
-					device := cpDeviceName(cm)
+					device := resolveAntennaDevice(silkDev[asString(cm["primitiveId"])], cm)
 					desig := asString(cm["designator"])
 					if !isAntennaDevice(device, desig) {
 						continue
@@ -2085,7 +2100,7 @@ placement; re-run 'pcb check' to confirm the antenna-keepout warning clears.
 					}
 					x0, y0, x1, y1, ok := antennaKeepoutRect(
 						asFloat(bb["minX"]), asFloat(bb["minY"]), asFloat(bb["maxX"]), asFloat(bb["maxY"]),
-						pads, antennaKeepoutFrac(keepouts, device), margin)
+						pads, antennaKeepoutFrac(keepouts, device), margin, padClear)
 					if !ok {
 						skipped = append(skipped, map[string]any{"designator": desig, "reason": "no pad-free antenna strip found"})
 						continue
@@ -2134,6 +2149,7 @@ placement; re-run 'pcb check' to confirm the antenna-keepout warning clears.
 		}
 		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the keep-out plan without creating regions")
 		c.Flags().Float64Var(&margin, "margin", 20, "expand the keep-out outward (away from pads) by this many mil")
+		c.Flags().Float64Var(&padClear, "pad-clearance", 40, "pull the keep-out's pad-facing edge back this many mil to clear pad bodies (strip is measured to pad centers)")
 		pcb.AddCommand(c)
 	}
 

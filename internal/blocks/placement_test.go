@@ -1,9 +1,29 @@
 package blocks
 
 import (
-	"strings"
+	"encoding/json"
 	"testing"
 )
+
+// TestPlacementDocKeyDoesNotDropBlock reproduces the exact bug where a block whose
+// `placement` (or `parts`) carries a schema `_doc` STRING key made the old
+// map[string]PlacementHint unmarshal fail → the WHOLE block's hints were silently
+// dropped. The RawMessage maps + per-key parse must tolerate it.
+func TestPlacementDocKeyDoesNotDropBlock(t *testing.T) {
+	raw := []byte(`{"parts":{"_doc":"x","SW1":{"part":"sw.tact"}},"placement":{"_doc":"doc string","SW1":{"board_edge":true,"edge":"user-facing"}}}`)
+	var bpr blockPlacementRaw
+	if err := json.Unmarshal(raw, &bpr); err != nil {
+		t.Fatalf("blockPlacementRaw must unmarshal a block with _doc keys; got %v", err)
+	}
+	sw1, ok := bpr.Placement["SW1"]
+	if !ok {
+		t.Fatal("SW1 placement entry missing")
+	}
+	var h PlacementHint
+	if err := json.Unmarshal(sw1, &h); err != nil || !h.BoardEdge {
+		t.Errorf("SW1 hint must parse (board_edge=true); err=%v h=%+v", err, h)
+	}
+}
 
 func TestLoadPlacementIndex(t *testing.T) {
 	idx, err := LoadPlacementIndex()
@@ -26,12 +46,15 @@ func TestLoadPlacementIndex(t *testing.T) {
 		t.Errorf("JP701 hint should be anchor=true (deliberate non-edge); got false")
 	}
 
-	// ANT (RF u.FL) is a board-edge part; SW (tactile buttons) are user-facing.
+	// ANT (RF u.FL) is a board-edge part.
 	if ant, ok := idx.ByRefPrefix["ANT"]; !ok || !ant.BoardEdge {
 		t.Errorf("ANT prefix should be indexed board_edge=true; ok=%v edge=%v", ok, ant.BoardEdge)
 	}
-	if sw, ok := idx.ByRefPrefix["SW"]; !ok || !strings.EqualFold(strings.TrimSpace(sw.Edge), "user-facing") {
-		t.Errorf("SW prefix should be user-facing; ok=%v edge=%q", ok, sw.Edge)
+	// SW is a CONFLICTED prefix across blocks (tactile buttons board_edge=false vs
+	// axp2101's power button board_edge=true) → the index must DROP it (don't guess
+	// an ambiguous prefix); the regex fallback still resolves SW* → user-facing.
+	if _, ok := idx.ByRefPrefix["SW"]; ok {
+		t.Errorf("SW prefix must be dropped (conflicting board_edge across blocks); still indexed")
 	}
 
 	// Generic single-letter prefixes must NOT be indexed (would misfile whole

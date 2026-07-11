@@ -552,18 +552,29 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 			}
 		}
 	}
+	// Prefer LOCAL (signal) nets so a satellite clusters onto the chip it truly
+	// belongs to; global power/ground nets (GND/VCC/3V3) are shared by EVERY chip,
+	// so seeding on them would pick a geometrically-near but electrically-unrelated
+	// chip. Fall back to all nets only when the part has no local net (a pure
+	// decoupling cap on VCC+GND) — matching the auto-place convention (localNets).
 	netSeed := func(c cpComp, fromX, fromY float64) (float64, float64, bool) {
-		var cand []apPad
-		seen := map[string]bool{}
-		for _, p := range c.pads {
-			n := strings.TrimSpace(p.net)
-			if n == "" || seen[n] {
-				continue
+		collect := func(localOnly bool) []apPad {
+			var cand []apPad
+			seen := map[string]bool{}
+			for _, p := range c.pads {
+				n := strings.TrimSpace(p.net)
+				if n == "" || seen[n] || (localOnly && isGlobalNet(n)) {
+					continue
+				}
+				seen[n] = true
+				cand = append(cand, fixedNetPads[n]...)
 			}
-			seen[n] = true
-			cand = append(cand, fixedNetPads[n]...)
+			return cand
 		}
-		if pad, ok := nearestPad(cand, fromX, fromY); ok {
+		if pad, ok := nearestPad(collect(true), fromX, fromY); ok { // local nets first
+			return pad.x, pad.y, true
+		}
+		if pad, ok := nearestPad(collect(false), fromX, fromY); ok { // fall back to all
 			return pad.x, pad.y, true
 		}
 		return 0, 0, false

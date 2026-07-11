@@ -1584,13 +1584,10 @@ func fetchAntennaContext(cfg *appConfig, window string, silk []pcbSilkText) ([]p
 		}
 		id, _ := cm["primitiveId"].(string)
 		desig, _ := cm["designator"].(string)
-		device := devByComp[id]
-		if device == "" {
-			// The silk Device attribute is often absent on placed parts; fall back to
-			// the manufacturerId (e.g. "ESP32-S3-WROOM-1") so antenna detection here
-			// matches `pcb antenna-keepout`'s (both must see the same RF parts).
-			device = asString(cm["manufacturerId"])
-		}
+		// Silk Device attr → else cpDeviceName (manufacturerId / non-template name).
+		// The SAME resolver `pcb antenna-keepout` uses, so both detect the same RF
+		// parts (the placed `name` is often the "={Manufacturer Part}" template).
+		device := resolveAntennaDevice(devByComp[id], cm)
 		if !isAntennaDevice(device, desig) {
 			continue
 		}
