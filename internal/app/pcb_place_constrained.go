@@ -5,6 +5,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+
+	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
 )
 
 // pcb_place_constrained.go — constraint-driven TIERED placement (daemon-side).
@@ -17,12 +20,19 @@ import (
 //	Tier 2  edge-constrained parts    — connectors (USB / terminal / card socket / IPEX) + RF
 //	                                     modules → snapped flush to their NEAREST board edge, fixed.
 //	Tier 3  main chips + crystals     — anchors, kept where they are (fixed).
+//	        + block-anchored parts    — a part the block pinned to a deliberate
+//	                                     non-edge spot (e.g. a bus-terminal jumper).
 //	Tier 4  satellites + user-facing  — legalized (spiral) around the fixed set, avoiding holes.
 //
-// Classification is by footprint/designator pattern — the categories are the ones
-// the circuit-block library flags with `placement.board_edge=true` / `user-facing`
-// (see internal/blocks/data/*.json). A board that was block-assembled or built from
-// the schematic both work: we read what's placed, not how it got there.
+// Classification CONSUMES the circuit-block library's declarative placement hints
+// (internal/blocks/data/*.json → placement.<REF>.{board_edge,edge,...}): a placed
+// part is reverse-mapped to its block role by device name / designator prefix, and
+// only falls back to the hardcoded footprint/designator regex when no block role
+// matches. The block data is the single source-of-truth (see the
+// improvements-sink-to-blocks rule) — the regex merely mirrors it as a safety net.
+// A board that was block-assembled or built from the schematic both work: we read
+// what's placed, not how it got there (placed parts carry no block link, hence the
+// device-name / prefix reverse lookup).
 
 type cpClass int
 
@@ -31,6 +41,8 @@ const (
 	cpUserFacing                // tier 4, but wants to stay near an edge / visible (LED, button)
 	cpMainChip                  // tier 3
 	cpEdgeMust                  // tier 2 — MUST sit at a board edge (connector / module / IPEX)
+	cpAnchored                  // tier 3 — block declares a DELIBERATE non-edge position
+	// (e.g. a bus-terminal jumper next to its resistor); keep it put, don't spiral.
 )
 
 func (k cpClass) String() string {
@@ -39,6 +51,8 @@ func (k cpClass) String() string {
 		return "edge"
 	case cpMainChip:
 		return "main"
+	case cpAnchored:
+		return "anchored"
 	case cpUserFacing:
 		return "user-facing"
 	default:
@@ -46,9 +60,49 @@ func (k cpClass) String() string {
 	}
 }
 
-// Footprint / designator patterns for the position-constrained categories. Derived
-// from the block library's placement hints (must-edge = connectors + RF module;
-// user-facing = buttons + LED). Matched case-insensitively against footprint name.
+// cpPlacementIndex lazily loads (and caches) the block library's placement hints
+// so classifyCP can consult the declarative source-of-truth before falling back
+// to the hardcoded regex below. The block data is go:embed'd, so this never
+// touches disk. Built once; the index is read-only after.
+var (
+	cpIdxOnce sync.Once
+	cpIdx     blocks.PlacementIndex
+)
+
+func placementIndex() blocks.PlacementIndex {
+	cpIdxOnce.Do(func() {
+		// Errors leave cpIdx zero-valued (empty maps → classifyCP just uses the
+		// regex fallback), so a broken block library degrades, never panics.
+		if idx, err := blocks.LoadPlacementIndex(); err == nil {
+			cpIdx = idx
+		}
+	})
+	return cpIdx
+}
+
+// classFromHint maps a block placement hint to a placement tier:
+//   - board_edge=true                     → edge-must (tier 2), snapped to an edge.
+//   - user-facing (and NOT board_edge)    → tier 4 user-facing (LED / button).
+//   - any other DELIBERATE non-edge decl  → anchored (tier 3): the block pinned it
+//     to a specific spot next to another part (e.g. JP701 by its 120R terminator),
+//     so keep it put rather than spiral it to a board corner.
+//
+// The hint only ever promotes a part to a stronger placement role; it never
+// demotes a main chip (which the pin-count fallback still catches).
+func classFromHint(h blocks.PlacementHint) cpClass {
+	if h.BoardEdge {
+		return cpEdgeMust
+	}
+	if strings.EqualFold(strings.TrimSpace(h.Edge), "user-facing") {
+		return cpUserFacing
+	}
+	return cpAnchored
+}
+
+// Footprint / designator patterns for the position-constrained categories. These
+// only MIRROR the block library's placement hints — they are the FALLBACK, used
+// when classifyCP can't reverse-map a placed part to a block role by device name
+// or designator prefix (see placementIndex). The block data is the source-of-truth.
 var (
 	cpReEdgeConn = regexp.MustCompile(`(?i)usb|type-?c|micro-?sd|tf[-_ ]?card|sd[-_]?card|push-?push|ipex|u\.?fl|sma|ufl|kf301|kf128|kf2edg|terminal|screw|hdr|header|pin-?header|conn`)
 	cpReModule   = regexp.MustCompile(`(?i)wroom|wrover|esp32.*(module|wifi|smd)`)
@@ -68,9 +122,24 @@ type cpComp struct {
 }
 
 // classify decides the placement tier from footprint + designator + pin count.
+//
+// Block-data FIRST: the declarative placement hints in internal/blocks/data/*.json
+// are the source-of-truth (see improvements-sink-to-blocks). We reverse-map the
+// placed part to a block role by device name, then by DISTINCTIVE designator
+// prefix (a placed part carries no block link, so we can only match on what it
+// exposes). Only when neither matches do we fall through to the hardcoded regex
+// heuristic below — that regex is the fallback, not the primary path.
 func classifyCP(c cpComp, mainPins int) cpClass {
 	fp := c.footprint
 	des := strings.ToUpper(c.designator)
+
+	idx := placementIndex()
+	if h, ok := idx.ByDevice[strings.ToLower(strings.TrimSpace(fp))]; ok {
+		return classFromHint(h)
+	}
+	if h, ok := idx.ByRefPrefix[refPrefixCP(des)]; ok {
+		return classFromHint(h)
+	}
 	// A connector/module footprint, OR a Jxx designator that isn't a plain header
 	// resistor — treat as edge-must.
 	if cpReModule.MatchString(fp) {
@@ -93,6 +162,18 @@ func classifyCP(c cpComp, mainPins int) cpClass {
 		return cpMainChip
 	}
 	return cpSatellite
+}
+
+// refPrefixCP returns the leading alphabetic run of a designator, upper-cased
+// ("JP701" → "JP", "J4" → "J"). Mirrors blocks.refPrefix so the app-side lookup
+// key matches the index key.
+func refPrefixCP(des string) string {
+	des = strings.ToUpper(strings.TrimSpace(des))
+	i := 0
+	for i < len(des) && des[i] >= 'A' && des[i] <= 'Z' {
+		i++
+	}
+	return des[:i]
 }
 
 // edgeInteriorDir is the unit vector pointing from a board edge toward the board
@@ -295,13 +376,21 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 		diags = append(diags, apDiag{Designator: c.designator, Reason: reason})
 	}
 
-	// ── Tier 3: main chips + crystals → keep where they are, fix. ─────────────
+	// ── Tier 3: main chips + crystals + block-anchored parts → keep, fix. ─────
+	// cpAnchored is a part the block deliberately pinned to a specific non-edge
+	// spot (e.g. a bus-terminal jumper beside its resistor). Like a main chip we
+	// leave it where it is and add it to the fixed set, so the Tier-4 spiral can
+	// never fling it to a corner.
 	for i, c := range comps {
-		if kinds[i] != cpMainChip || !c.hasBBox {
+		if (kinds[i] != cpMainChip && kinds[i] != cpAnchored) || !c.hasBBox {
 			continue
 		}
 		addFixed(cpRect{c.minX - m, c.minY - m, c.maxX + m, c.maxY + m}, c.layer)
-		diags = append(diags, apDiag{Designator: c.designator, Reason: "main:fixed"})
+		reason := "main:fixed"
+		if kinds[i] == cpAnchored {
+			reason = "anchored:fixed"
+		}
+		diags = append(diags, apDiag{Designator: c.designator, Reason: reason})
 	}
 
 	// ── Tier 4: satellites + user-facing → legalize (spiral) around fixed. ────
