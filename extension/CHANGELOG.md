@@ -6,11 +6,39 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed
-- **连接器已上架[立创EDA官方插件市场](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)**
-  —— 新增第二条安装通道:插件市场一键安装,平台可**原地自动更新**。侧载的 GitHub
-  Release `.eext` 仍与 CLI **严格同版**,是四件套对齐的权威来源;市场版本可能滞后
-  CLI(无发布 CLI/API,每次发版需网页端手动重新提审)。
+## [0.11.2] - 2026-07-12
+
+本版聚焦 **PCB 布局智能** 与 **电路块库扩张**,并将连接器上架官方插件市场。
+
+### Added
+- **电路块库扩张(~15 个新拓扑块 + 两批器件入库)**:sy8089 3V3 同步 buck、tps63802
+  buck-boost、usbc_ufp_power_or(USB-C 设备口 + VBUS 二极管 OR)、ch334f USB2.0 四口 hub、
+  bq24074 power-path 充电、vehicle_input 车载 12–24V 前端 + tps54360 车规 buck、
+  pmos_highside 高侧软启动、opto_acc_ign 车载 ACC/点火检测、axp2101 PMU 等。
+- **`easyeda pcb antenna-keepout`(新命令)**:按块声明(`keepout.end_frac`)自动为
+  RF/天线器件在**每个铜层**(MULTI 层)生成 no-copper 禁铜区——只盖模组**无焊盘的天线端**
+  (不孤立接地焊盘)、幂等;`--dry-run` / `--pad-clearance`。
+- **边缘端子自动定向**:块声明连接器开口方向(`openings:[{match,local}]`),
+  `pcb place-constrained` 据此把螺钉端子等**开口自动转向板外**;焊盘对称且块未声明的
+  连接器则**显式提示手工确认**(不凭焊盘几何乱猜)。
+- **连接器上架[立创EDA官方插件市场](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)**
+  —— 新增市场一键安装通道,平台可**原地自动更新**;侧载 GitHub Release `.eext` 仍与 CLI
+  **严格同版**,是四件套对齐的权威来源(市场版本可能滞后 CLI,每次发版需网页端手动重新提审)。
+
+### Changed / Fixed — PCB 布局智能(place-constrained 大修)
+- 器件分类改**消费块 placement 数据**(位号前缀)而非硬编码正则 + 新增显式 `anchor` 档;
+  分类字符串改用真 `manufacturerId` 而非 `"={Manufacturer Part}"` 模板(修 WROOM 被误判为
+  主芯片、连接器按名认不出)。
+- 边缘吸附读**真板框**(`pcb.outline.get`)而非件云 bbox;Tier-4 卫星**按共网聚类**到
+  所属芯片(优先局部信号网)。
+- **对抗审查修 6 个潜在 bug**:天线 keepout 不再压焊盘(`--pad-clearance` 让开焊盘本体)、
+  块 `_doc` 键不再丢整块 placement、天线幂等收紧(只认 MULTI 层全铜禁铜)、netSeed 优先
+  局部网、天线器件识别在 `pcb check` 与生成器两侧对齐。
+
+### Verified
+- `go test ./...` 全绿;**ceshi 真机逐条验证**(WROOM 模组 `main`→`edge`、J1 螺钉端子开口
+  朝外、天线 keepout `pcb check` loop 0→1→0);两轮多 agent **对抗审查**复核 5 个 review 修复
+  (0 新增回归)。
 
 ## [0.11.1] - 2026-07-10
 
