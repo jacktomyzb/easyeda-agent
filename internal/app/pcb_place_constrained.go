@@ -441,6 +441,42 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 		}
 		return false
 	}
+	inside := func(r cpRect) bool {
+		return !(r.x0 < bx0-20 || r.y0 < by0-20 || r.x1 > bx1+20 || r.y1 > by1+20)
+	}
+	// Net-aware seed source: pads of the FIXED, NON-MOVED parts (mains + anchored).
+	// Tier-2 edge parts DID move, so their pad coords are stale — exclude them.
+	// A satellite that must be relocated is seeded near its nearest electrically-
+	// related fixed pad, so a decoupling cap clusters onto its chip instead of
+	// landing at the first free slot near a bad import position.
+	fixedNetPads := map[string][]apPad{}
+	for i, c := range comps {
+		if kinds[i] != cpMainChip && kinds[i] != cpAnchored {
+			continue
+		}
+		for _, p := range c.pads {
+			if n := strings.TrimSpace(p.net); n != "" {
+				fixedNetPads[n] = append(fixedNetPads[n], p)
+			}
+		}
+	}
+	netSeed := func(c cpComp, fromX, fromY float64) (float64, float64, bool) {
+		var cand []apPad
+		seen := map[string]bool{}
+		for _, p := range c.pads {
+			n := strings.TrimSpace(p.net)
+			if n == "" || seen[n] {
+				continue
+			}
+			seen[n] = true
+			cand = append(cand, fixedNetPads[n]...)
+		}
+		if pad, ok := nearestPad(cand, fromX, fromY); ok {
+			return pad.x, pad.y, true
+		}
+		return 0, 0, false
+	}
+
 	for _, i := range satIdx {
 		c := comps[i]
 		if !c.hasBBox {
@@ -448,6 +484,23 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 		}
 		cx0, cy0 := c.bboxCenter()
 		hw, hh := c.width()/2, c.height()/2
+		// Keep a well-placed satellite EXACTLY where it is (no gratuitous moves —
+		// don't disturb a hand-placed layout). Only relocate one that clashes.
+		cur := cpRect{cx0 - hw - m, cy0 - hh - m, cx0 + hw + m, cy0 + hh + m}
+		if inside(cur) && !clashFixed(cur, c.layer) {
+			addFixed(cur, c.layer)
+			continue
+		}
+		// Must relocate. A pure satellite (decoupling cap / resistor) is seeded near
+		// its chip (nearest shared-net fixed pad) so it clusters there; a USER-FACING
+		// part (LED / button) is NOT net-hugged — it should stay where it is visible
+		// / accessible, so it just spirals out from its current position.
+		seedX, seedY := cx0, cy0
+		if kinds[i] == cpSatellite {
+			if sx, sy, ok := netSeed(c, cx0, cy0); ok {
+				seedX, seedY = sx, sy
+			}
+		}
 		var best *[2]float64
 		for rad := 0.0; rad <= 2200 && best == nil; rad += 25 {
 			steps := 1
@@ -456,9 +509,9 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 			}
 			for s := 0; s < steps; s++ {
 				ang := float64(s) * math.Pi / 12
-				px, py := cx0+rad*math.Cos(ang), cy0+rad*math.Sin(ang)
+				px, py := seedX+rad*math.Cos(ang), seedY+rad*math.Sin(ang)
 				r := cpRect{px - hw - m, py - hh - m, px + hw + m, py + hh + m}
-				if r.x0 < bx0-20 || r.y0 < by0-20 || r.x1 > bx1+20 || r.y1 > by1+20 {
+				if !inside(r) {
 					continue
 				}
 				if !clashFixed(r, c.layer) {

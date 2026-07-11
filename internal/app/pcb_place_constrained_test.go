@@ -1,10 +1,22 @@
 package app
 
 import (
+	"math"
 	"testing"
 
 	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
 )
+
+// mkCPNet is mkCP with every pad tagged on `net` and positioned at the component
+// centre — so net-aware placement can find the part by its pad coordinates.
+func mkCPNet(des, name string, x, y, w, h float64, pins int, net string) cpComp {
+	c := mkCP(des, name, 1, x, y, w, h, pins)
+	for i := range c.pads {
+		c.pads[i].net = net
+		c.pads[i].x, c.pads[i].y = x, y
+	}
+	return c
+}
 
 func mkCP(des, name string, layer int, x, y, w, h float64, pins int) cpComp {
 	c := cpComp{footprint: name, layer: layer}
@@ -221,6 +233,36 @@ func TestConstrainedPlaceUsesRealOutline(t *testing.T) {
 	if !(j1rb.NewY < j1pc.NewY-100) {
 		t.Errorf("with the real (larger) outline J1 must snap to the real bottom edge, "+
 			"far below the part-cloud edge: part-cloud newY=%.0f real-board newY=%.0f", j1pc.NewY, j1rb.NewY)
+	}
+}
+
+// TestConstrainedPlaceSatelliteHugsChip is the defect-#3 regression: a decoupling
+// cap that must be relocated (it overlaps a fixed part) is seeded toward the chip
+// it shares a net with, not just parked at the nearest free slot from its bad
+// origin. C1 sits on top of U7 at the origin but shares net "SIG" with U3 far
+// away → it must end up nearer U3 than the origin.
+func TestConstrainedPlaceSatelliteHugsChip(t *testing.T) {
+	comps := []cpComp{
+		mkCPNet("U3", "CH340C", 2000, 2000, 300, 200, 16, "SIG"), // main w/ SIG pads, fixed
+		mkCP("U7", "SP3485EN-L SOP8", 1, 0, 0, 300, 200, 8),      // another main at origin, fixed
+		mkCPNet("C1", "CAP 100nF", 0, 0, 40, 30, 2, "SIG"),       // cap ON U7, shares SIG with U3
+	}
+	opt := defaultCpOptions()
+	opt.board = &cpRect{-3000, -3000, 3000, 3000} // room to place anywhere
+	moves, _ := planConstrainedPlace(comps, nil, opt)
+	var c1 *apMove
+	for i := range moves {
+		if moves[i].Designator == "C1" {
+			c1 = &moves[i]
+		}
+	}
+	if c1 == nil {
+		t.Fatal("C1 overlaps U7 → it must be relocated")
+	}
+	toU3 := math.Hypot(c1.NewX-2000, c1.NewY-2000)
+	toOrigin := math.Hypot(c1.NewX, c1.NewY)
+	if toU3 > toOrigin {
+		t.Errorf("C1 should hug its net partner U3 (~2000,2000); landed (%.0f,%.0f) closer to the origin", c1.NewX, c1.NewY)
 	}
 }
 
