@@ -10,8 +10,8 @@ observable actions. This is the community `easyeda-agent` workflow, not an offic
 EasyEDA skill; the suffix is intentional so users can distinguish it from upstream
 EasyEDA tooling.
 
-> **Source & docs:** https://github.com/zhoushoujianwork/easyeda-agent · Plugin
-> marketplace listing coming soon. Install the CLI + connector per the repo README.
+> **Source & docs:** https://github.com/zhoushoujianwork/easyeda-agent · Connector
+> 已上架[立创EDA官方插件市场](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)(一键装、平台可原地自动更新,但市场版本可能**滞后** CLI 若干 minor —— 四件套严格同版仍以 **GitHub Release 的 `.eext`** 为准)。Install the CLI + connector per the repo README.
 
 > **本 SKILL.md 顶部是「抗遗忘扫读区」——执行任何板级任务前先扫这几屏,别凭记忆走。**
 > 顺序:① **铁律**(不可违反)→ ② **流程停点 / 档位默认 / 块地图** 三张速查 → ③ **顺序硬约束**。

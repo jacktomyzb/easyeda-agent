@@ -48,15 +48,24 @@ Skill / CLI -> Go daemon -> EasyEDA Agent Connector -> official eda.* API
 
 ## 安装
 
-先安装 `easyeda` CLI/daemon，再导入这个连接器：
+这个连接器只是薄桥接层，**必须配套本地 `easyeda` CLI/daemon 一起用**。
+
+**1. 装本连接器**（两条通道任选）：
+
+- 在[立创官方插件市场](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)点击「安装」—— 平台可原地自动更新，最省心；
+- 或从 [GitHub Release](https://github.com/zhoushoujianwork/easyeda-agent/releases/latest) 侧载 `easyeda-agent-connector.eext` —— 与 CLI **严格同版**。
+
+> 市场上架版本可能**滞后于 CLI**（当前市场约 v0.9.x，仓库已到 0.11.x）。四件套需严格同版时，请以 GitHub Release 里与 CLI 对齐的 `.eext` 为准；市场版胜在平台自动更新，但可能落后。
+
+**2. 装 CLI/daemon 并启动**：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh
 ```
 
-安装后请在 EasyEDA 中确认：
+然后在 EasyEDA 中确认：
 
-1. 已导入 `.eext` 连接器。
+1. 已安装本连接器（市场安装或 `.eext` 导入）。
 2. 已开启「允许外部交互 / Allow external interaction」。
 3. 已启动本地 `easyeda-agent` daemon。
 

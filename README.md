@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/zhoushoujianwork/easyeda-agent"><b>GitHub</b></a> ·
-  <b>插件市场</b> <em>(即将上架)</em> ·
+  <a href="https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector"><b>立创插件市场</b></a> ·
   <a href="README.en.md">English</a>
 </p>
 
@@ -88,7 +88,7 @@ easyeda-agent 是一套**四件套**,四者需**同版本、同时在位**:CLI/d
 三方(CLI + 连接器 + Skill)要一起升到同一版本**,否则 `easyeda daemon health` 会把
 落后的连接器标成 stale。
 
-先装 `easyeda` CLI/daemon,再按安装器打印的地址导入 EasyEDA 连接器:
+先装 `easyeda` CLI/daemon,再装 EasyEDA 连接器 —— 两条通道任选:安装器会打印**与 CLI 严格同版**的 GitHub Release `.eext` 下载地址(导入即用),或从[**立创官方插件市场**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)一键安装(平台可原地自动更新,但市场版本可能滞后 CLI,严格四件套同版时以 Release `.eext` 为准):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh

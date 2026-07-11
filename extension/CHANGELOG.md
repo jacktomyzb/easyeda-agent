@@ -6,6 +6,12 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **连接器已上架[立创EDA官方插件市场](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)**
+  —— 新增第二条安装通道:插件市场一键安装,平台可**原地自动更新**。侧载的 GitHub
+  Release `.eext` 仍与 CLI **严格同版**,是四件套对齐的权威来源;市场版本可能滞后
+  CLI(无发布 CLI/API,每次发版需网页端手动重新提审)。
+
 ## [0.11.1] - 2026-07-10
 
 `pcb beautify` 打磨(补丁):

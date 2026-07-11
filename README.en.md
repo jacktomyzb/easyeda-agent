@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/zhoushoujianwork/easyeda-agent"><b>GitHub</b></a> ·
-  <b>Plugin marketplace</b> <em>(coming soon)</em> ·
+  <a href="https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector"><b>Plugin marketplace</b></a> ·
   <a href="README.md">中文</a>
 </p>
 
@@ -89,8 +89,12 @@ parts point back into the standard-parts library (BOM-ready).
 > upgrade, bump all three (CLI + connector + Skill) to the same version**, or
 > `easyeda daemon health` flags the lagging connector as stale.
 
-Install the `easyeda` CLI/daemon first, then import the EasyEDA connector URL printed
-by the installer:
+Install the `easyeda` CLI/daemon first, then add the EasyEDA connector — two
+channels: import the **strictly CLI-version-locked** GitHub-Release `.eext` whose URL
+the installer prints, or one-click install from the
+[**official 立创EDA marketplace**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)
+(the platform auto-updates it in place, but the listing can lag the CLI — use the
+Release `.eext` when the four-piece kit must be strictly same-version):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh

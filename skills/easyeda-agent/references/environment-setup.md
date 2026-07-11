@@ -52,8 +52,10 @@ profile 里持久化)。
    easyeda doc switch PCB1 --project <name> 切到目标文档。
 ```
 
-前提(一次性,人工):该 profile 里已导入过连接器 `.eext` 且开了
-**允许外部交互**;登录过嘉立创账号。之后每次自举都无人工步骤。
+前提(一次性,人工):该 profile 里已装过连接器 —— **侧载** GitHub Release 的
+`.eext`(与 CLI 严格同版)**或**从[立创官方插件市场](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)
+一键装(平台可原地自动更新,但市场版本可能滞后 CLI);并开了 **允许外部交互**、
+登录过嘉立创账号。之后每次自举都无人工步骤。
 
 ## 2. 热重载连接器(改了 extension/ 之后)
 

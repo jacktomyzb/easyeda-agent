@@ -301,7 +301,7 @@ easyeda doc switch <P2|PCB1|uuid> --project <名字>   # 切换:按页名/PCB名
 >
 > **UI 切页要双击**:单击只选中 tab、不打开文档;双击才真正打开,`document.current` 读到的是「已打开」的那个文档。
 >
-> **`connectorVersionOk: false`** = 该窗口加载的连接器版本与 daemon 不符(典型:开着的窗口跑着旧连接器代码)。处理:完全退出并重启 EasyEDA 重新加载连接器(re-import 不会刷新已开窗口)。`null` 表示版本号非 semver(dev 构建)无法判定。
+> **`connectorVersionOk: false`** = 该窗口加载的连接器版本与 daemon 不符(典型:开着的窗口跑着旧连接器代码,或连接器版本落后 CLI)。处理:**侧载**的 `.eext` 需重导与 CLI 同版的 GitHub Release 包;从[立创插件市场](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)装的可能已原地自动更新(但市场版可能**滞后** CLI,严格同版仍取 Release `.eext`)。无论哪种,都要**完全退出并重启 EasyEDA** 才能把新连接器加载进已开窗口(re-import / 原地更新都不刷新已开窗口)。`null` 表示版本号非 semver(dev 构建)无法判定。
 
 ### 原理图编辑
 

@@ -46,7 +46,7 @@ daemon 会在端口段 `49620-49629` 监听,连接器会自动端口扫描并握
 ### 3. 导入连接器 `.eext`
 
 从 [GitHub Release](https://github.com/zhoushoujianwork/easyeda-agent/releases/latest) 下载
-`easyeda-agent-connector.eext`(或立创插件市场搜 **easyeda-agent**),然后:
+`easyeda-agent-connector.eext`(**与 CLI 严格同版**),或从[**立创官方插件市场**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)一键安装(平台可原地自动更新,但**版本可能滞后 CLI** —— 需严格四件套同版时以 GitHub Release 的 `.eext` 为准),然后:
 
 > EasyEDA Pro → **扩展管理 → 导入扩展** → 选中 `.eext` 文件
 
@@ -85,6 +85,7 @@ easyeda daemon health
    ```
 2. **重导连接器 `.eext`** —— EasyEDA 按 **uuid 去重**,光 bump 版本号不够:
    先在「已安装」里**卸载旧连接器**,再导入新 `.eext`(uuid 不变,原地更新)。
+   *(这步只针对**侧载**的 GitHub Release `.eext`;若连接器是从[立创插件市场](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)装的,平台会原地自动更新 —— 但市场版本可能滞后 CLI,严格同版仍以 Release `.eext` 为准。)*
 3. **完全退出并重启 EasyEDA** —— 重导**不会重载已开着的窗口**;旧窗口会继续跑旧代码、
    和新连接器抢 daemon socket。必须**彻底退出 EasyEDA 再打开**。
 4. **`easyeda daemon health` 复核** —— `connectorVersionOk:true` 才算升级到位。
@@ -105,8 +106,10 @@ easyeda daemon health
   ```
 - **连接器落后自动提示**:连接器一注册,daemon 就比对版本;落后时打一条**可操作日志**
   (「stale connector: vX < daemon vY — 重导 .eext + 彻底重启 EasyEDA」)。
-  连接器 `.eext` **无法**被 daemon 静默替换(sideload 无原地自动更新,是插件市场专属能力),
-  所以这里只**检测+提示**,重导那步仍需你手动做(见上)。
+  **侧载**(GitHub Release)的连接器 `.eext` **无法**被 daemon 静默替换(sideload 无原地自动更新),
+  所以这里只**检测+提示**,重导那步仍需你手动做(见上)。若连接器是从
+  [**立创插件市场**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)装的,
+  平台**可原地自动更新** —— 但市场版本可能滞后 CLI,严格四件套同版仍以 GitHub Release 的 `.eext` 为准。
 
 ---
 
