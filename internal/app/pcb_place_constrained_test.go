@@ -38,6 +38,65 @@ func TestClassifyCP(t *testing.T) {
 	}
 }
 
+// TestClassifyCPFromBlockData is the acceptance gate for issue #95 defect #1:
+// classifyCP must consult the block library's placement hints (device name /
+// designator prefix) BEFORE the hardcoded regex. JP701 (RS485 120R terminator
+// jumper) is declared board_edge=false in sp3485_rs485_halfduplex.json, so it
+// must land as an anchored part (kept beside its resistor), NOT be caught by the
+// old J*-but-not-JP* rule and spiraled to a corner as a plain satellite.
+func TestClassifyCPFromBlockData(t *testing.T) {
+	// device name matches the library part id conn.sip2_254 → picked up by
+	// ByDevice regardless of designator.
+	jp := classifyCP(mkCP("JP701", "conn.sip2_254", 1, 0, 0, 60, 40, 2), 8)
+	if jp == cpSatellite {
+		t.Errorf("JP701 (block board_edge=false) must not classify as plain satellite; got %v", jp)
+	}
+	if jp != cpAnchored {
+		t.Errorf("JP701 should be block-anchored (deliberate non-edge spot); got %v", jp)
+	}
+	// The 3P terminal J4 IS a board-edge part per the same block → edge-must.
+	j4 := classifyCP(mkCP("J4", "conn.terminal_3p_508", 1, 0, 0, 300, 200, 3), 8)
+	if j4 != cpEdgeMust {
+		t.Errorf("J4 (block board_edge=true) should be edge-must; got %v", j4)
+	}
+}
+
+// TestConstrainedPlaceKeepsJP701 asserts the end-to-end #95 acceptance: with a
+// JP701 sitting next to its 120R terminator and 3P terminal, place-constrained
+// must NOT spiral it off to a board corner. A block-anchored part is fixed in
+// place, so it produces no move (or at most a tiny legalizing nudge), unlike a
+// satellite that gets flung outward.
+func TestConstrainedPlaceKeepsJP701(t *testing.T) {
+	comps := []cpComp{
+		mkCP("U7", "ic.sp3485_sop8", 1, 900, 900, 300, 200, 8),      // main chip, fixed
+		mkCP("J4", "conn.terminal_3p_508", 1, 1500, 900, 300, 200, 3), // edge terminal
+		mkCP("R703", "res.120r_1206", 1, 1300, 900, 80, 50, 2),        // terminator
+		mkCP("JP701", "conn.sip2_254", 1, 1350, 950, 60, 40, 2),       // jumper beside R703/J4
+		mkCP("C701", "cap.100nf_0402", 1, 700, 900, 40, 30, 2),        // decap satellite
+	}
+	moves, diags := planConstrainedPlace(comps, nil, defaultCpOptions())
+
+	byDes := map[string]apMove{}
+	for _, m := range moves {
+		byDes[m.Designator] = m
+	}
+	// JP701 must be recognised as block-anchored, not a satellite spiral.
+	var jpDiag string
+	for _, d := range diags {
+		if d.Designator == "JP701" {
+			jpDiag = d.Reason
+		}
+	}
+	if jpDiag != "anchored:fixed" {
+		t.Errorf("JP701 should be block-anchored (diag anchored:fixed); got %q", jpDiag)
+	}
+	// An anchored part stays put → no move emitted (satellites near JP701's old
+	// class would have been flung to legalize around the pile).
+	if mv, moved := byDes["JP701"]; moved {
+		t.Errorf("JP701 (anchored) should not be relocated; got move to (%v,%v)", mv.NewX, mv.NewY)
+	}
+}
+
 func TestConstrainedPlaceEdgeSnapAndNoOverlap(t *testing.T) {
 	// A USB connector parked 300mil inside the board must snap to the nearest edge;
 	// satellites must not overlap it or each other.
