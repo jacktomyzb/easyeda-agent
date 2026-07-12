@@ -1684,7 +1684,7 @@ external router (Freerouting) would route under the antenna. The result reports
 	}
 	// ── stage-snapshot: recording/demo stage capture (snapshot + data bundle) ──
 	pcb.AddCommand(newPcbStageSnapshotCmd(cfg, &window, stdout, stderr))
-	pcb.AddCommand(newPcbStageCmd(cfg, stdout, stderr))
+	pcb.AddCommand(newPcbStageCmd(cfg, &window, stdout, stderr))
 	// ── autoroute: one-command Freerouting round-trip ────────────────────────
 	// export DSN → run an external Freerouting engine → import the routed SES → DRC.
 	// The engine is external (Freerouting needs Java 17+); decoupled via a command
@@ -1723,7 +1723,7 @@ exported DSN contains keepout entries before trusting the result.`,
 				// 0. Routability gate (issue #97): autoroute mutates the board, so it
 				// needs the same outline_confirmed + pre_route_passed state as
 				// route-short; --force <reason> overrides for audit.
-				if err := gateRouteCommand(cfg, "autoroute", forceReason, stderr); err != nil {
+				if err := gateRouteCommand(cfg, window, "autoroute", forceReason, stderr); err != nil {
 					return err
 				}
 				// 1. Export DSN, capture the persisted file path.
@@ -2212,7 +2212,7 @@ emits a chord-approximated fillet (native arcs do not commit on this build).
 				// prints the plan (no mutation) so it bypasses the gate. --force
 				// <reason> overrides but records the bypass for audit.
 				if !dryRun {
-					if err := gateRouteCommand(cfg, "route-short", forceReason, stderr); err != nil {
+					if err := gateRouteCommand(cfg, window, "route-short", forceReason, stderr); err != nil {
 						return err
 					}
 				}
@@ -2616,15 +2616,17 @@ Pulls every footprint's rendered bbox + pads (pcb.components.list) and computes:
 
   • overlap          — two footprint bboxes intersect                → ERROR (score 0)
   • off-board        — a footprint extends outside the board outline → ERROR
-  • tight spacing    — bbox gap below --min-gap                      → WARN
+  • tight spacing    — bbox gap below project assembly profile/min-gap → WARN
   • ratsnest         — per signal-net minimum spanning tree (power/GND
                        excluded — they're poured, not routed)
   • crossings        — cross-net ratline segments that geometrically
                        cross → the single-layer routability killer   → WARN
 
 Yields a 0-100 routability score + verdict (easy/moderate/hard/very-hard). Fewer
-crossings + shorter ratsnest = more routable. --min-gap defaults to the board's
-live track-to-pad clearance. Exits non-zero on any overlap/off-board (gate-able).`,
+crossings + shorter ratsnest = more routable. Without --gate, --min-gap defaults
+to the board electrical clearance. With --gate, the persisted assembly profile
+is mandatory; hand-solder floors the gap at 40mil and ANY tight pair fails the
+gate (issue #99). Exits non-zero on overlap/off-board or a failed gate.`,
 			Args: cobra.NoArgs,
 			Example: `  easyeda pcb layout-lint
   easyeda pcb layout-lint --json
@@ -2637,7 +2639,7 @@ live track-to-pad clearance. Exits non-zero on any overlap/off-board (gate-able)
 		}
 		c.Flags().Float64Var(&minGap, "min-gap", 0, "min gap between footprint bboxes in mil (closer = WARN; default = board clearance)")
 		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
-		c.Flags().BoolVar(&gate, "gate", false, "apply the routability gate (score/crossings/overlap/off-board); on pass, confirm the project's pre_route_passed stage (issue #97)")
+		c.Flags().BoolVar(&gate, "gate", false, "apply assembly+routability gate; requires `pcb stage set-assembly`; on pass confirms pre_route_passed (#97/#99)")
 		c.Flags().IntVar(&minScore, "min-score", 60, "minimum routability score for --gate to pass")
 		c.Flags().IntVar(&maxCrossings, "max-crossings", 8, "maximum cross-net ratline crossings for --gate to pass (-1 = unlimited)")
 		pcb.AddCommand(c)

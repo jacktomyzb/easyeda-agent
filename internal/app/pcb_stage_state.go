@@ -1,261 +1,248 @@
 package app
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
-	"time"
+
+	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
 )
 
-// pcb_stage_state.go — persistable PCB flow gating (issue #97).
+// pcb_stage_state.go — CLI adapter over the shared internal/workflow stage
+// machine (issue #97).
 //
-// The design-flow skill describes P2 placement-confirm, P3 outline-confirm and a
-// P6 routability gate, but nothing in the CLI persisted or enforced them: a
-// caller could run `pcb route-short` straight after import with a score-32
-// layout and bank 30+ DRC errors. This is the missing state machine.
+// The state machine itself (stages, persistence, route gate, fingerprints)
+// lives in internal/workflow so the DAEMON enforces the same gates at the
+// /action dispatch choke point (see internal/daemon/stagegate.go). State is
+// GLOBAL per project (~/.easyeda-agent/workflow/<key>.json) — running the CLI
+// from a different cwd can no longer blind the gate; the old cwd-relative
+// .easyeda/pcb-stage/ file is still read as a legacy fallback.
 //
-// State lives per project at <cwd>/.easyeda/pcb-stage/<project>.json — a plain
-// file, no daemon, in the same .easyeda tree stage-snapshot already uses. The
-// gate is advisory-but-enforced: route commands refuse without
-// outline_confirmed + pre_route_passed unless the caller passes an explicit
-// --force <reason>, which is recorded for audit rather than silently accepted.
+// On top of the marker checks, the CLI-side route gate verifies the DOCUMENT
+// FINGERPRINTS stored at confirm time (placement poses / outline geometry): a
+// GUI drag, a debug.exec_js edit or another agent's move changes the hash, the
+// gate auto-invalidates the stale confirmation and blocks until re-confirmed.
 
-// pcbStage is one node of the flow. Ordered by rank (see pcbStageRank).
-type pcbStage string
+// Aliases keep the app-side names stable over the shared workflow types.
+type (
+	pcbStage             = workflow.Stage
+	pcbStageEvent        = workflow.Event
+	pcbStageState        = workflow.State
+	pcbAssemblyProfile   = workflow.AssemblyProfile
+	pcbLayoutGateSummary = workflow.GateSummary
+	routeGate            = workflow.Gate
+	stageFingerprint     = workflow.Fingerprint
+	stageComponentPose   = workflow.ComponentPose
+)
 
 const (
-	stageImported           pcbStage = "imported"
-	stagePlacementReady     pcbStage = "placement_ready"
-	stagePlacementConfirmed pcbStage = "placement_confirmed"
-	stageOutlineConfirmed   pcbStage = "outline_confirmed"
-	stagePreRoutePassed     pcbStage = "pre_route_passed"
-	stageRoutingAuthorized  pcbStage = "routing_authorized"
+	stageImported           = workflow.StageImported
+	stagePlacementReady     = workflow.StagePlacementReady
+	stagePlacementConfirmed = workflow.StagePlacementConfirmed
+	stageOutlineConfirmed   = workflow.StageOutlineConfirmed
+	stagePreRoutePassed     = workflow.StagePreRoutePassed
+	stageRoutingAuthorized  = workflow.StageRoutingAuthorized
 )
 
-// pcbStageOrder is the canonical progression; index = rank.
-var pcbStageOrder = []pcbStage{
-	stageImported,
-	stagePlacementReady,
-	stagePlacementConfirmed,
-	stageOutlineConfirmed,
-	stagePreRoutePassed,
-	stageRoutingAuthorized,
+var pcbStageOrder = workflow.Order
+
+func pcbStageRank(s pcbStage) int { return workflow.Rank(s) }
+
+func loadPcbStageState(project string) (*pcbStageState, error) { return workflow.Load(project) }
+func savePcbStageState(s *pcbStageState) error                 { return workflow.Save(s) }
+
+func checkRouteGate(s *pcbStageState, force bool, reason string) routeGate {
+	return workflow.CheckRouteGate(s, force, reason)
 }
 
-// pcbStageRank returns the ordinal of a stage (−1 if unknown).
-func pcbStageRank(s pcbStage) int {
-	for i, v := range pcbStageOrder {
-		if v == s {
-			return i
-		}
+// resolveStageProject yields the project key the workflow state is filed under:
+// the explicit --project when given, else the live window's project identity
+// (friendlyName || name — the same value the connector reports as projectName,
+// so the CLI and the daemon-side gate agree on the key).
+func resolveStageProject(cfg *appConfig, window string) (string, error) {
+	if strings.TrimSpace(cfg.project) != "" {
+		return cfg.project, nil
 	}
-	return -1
-}
-
-// pcbStageEvent is one confirm / gate / force entry (audit trail).
-type pcbStageEvent struct {
-	Stage  pcbStage `json:"stage"`
-	At     string   `json:"at"`
-	Action string   `json:"action"` // confirm | gate-pass | force | invalidate
-	Note   string   `json:"note,omitempty"`
-	Reason string   `json:"reason,omitempty"` // for force
-}
-
-// pcbStageState is the persisted per-project record.
-type pcbStageState struct {
-	Project   string                `json:"project"`
-	Confirmed map[pcbStage]bool     `json:"confirmed"`
-	Layout    *pcbLayoutGateSummary `json:"layoutGate,omitempty"`
-	History   []pcbStageEvent       `json:"history,omitempty"`
-	UpdatedAt string                `json:"updatedAt"`
-}
-
-// pcbLayoutGateSummary is the machine-readable layout-lint gate snapshot stored
-// when a pre_route gate passes (so route commands can show WHAT it passed on).
-type pcbLayoutGateSummary struct {
-	Score         int    `json:"score"`
-	Verdict       string `json:"verdict"`
-	Overlaps      int    `json:"overlaps"`
-	OffBoard      int    `json:"offBoard"`
-	CrossingCount int    `json:"crossingCount"`
-	At            string `json:"at"`
-}
-
-// has reports whether a stage confirmation is currently set.
-func (s *pcbStageState) has(st pcbStage) bool {
-	return s != nil && s.Confirmed != nil && s.Confirmed[st]
-}
-
-// pcbStageDir is the per-project state root under the cwd's .easyeda tree.
-func pcbStageDir() string {
-	return filepath.Join(".easyeda", "pcb-stage")
-}
-
-// sanitizeProjectKey turns a project name/uuid into a safe file stem. Falls back
-// to "_active" when routing is by --window (no project name available).
-func sanitizeProjectKey(project string) string {
-	p := stageSanitizeRe.ReplaceAllString(strings.TrimSpace(project), "-")
-	p = strings.Trim(p, "-")
-	if p == "" {
-		return "_active"
-	}
-	return p
-}
-
-// pcbStagePath is the state file for a project.
-func pcbStagePath(project string) string {
-	return filepath.Join(pcbStageDir(), sanitizeProjectKey(project)+".json")
-}
-
-// loadPcbStageState reads the state; a missing file yields a fresh imported
-// state rather than an error (the flow always starts at imported).
-func loadPcbStageState(project string) (*pcbStageState, error) {
-	path := pcbStagePath(project)
-	data, err := os.ReadFile(path)
+	res, err := requestAction(cfg, "project.current", window, nil)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return &pcbStageState{Project: project, Confirmed: map[pcbStage]bool{}}, nil
+		return "", fmt.Errorf("resolve project for workflow state: %w", err)
+	}
+	if name := asString(res.Result["friendlyName"]); name != "" {
+		return name, nil
+	}
+	if name := asString(res.Result["name"]); name != "" {
+		return name, nil
+	}
+	if uuid := asString(res.Result["uuid"]); uuid != "" {
+		return uuid, nil
+	}
+	return "", fmt.Errorf("resolve project for workflow state: window reports no project identity")
+}
+
+// pullLayoutPoses reads the live placement poses (designator/x/y/rotation/layer)
+// the layout fingerprint is derived from.
+func pullLayoutPoses(cfg *appConfig, window string) ([]stageComponentPose, error) {
+	res, err := requestAction(cfg, "pcb.components.list", window, nil)
+	if err != nil {
+		return nil, fmt.Errorf("fetch placement for fingerprint: %w", err)
+	}
+	raw, _ := res.Result["components"].([]any)
+	poses := make([]stageComponentPose, 0, len(raw))
+	for _, ri := range raw {
+		cm, ok := ri.(map[string]any)
+		if !ok {
+			continue
 		}
+		poses = append(poses, stageComponentPose{
+			Designator: asString(cm["designator"]),
+			X:          asFloat(cm["x"]),
+			Y:          asFloat(cm["y"]),
+			Rotation:   asFloat(cm["rotation"]),
+			Layer:      asString(cm["layer"]),
+		})
+	}
+	return poses, nil
+}
+
+// pullLayoutFingerprint hashes the live placement.
+func pullLayoutFingerprint(cfg *appConfig, window string) (*stageFingerprint, error) {
+	poses, err := pullLayoutPoses(cfg, window)
+	if err != nil {
 		return nil, err
 	}
-	var s pcbStageState
-	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	if s.Confirmed == nil {
-		s.Confirmed = map[pcbStage]bool{}
-	}
-	return &s, nil
+	return workflow.NewFingerprint(workflow.HashLayout(poses), len(poses)), nil
 }
 
-// savePcbStageState atomically persists the state.
-func savePcbStageState(s *pcbStageState) error {
-	if err := os.MkdirAll(pcbStageDir(), 0o755); err != nil {
-		return err
-	}
-	s.UpdatedAt = time.Now().Format(time.RFC3339)
-	data, err := json.MarshalIndent(s, "", "  ")
+// pullOutlineFingerprint hashes the live board outline snapshot (counts + bbox).
+func pullOutlineFingerprint(cfg *appConfig, window string) (*stageFingerprint, error) {
+	res, err := requestAction(cfg, "pcb.outline.get", window, nil)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("fetch outline for fingerprint: %w", err)
 	}
-	path := pcbStagePath(s.Project)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
-		return err
+	snapshot := map[string]any{
+		"outline":  res.Result["outline"],
+		"segments": res.Result["segments"],
+		"arcs":     res.Result["arcs"],
+		"bbox":     res.Result["bbox"],
 	}
-	return os.Rename(tmp, path)
+	hash, err := workflow.HashJSON(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	count := int(asFloat(res.Result["outline"])) + int(asFloat(res.Result["segments"])) + int(asFloat(res.Result["arcs"]))
+	return workflow.NewFingerprint(hash, count), nil
 }
 
-// confirmStage sets a stage confirmation and records the event.
-func (s *pcbStageState) confirmStage(st pcbStage, action, note string) {
-	if s.Confirmed == nil {
-		s.Confirmed = map[pcbStage]bool{}
-	}
-	s.Confirmed[st] = true
-	s.History = append(s.History, pcbStageEvent{
-		Stage: st, At: time.Now().Format(time.RFC3339), Action: action, Note: note,
-	})
-}
-
-// invalidateFrom clears the given stage and every stage after it, so a mutation
-// (place-constrained / outline-fit / outline-round) can never leave a stale
-// downstream confirmation standing. Records one invalidate event per cleared
-// stage and drops the layout gate snapshot when pre_route is cleared.
-func (s *pcbStageState) invalidateFrom(from pcbStage, cause string) []pcbStage {
-	if s.Confirmed == nil {
-		return nil
-	}
-	fromRank := pcbStageRank(from)
-	if fromRank < 0 {
-		return nil
-	}
-	var cleared []pcbStage
-	for _, st := range pcbStageOrder {
-		if pcbStageRank(st) >= fromRank && s.Confirmed[st] {
-			delete(s.Confirmed, st)
-			cleared = append(cleared, st)
+// verifyStageFingerprints re-derives the placement/outline fingerprints from the
+// live document and compares them to the ones stored at confirm time. A
+// mismatch means the document changed OUTSIDE the gated flow (GUI drag,
+// debug.exec_js, another agent) — the stale confirmation is invalidated so the
+// flow re-enters at the right stage. Returns human-readable drift notes (empty
+// = no drift). The caller persists the state.
+func verifyStageFingerprints(cfg *appConfig, window string, st *pcbStageState) ([]string, error) {
+	var drift []string
+	if st.LayoutFP != nil && st.Has(stagePlacementConfirmed) {
+		live, err := pullLayoutFingerprint(cfg, window)
+		if err != nil {
+			return nil, err
+		}
+		if live.Hash != st.LayoutFP.Hash {
+			st.InvalidateFrom(stagePlacementConfirmed,
+				fmt.Sprintf("placement fingerprint drift (confirmed %d parts @ %s, live %d parts)",
+					st.LayoutFP.Count, st.LayoutFP.At, live.Count))
+			drift = append(drift, fmt.Sprintf(
+				"placement changed since confirm-layout (%d parts @ %s) — re-run `pcb stage confirm-layout`",
+				live.Count, st.UpdatedAt))
 		}
 	}
-	if pcbStageRank(stagePreRoutePassed) >= fromRank {
-		s.Layout = nil
+	if st.OutlineFP != nil && st.Has(stageOutlineConfirmed) {
+		live, err := pullOutlineFingerprint(cfg, window)
+		if err != nil {
+			return nil, err
+		}
+		if live.Hash != st.OutlineFP.Hash {
+			st.InvalidateFrom(stageOutlineConfirmed, "outline fingerprint drift (board edge changed since confirm-outline)")
+			drift = append(drift, "board outline changed since confirm-outline — re-run `pcb stage confirm-outline`")
+		}
 	}
-	if len(cleared) > 0 {
-		s.History = append(s.History, pcbStageEvent{
-			Stage: from, At: time.Now().Format(time.RFC3339),
-			Action: "invalidate", Note: cause,
-		})
-	}
-	return cleared
+	return drift, nil
 }
 
-// routeGate is the verdict for a routing command's precondition check.
-type routeGate struct {
-	Allowed bool     `json:"allowed"`
-	Missing []string `json:"missing,omitempty"`
-	Message string   `json:"message,omitempty"`
-}
-
-// checkRouteGate reports whether routing may proceed: it needs both
-// outline_confirmed and pre_route_passed. When force is set it always allows and
-// records the override reason so the bypass is auditable, not silent.
-func checkRouteGate(s *pcbStageState, force bool, reason string) routeGate {
-	var missing []string
-	if !s.has(stageOutlineConfirmed) {
-		missing = append(missing, string(stageOutlineConfirmed))
-	}
-	if !s.has(stagePreRoutePassed) {
-		missing = append(missing, string(stagePreRoutePassed))
-	}
-	if len(missing) == 0 {
-		return routeGate{Allowed: true}
-	}
+// gateRouteCommand enforces the route gate for a composite CLI route command.
+// It returns errActionFailed (already-explained) when routing is blocked, nil
+// when allowed. FAIL-CLOSED: an unreadable state or an unverifiable fingerprint
+// blocks routing (the pre-#97 behavior treated a read error as "un-gated").
+// --force <reason> overrides for THIS run only — the reason is recorded in the
+// state history AND propagated to the daemon (cfg.forceReason → every routing
+// action request), so the daemon-side gate honors the same audited override;
+// nothing is confirmed, and the next un-forced run is gated again.
+func gateRouteCommand(cfg *appConfig, window, cmdName, forceReason string, stderr io.Writer) error {
+	reason := strings.TrimSpace(forceReason)
+	force := reason != ""
 	if force {
-		s.History = append(s.History, pcbStageEvent{
-			Stage: stageRoutingAuthorized, At: time.Now().Format(time.RFC3339),
-			Action: "force", Reason: reason,
-			Note: "routing forced past missing: " + strings.Join(missing, ", "),
-		})
-		return routeGate{
-			Allowed: true, Missing: missing,
-			Message: "gate FORCED past " + strings.Join(missing, ", ") + " (reason: " + reason + ")",
+		// Propagate to the daemon-side gate for the routing actions this command
+		// is about to dispatch (pcb.line.create / pcb.via.create / …).
+		cfg.forceReason = reason
+	}
+
+	project, err := resolveStageProject(cfg, window)
+	if err != nil {
+		if force {
+			fmt.Fprintf(stderr, "⚠️  %s: %v — proceeding on --force (reason: %s)\n", cmdName, err, reason)
+			return nil
+		}
+		fmt.Fprintf(stderr, "❌ %s: %v (routing is stage-gated; pass --project or --force <reason>)\n", cmdName, err)
+		return errActionFailed
+	}
+	st, err := loadPcbStageState(project)
+	if err != nil {
+		if force {
+			fmt.Fprintf(stderr, "⚠️  %s: could not read workflow state: %v — proceeding on --force (reason: %s)\n", cmdName, err, reason)
+			return nil
+		}
+		fmt.Fprintf(stderr, "❌ %s: workflow state unreadable (%v) — refusing to route (fail-closed); fix or delete %s, or --force <reason>\n",
+			cmdName, err, workflow.Path(project))
+		return errActionFailed
+	}
+
+	// Fingerprint drift check: catches edits the gated flow never saw.
+	if !force {
+		drift, derr := verifyStageFingerprints(cfg, window, st)
+		if derr != nil {
+			fmt.Fprintf(stderr, "❌ %s: cannot verify document fingerprints (%v) — refusing to route (fail-closed)\n", cmdName, derr)
+			return errActionFailed
+		}
+		if len(drift) > 0 {
+			if serr := savePcbStageState(st); serr != nil {
+				fmt.Fprintf(stderr, "⚠️  %s: could not persist drift invalidation: %v\n", cmdName, serr)
+			}
+			for _, d := range drift {
+				fmt.Fprintf(stderr, "⚠️  %s: %s\n", cmdName, d)
+			}
 		}
 	}
-	return routeGate{
-		Allowed: false, Missing: missing,
-		Message: "routing blocked: missing " + strings.Join(missing, ", ") +
-			". Confirm layout (`pcb stage confirm-layout`), outline (`pcb stage confirm-outline`) " +
-			"and pass the routability gate (`pcb layout-lint`), or override with `--force <reason>`.",
-	}
-}
 
-// gateRouteCommand loads the project stage state and enforces the route gate. It
-// returns errActionFailed (already-explained) when routing is blocked, nil when
-// allowed (recording a forced override when --force <reason> is given). The
-// bypass reason is required when forcing so an override is never anonymous.
-func gateRouteCommand(cfg *appConfig, cmdName, forceReason string, stderr io.Writer) error {
-	force := strings.TrimSpace(forceReason) != ""
-	st, err := loadPcbStageState(cfg.project)
-	if err != nil {
-		fmt.Fprintf(stderr, "⚠️  %s: could not read PCB stage state: %v — treating as un-gated\n", cmdName, err)
-		return nil
-	}
-	gate := checkRouteGate(st, force, strings.TrimSpace(forceReason))
+	gate := checkRouteGate(st, force, reason)
 	if !gate.Allowed {
 		fmt.Fprintf(stderr, "❌ %s: %s\n", cmdName, gate.Message)
 		return errActionFailed
 	}
-	if force {
-		// checkRouteGate already recorded the force audit event (with the reason);
-		// just flag routing_authorized so downstream steps see the (forced)
-		// authorization, without a duplicate history entry.
-		st.Confirmed[stageRoutingAuthorized] = true
+	if gate.Forced {
+		// The force audit event is in the history; persist it. Authorization is
+		// per-run: routing_authorized is NOT set.
 		if serr := savePcbStageState(st); serr != nil {
 			fmt.Fprintf(stderr, "⚠️  %s: gate override could not be persisted: %v\n", cmdName, serr)
 		}
 		fmt.Fprintf(stderr, "⚠️  %s: %s\n", cmdName, gate.Message)
+		return nil
+	}
+	// Normal pass: record routing_authorized (informational — invalidated by any
+	// later placement/outline mutation like every other downstream stage).
+	if !st.Has(stageRoutingAuthorized) {
+		st.Confirm(stageRoutingAuthorized, "gate-pass", cmdName)
+		if serr := savePcbStageState(st); serr != nil {
+			fmt.Fprintf(stderr, "⚠️  %s: could not persist routing_authorized: %v\n", cmdName, serr)
+		}
 	}
 	return nil
 }
@@ -264,12 +251,14 @@ func gateRouteCommand(cfg *appConfig, cmdName, forceReason string, stderr io.Wri
 // everything downstream, and persists. Returns the cleared stages (as strings)
 // so a command can surface what its mutation invalidated. Best-effort: a load /
 // save failure is non-fatal to the caller (the mutation itself succeeded).
+// The daemon performs the same catalog-driven invalidation at dispatch, so this
+// CLI-side hook mostly reports what already happened for composite commands.
 func invalidatePcbStageFrom(cfg *appConfig, from pcbStage, cause string) []string {
 	st, err := loadPcbStageState(cfg.project)
 	if err != nil {
 		return nil
 	}
-	cleared := st.invalidateFrom(from, cause)
+	cleared := st.InvalidateFrom(from, cause)
 	if len(cleared) == 0 {
 		return nil
 	}

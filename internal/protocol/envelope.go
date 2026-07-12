@@ -22,6 +22,11 @@ type Request struct {
 	// screenshots/exports land in the user's project, not the daemon's. Empty for
 	// callers that don't set it (the daemon then falls back to its ArtifactDir).
 	OutputDir string `json:"outputDir,omitempty"`
+	// ForceReason explicitly overrides a workflow stage gate for THIS request
+	// only (e.g. routing actions before outline_confirmed + pre_route_passed).
+	// The daemon records it in the project's stage history so the bypass is
+	// auditable, never silent. Empty = no override.
+	ForceReason string `json:"forceReason,omitempty"`
 	// TimeoutMs is the caller's round-trip budget. The daemon shortens its own
 	// connector wait to (TimeoutMs - grace) so the caller receives a structured
 	// DISPATCH_FAILED instead of a raw HTTP timeout when the connector hangs

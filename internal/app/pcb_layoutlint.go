@@ -300,6 +300,26 @@ type pcbLayoutGateOpts struct {
 }
 
 func runPcbLayoutLint(cfg *appConfig, window string, minGapMil float64, asJSON bool, gate pcbLayoutGateOpts, stdout, stderr io.Writer) error {
+	var assembly *pcbAssemblyProfile
+	if gate.gate {
+		// Key the persisted gate state by the real project identity (matches the
+		// daemon-side gate and the confirm commands) — not the raw --project flag,
+		// which may be empty when routing by --window.
+		if resolved, rerr := resolveStageProject(cfg, window); rerr == nil {
+			gate.project = resolved
+		}
+		st, serr := loadPcbStageState(gate.project)
+		if serr != nil {
+			return fmt.Errorf("load assembly profile: %w", serr)
+		}
+		if st.Assembly == nil {
+			return fmt.Errorf("assembly profile is required for --gate; run `pcb stage set-assembly --profile hand-solder|reflow`")
+		}
+		assembly = st.Assembly
+		if assembly.MinGapMil > minGapMil {
+			minGapMil = assembly.MinGapMil
+		}
+	}
 	res, err := requestAction(cfg, "pcb.components.list", window, map[string]any{"includeBBox": true, "includePads": true})
 	if err != nil {
 		return fmt.Errorf("fetch PCB components: %w", err)
@@ -366,7 +386,7 @@ func runPcbLayoutLint(cfg *appConfig, window string, minGapMil float64, asJSON b
 		gv := evalLayoutGate(rep, gate)
 		gateVerdict = &gv
 		if gv.Pass {
-			if perr := recordLayoutGatePass(gate.project, rep); perr != nil {
+			if perr := recordLayoutGatePass(gate.project, rep, assembly); perr != nil {
 				fmt.Fprintf(stderr, "⚠️  gate passed but could not persist pre_route_passed: %v\n", perr)
 			}
 		}
@@ -420,6 +440,9 @@ func evalLayoutGate(rep pcbLayoutReport, opt pcbLayoutGateOpts) routeGateVerdict
 	if len(rep.OutsideOutline) > 0 {
 		v.Reasons = append(v.Reasons, fmt.Sprintf("%d off-board", len(rep.OutsideOutline)))
 	}
+	if len(rep.TightPairs) > 0 {
+		v.Reasons = append(v.Reasons, fmt.Sprintf("%d tight pair(s) below %.1fmil assembly gap", len(rep.TightPairs), rep.MinGapMil))
+	}
 	if rep.Score < opt.minScore {
 		v.Reasons = append(v.Reasons, fmt.Sprintf("score %d < min %d", rep.Score, opt.minScore))
 	}
@@ -431,17 +454,22 @@ func evalLayoutGate(rep pcbLayoutReport, opt pcbLayoutGateOpts) routeGateVerdict
 }
 
 // recordLayoutGatePass persists pre_route_passed + the gate snapshot.
-func recordLayoutGatePass(project string, rep pcbLayoutReport) error {
+func recordLayoutGatePass(project string, rep pcbLayoutReport, assembly *pcbAssemblyProfile) error {
 	st, err := loadPcbStageState(project)
 	if err != nil {
 		return err
 	}
+	profile := ""
+	if assembly != nil {
+		profile = assembly.Profile
+	}
 	st.Layout = &pcbLayoutGateSummary{
 		Score: rep.Score, Verdict: rep.Verdict,
 		Overlaps: len(rep.Overlaps), OffBoard: len(rep.OutsideOutline),
-		CrossingCount: rep.CrossingCount, At: time.Now().Format(time.RFC3339),
+		CrossingCount: rep.CrossingCount, MinGapMil: rep.MinGapMil,
+		TightPairs: len(rep.TightPairs), Assembly: profile, At: time.Now().Format(time.RFC3339),
 	}
-	st.confirmStage(stagePreRoutePassed, "gate-pass",
+	st.Confirm(stagePreRoutePassed, "gate-pass",
 		fmt.Sprintf("layout-lint score=%d crossings=%d", rep.Score, rep.CrossingCount))
 	return savePcbStageState(st)
 }

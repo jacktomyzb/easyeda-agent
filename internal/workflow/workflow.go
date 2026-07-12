@@ -1,0 +1,422 @@
+// Package workflow is the persistable per-project design-flow state machine
+// (issue #97 follow-up). It is shared by the CLI (internal/app) and the daemon
+// (internal/daemon) so stage gates are enforced at BOTH layers:
+//
+//   - the CLI gates its composite commands (route-short / autoroute) and adds
+//     document-fingerprint verification (drift → auto-invalidate);
+//   - the daemon gates the low-level typed actions (pcb.line.create /
+//     pcb.via.create / pcb.import_autoroute) at dispatch, so a raw /action
+//     caller cannot bypass the flow, and invalidates downstream confirmations
+//     after any placement/outline mutation (catalog-driven, like autosave).
+//
+// State lives per project at Dir()/<key>.json — a global directory
+// (~/.easyeda-agent/workflow by default, EASYEDA_WORKFLOW_DIR to override), NOT
+// the CLI's cwd, so the gate cannot be blinded by running the CLI from a
+// different directory. The pre-#98 cwd-relative location
+// (<cwd>/.easyeda/pcb-stage/<key>.json) is read as a legacy fallback and
+// migrates to the global path on the next save.
+package workflow
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+)
+
+// Stage is one node of the flow. Ordered by rank (see Rank).
+type Stage string
+
+const (
+	StageImported           Stage = "imported"
+	StagePlacementReady     Stage = "placement_ready"
+	StagePlacementConfirmed Stage = "placement_confirmed"
+	StageOutlineConfirmed   Stage = "outline_confirmed"
+	StagePreRoutePassed     Stage = "pre_route_passed"
+	StageRoutingAuthorized  Stage = "routing_authorized"
+)
+
+// Order is the canonical progression; index = rank.
+var Order = []Stage{
+	StageImported,
+	StagePlacementReady,
+	StagePlacementConfirmed,
+	StageOutlineConfirmed,
+	StagePreRoutePassed,
+	StageRoutingAuthorized,
+}
+
+// Rank returns the ordinal of a stage (−1 if unknown).
+func Rank(s Stage) int {
+	for i, v := range Order {
+		if v == s {
+			return i
+		}
+	}
+	return -1
+}
+
+// Event is one confirm / gate / force / invalidate entry (audit trail).
+type Event struct {
+	Stage  Stage  `json:"stage"`
+	At     string `json:"at"`
+	Action string `json:"action"` // confirm | gate-pass | force | invalidate | init
+	Note   string `json:"note,omitempty"`
+	Reason string `json:"reason,omitempty"` // for force
+}
+
+// GateSummary is the machine-readable layout-lint gate snapshot stored when a
+// pre_route gate passes (so route commands can show WHAT it passed on).
+type GateSummary struct {
+	Score         int     `json:"score"`
+	Verdict       string  `json:"verdict"`
+	Overlaps      int     `json:"overlaps"`
+	OffBoard      int     `json:"offBoard"`
+	CrossingCount int     `json:"crossingCount"`
+	MinGapMil     float64 `json:"minGapMil"`
+	TightPairs    int     `json:"tightPairs"`
+	Assembly      string  `json:"assembly,omitempty"`
+	At            string  `json:"at"`
+}
+
+// AssemblyProfile is the project-level assembly/hand-solder contract. It is
+// persisted so a later agent cannot silently fall back to electrical clearance
+// after the user selected hand assembly (issue #99).
+type AssemblyProfile struct {
+	Profile           string  `json:"profile"` // hand-solder | reflow
+	MinGapMil         float64 `json:"minGapMil"`
+	LargePadAccessMil float64 `json:"largePadAccessMil,omitempty"`
+	At                string  `json:"at"`
+}
+
+// Fingerprint pins a confirmation to the document state it was given on: a
+// deterministic hash of the placement poses (or outline geometry) plus the
+// element count. A later gate re-derives the hash from the live document and a
+// mismatch auto-invalidates the confirmation — so a GUI drag, a debug.exec_js
+// edit or another agent's move can never ride a stale sign-off into routing.
+type Fingerprint struct {
+	Hash  string `json:"hash"`
+	Count int    `json:"count"`
+	At    string `json:"at"`
+}
+
+// State is the persisted per-project record.
+type State struct {
+	Project   string           `json:"project"`
+	Confirmed map[Stage]bool   `json:"confirmed"`
+	Assembly  *AssemblyProfile `json:"assembly,omitempty"`
+	Layout    *GateSummary     `json:"layoutGate,omitempty"`
+	LayoutFP  *Fingerprint     `json:"layoutFingerprint,omitempty"`
+	OutlineFP *Fingerprint     `json:"outlineFingerprint,omitempty"`
+	History   []Event          `json:"history,omitempty"`
+	UpdatedAt string           `json:"updatedAt"`
+}
+
+// Has reports whether a stage confirmation is currently set.
+func (s *State) Has(st Stage) bool {
+	return s != nil && s.Confirmed != nil && s.Confirmed[st]
+}
+
+// Confirm sets a stage confirmation and records the event.
+func (s *State) Confirm(st Stage, action, note string) {
+	if s.Confirmed == nil {
+		s.Confirmed = map[Stage]bool{}
+	}
+	s.Confirmed[st] = true
+	s.History = append(s.History, Event{
+		Stage: st, At: time.Now().Format(time.RFC3339), Action: action, Note: note,
+	})
+}
+
+// InvalidateFrom clears the given stage and every stage after it, so a mutation
+// can never leave a stale downstream confirmation standing. Records one
+// invalidate event and drops the gate snapshot / fingerprints tied to the
+// cleared stages.
+func (s *State) InvalidateFrom(from Stage, cause string) []Stage {
+	if s.Confirmed == nil {
+		return nil
+	}
+	fromRank := Rank(from)
+	if fromRank < 0 {
+		return nil
+	}
+	var cleared []Stage
+	for _, st := range Order {
+		if Rank(st) >= fromRank && s.Confirmed[st] {
+			delete(s.Confirmed, st)
+			cleared = append(cleared, st)
+		}
+	}
+	if Rank(StagePreRoutePassed) >= fromRank {
+		s.Layout = nil
+	}
+	if Rank(StagePlacementConfirmed) >= fromRank {
+		s.LayoutFP = nil
+	}
+	if Rank(StageOutlineConfirmed) >= fromRank {
+		s.OutlineFP = nil
+	}
+	if len(cleared) > 0 {
+		s.History = append(s.History, Event{
+			Stage: from, At: time.Now().Format(time.RFC3339),
+			Action: "invalidate", Note: cause,
+		})
+	}
+	return cleared
+}
+
+// ── storage ────────────────────────────────────────────────────────────────
+
+// EnvDir overrides the state directory (tests, sandboxes).
+const EnvDir = "EASYEDA_WORKFLOW_DIR"
+
+// Dir is the global state root: EASYEDA_WORKFLOW_DIR, else
+// ~/.easyeda-agent/workflow (the same tree the daemon audit log uses).
+func Dir() string {
+	if d := strings.TrimSpace(os.Getenv(EnvDir)); d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = os.Getenv("HOME")
+	}
+	return filepath.Join(home, ".easyeda-agent", "workflow")
+}
+
+var sanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+
+// SanitizeKey turns a project name/uuid into a safe file stem. Falls back to
+// "_active" when routing is by --window (no project name available).
+func SanitizeKey(project string) string {
+	p := sanitizeRe.ReplaceAllString(strings.TrimSpace(project), "-")
+	p = strings.Trim(p, "-")
+	if p == "" {
+		return "_active"
+	}
+	return p
+}
+
+// Path is the state file for a project.
+func Path(project string) string {
+	return filepath.Join(Dir(), SanitizeKey(project)+".json")
+}
+
+// legacyPath is the pre-global (cwd-relative) location PR #98 used.
+func legacyPath(project string) string {
+	return filepath.Join(".easyeda", "pcb-stage", SanitizeKey(project)+".json")
+}
+
+// Load reads the state; a missing file yields a fresh imported state rather
+// than an error (the flow always starts at imported). When the global file is
+// missing but the legacy cwd-relative one exists, the legacy state is loaded
+// (and lands at the global path on the next Save).
+func Load(project string) (*State, error) {
+	for _, path := range []string{Path(project), legacyPath(project)} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		var s State
+		if err := json.Unmarshal(data, &s); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if s.Confirmed == nil {
+			s.Confirmed = map[Stage]bool{}
+		}
+		return &s, nil
+	}
+	return &State{Project: project, Confirmed: map[Stage]bool{}}, nil
+}
+
+// Exists reports whether a persisted state file exists for the project (global
+// or legacy path).
+func Exists(project string) bool {
+	for _, path := range []string{Path(project), legacyPath(project)} {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// LoadAny loads the state for the first candidate key that has a persisted
+// file; when none exists it returns a fresh state for the first non-empty
+// candidate. Candidates let a caller that knows several identities for the same
+// project (request hint, window project name, project uuid) find the record the
+// CLI wrote, whichever key it used.
+func LoadAny(candidates ...string) (*State, error) {
+	first := ""
+	for _, c := range candidates {
+		if strings.TrimSpace(c) == "" {
+			continue
+		}
+		if first == "" {
+			first = c
+		}
+		if Exists(c) {
+			return Load(c)
+		}
+	}
+	return &State{Project: first, Confirmed: map[Stage]bool{}}, nil
+}
+
+// Save atomically persists the state at the global path.
+func Save(s *State) error {
+	if err := os.MkdirAll(Dir(), 0o755); err != nil {
+		return err
+	}
+	s.UpdatedAt = time.Now().Format(time.RFC3339)
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := Path(s.Project)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// InvalidateAll clears from-and-downstream on every candidate key that has a
+// persisted state file (a project may have been recorded under its name AND its
+// uuid). Returns the union of cleared stage names. Best-effort: save failures
+// are skipped (the mutation that triggered this already succeeded).
+func InvalidateAll(candidates []string, from Stage, cause string) []string {
+	seenKey := map[string]bool{}
+	clearedSet := map[string]bool{}
+	for _, c := range candidates {
+		if strings.TrimSpace(c) == "" {
+			continue
+		}
+		key := SanitizeKey(c)
+		if seenKey[key] || !Exists(c) {
+			continue
+		}
+		seenKey[key] = true
+		st, err := Load(c)
+		if err != nil {
+			continue
+		}
+		cleared := st.InvalidateFrom(from, cause)
+		if len(cleared) == 0 {
+			continue
+		}
+		if err := Save(st); err != nil {
+			continue
+		}
+		for _, cl := range cleared {
+			clearedSet[string(cl)] = true
+		}
+	}
+	out := make([]string, 0, len(clearedSet))
+	for k := range clearedSet {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ── route gate ─────────────────────────────────────────────────────────────
+
+// Gate is the verdict for a routing command's precondition check.
+type Gate struct {
+	Allowed bool     `json:"allowed"`
+	Forced  bool     `json:"forced,omitempty"`
+	Missing []string `json:"missing,omitempty"`
+	Message string   `json:"message,omitempty"`
+}
+
+// CheckRouteGate reports whether routing may proceed: it needs both
+// outline_confirmed and pre_route_passed. When force is set it always allows
+// and records the override reason in the state's history so the bypass is
+// auditable, not silent — but the authorization is for THIS run only: nothing
+// is confirmed, so the next un-forced call is gated again.
+func CheckRouteGate(s *State, force bool, reason string) Gate {
+	var missing []string
+	if !s.Has(StageOutlineConfirmed) {
+		missing = append(missing, string(StageOutlineConfirmed))
+	}
+	if !s.Has(StagePreRoutePassed) {
+		missing = append(missing, string(StagePreRoutePassed))
+	}
+	if len(missing) == 0 {
+		return Gate{Allowed: true}
+	}
+	if force {
+		s.History = append(s.History, Event{
+			Stage: StageRoutingAuthorized, At: time.Now().Format(time.RFC3339),
+			Action: "force", Reason: reason,
+			Note: "routing forced past missing: " + strings.Join(missing, ", "),
+		})
+		return Gate{
+			Allowed: true, Forced: true, Missing: missing,
+			Message: "gate FORCED past " + strings.Join(missing, ", ") + " (reason: " + reason + ")",
+		}
+	}
+	return Gate{
+		Allowed: false, Missing: missing,
+		Message: "routing blocked: missing " + strings.Join(missing, ", ") +
+			". Confirm layout (`easyeda pcb stage confirm-layout`), outline (`easyeda pcb stage confirm-outline`) " +
+			"and pass the routability gate (`easyeda pcb layout-lint --gate`), or override with `--force <reason>`.",
+	}
+}
+
+// ── fingerprints ───────────────────────────────────────────────────────────
+
+// ComponentPose is the placement identity of one component: what a layout
+// fingerprint is derived from. Coordinates are rounded to 0.1 mil so float
+// noise from a round-trip re-read never reads as drift.
+type ComponentPose struct {
+	Designator string
+	X, Y       float64
+	Rotation   float64
+	Layer      string
+}
+
+// HashLayout derives a deterministic fingerprint hash from component poses
+// (sorted by designator; primitive ids are excluded — they churn across window
+// reloads while the placement itself is unchanged).
+func HashLayout(poses []ComponentPose) string {
+	sorted := make([]ComponentPose, len(poses))
+	copy(sorted, poses)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Designator != sorted[j].Designator {
+			return sorted[i].Designator < sorted[j].Designator
+		}
+		// Duplicate designators (should not happen, but never let map/order
+		// nondeterminism produce a spurious drift): order by pose.
+		return sorted[i].X < sorted[j].X || (sorted[i].X == sorted[j].X && sorted[i].Y < sorted[j].Y)
+	})
+	h := sha256.New()
+	for _, p := range sorted {
+		fmt.Fprintf(h, "%s|%.1f|%.1f|%.1f|%s\n", p.Designator, p.X, p.Y, p.Rotation, p.Layer)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// HashJSON derives a deterministic fingerprint hash from any JSON-encodable
+// value (encoding/json sorts map keys, so equal content hashes equally). Used
+// for the outline geometry snapshot.
+func HashJSON(v any) (string, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// NewFingerprint stamps a hash + count with the current time.
+func NewFingerprint(hash string, count int) *Fingerprint {
+	return &Fingerprint{Hash: hash, Count: count, At: time.Now().Format(time.RFC3339)}
+}

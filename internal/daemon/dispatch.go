@@ -172,6 +172,16 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	req.CreatedAt = time.Now().UTC()
 	req.WindowID = target.id()
 
+	// Workflow stage gate (issue #97): routing actions refuse until the
+	// project's persisted stage state authorizes them — enforced HERE, at the
+	// choke point, so a raw /action caller can't bypass the CLI's gates.
+	if errResp := s.checkStageGate(&req); errResp != nil {
+		started := time.Now().UTC()
+		s.audit.Append(fromResponse(started, &req, errResp))
+		writeJSON(w, http.StatusForbidden, *errResp)
+		return
+	}
+
 	// Re-entrancy guard: refuse to stack a second DRC onto a window whose first
 	// one hasn't settled — retrying piles recompute tasks onto the webview.
 	if nonReentrant[req.Action] {
@@ -208,6 +218,9 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		resp.Type = protocol.TypeResponse
 	}
 	s.persistArtifacts(resp, s.artifactDir(req.OutputDir))
+	// Catalog-driven stage invalidation: a successful placement/outline mutation
+	// clears stale downstream confirmations, whoever the client was.
+	s.maybeInvalidateStage(&req, resp)
 	s.audit.Append(fromResponse(started, &req, resp))
 	// After a successful content-changing action, arm a debounced autosave so the
 	// work reaches disk without the agent having to remember to save (no-op when

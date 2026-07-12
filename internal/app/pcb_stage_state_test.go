@@ -1,8 +1,9 @@
 package app
 
 import (
-	"os"
 	"testing"
+
+	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
 )
 
 // Issue #97 regression: the PCB flow must not let routing proceed without
@@ -26,8 +27,8 @@ func TestRouteGateBlocksUnconfirmed(t *testing.T) {
 
 func TestRouteGateAllowsWhenConfirmed(t *testing.T) {
 	st := newTestStageState()
-	st.confirmStage(stageOutlineConfirmed, "confirm", "")
-	st.confirmStage(stagePreRoutePassed, "gate-pass", "")
+	st.Confirm(stageOutlineConfirmed, "confirm", "")
+	st.Confirm(stagePreRoutePassed, "gate-pass", "")
 	g := checkRouteGate(st, false, "")
 	if !g.Allowed {
 		t.Fatalf("route gate should allow with both confirmations, missing=%v", g.Missing)
@@ -53,19 +54,19 @@ func TestMutationInvalidatesDownstream(t *testing.T) {
 	for _, s := range []pcbStage{
 		stagePlacementReady, stagePlacementConfirmed, stageOutlineConfirmed, stagePreRoutePassed,
 	} {
-		st.confirmStage(s, "confirm", "")
+		st.Confirm(s, "confirm", "")
 	}
 	st.Layout = &pcbLayoutGateSummary{Score: 70}
 
 	// Moving a part invalidates placement_confirmed and everything after it.
-	cleared := st.invalidateFrom(stagePlacementConfirmed, "test move")
+	cleared := st.InvalidateFrom(stagePlacementConfirmed, "test move")
 	if len(cleared) != 3 {
 		t.Fatalf("expected 3 cleared (placement_confirmed, outline_confirmed, pre_route_passed), got %v", cleared)
 	}
-	if st.has(stagePlacementConfirmed) || st.has(stageOutlineConfirmed) || st.has(stagePreRoutePassed) {
+	if st.Has(stagePlacementConfirmed) || st.Has(stageOutlineConfirmed) || st.Has(stagePreRoutePassed) {
 		t.Fatal("downstream confirmations must be cleared")
 	}
-	if !st.has(stagePlacementReady) {
+	if !st.Has(stagePlacementReady) {
 		t.Fatal("upstream stage (placement_ready) must survive")
 	}
 	if st.Layout != nil {
@@ -79,15 +80,15 @@ func TestMutationInvalidatesDownstream(t *testing.T) {
 
 func TestOutlineMutationKeepsPlacement(t *testing.T) {
 	st := newTestStageState()
-	st.confirmStage(stagePlacementConfirmed, "confirm", "")
-	st.confirmStage(stageOutlineConfirmed, "confirm", "")
-	st.confirmStage(stagePreRoutePassed, "gate-pass", "")
+	st.Confirm(stagePlacementConfirmed, "confirm", "")
+	st.Confirm(stageOutlineConfirmed, "confirm", "")
+	st.Confirm(stagePreRoutePassed, "gate-pass", "")
 
-	cleared := st.invalidateFrom(stageOutlineConfirmed, "outline resized")
+	cleared := st.InvalidateFrom(stageOutlineConfirmed, "outline resized")
 	if len(cleared) != 2 {
 		t.Fatalf("outline change should clear outline_confirmed + pre_route_passed, got %v", cleared)
 	}
-	if !st.has(stagePlacementConfirmed) {
+	if !st.Has(stagePlacementConfirmed) {
 		t.Fatal("placement_confirmed must survive an outline-only change")
 	}
 }
@@ -112,21 +113,40 @@ func TestEvalLayoutGate(t *testing.T) {
 	if v := evalLayoutGate(ovl, opt); v.Pass {
 		t.Fatal("any overlap must fail the gate")
 	}
+
+	// Issue #99: electrical clearance is not a hand-solder assembly gate.
+	tight := pcbLayoutReport{Score: 90, CrossingCount: 0, MinGapMil: 40,
+		TightPairs: []pcbLFinding{{A: "C1", B: "U1", Gap: 16.4}}}
+	if v := evalLayoutGate(tight, opt); v.Pass {
+		t.Fatal("any pair below the selected assembly gap must fail the gate")
+	}
+}
+
+func TestAssemblyProfileRoundTrip(t *testing.T) {
+	t.Setenv(workflow.EnvDir, t.TempDir())
+
+	st := newTestStageState()
+	st.Assembly = &pcbAssemblyProfile{Profile: "hand-solder", MinGapMil: 40, LargePadAccessMil: 60}
+	if err := savePcbStageState(st); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := loadPcbStageState("test")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.Assembly == nil || got.Assembly.Profile != "hand-solder" || got.Assembly.MinGapMil != 40 {
+		t.Fatalf("assembly profile did not round-trip: %+v", got.Assembly)
+	}
 }
 
 func TestStageStateRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	cwd, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	defer os.Chdir(cwd)
+	t.Setenv(workflow.EnvDir, t.TempDir())
 
 	st, err := loadPcbStageState("proj-x")
 	if err != nil {
 		t.Fatalf("load fresh: %v", err)
 	}
-	st.confirmStage(stageOutlineConfirmed, "confirm", "note")
+	st.Confirm(stageOutlineConfirmed, "confirm", "note")
 	if err := savePcbStageState(st); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -134,7 +154,7 @@ func TestStageStateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if !got.has(stageOutlineConfirmed) {
+	if !got.Has(stageOutlineConfirmed) {
 		t.Fatal("persisted confirmation must survive a reload")
 	}
 }

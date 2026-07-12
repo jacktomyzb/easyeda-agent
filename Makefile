@@ -157,6 +157,11 @@ endif
 	@echo "  creating GitHub release..."
 	git tag -a $(VERSION) -m "Release $(VERSION)" 2>/dev/null || echo "  (tag $(VERSION) already exists, reusing)"
 	git push origin $(VERSION)
+	@awk '/^## \[$(VERSION:v%=%)\]/{f=1} f&&/^## \[/&&!/^## \[$(VERSION:v%=%)\]/{exit} f' extension/CHANGELOG.md > $(DIST)/changelog-section.md
+	@{ \
+		cat $(DIST)/changelog-section.md; \
+		printf '\n---\n\nOne-line install/update:\n```\ncurl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh\n```\n\nInstalls/updates:\n- easyeda CLI/daemon\n- easyeda-agent skill for Codex (~/.codex/skills) and/or Claude Code (~/.claude/skills) when detected\n- prints EasyEDA connector .eext import URL\n\nSkill targets: set `EASYEDA_INSTALL_SKILLS=codex,claude` to force targets, `none` to skip, or `EASYEDA_SKILL_PRESERVE=1` to keep local edits.\n'; \
+	} > $(DIST)/release-notes.md
 	gh release create $(VERSION) \
 		$(DIST)/easyeda_darwin_amd64 \
 		$(DIST)/easyeda_darwin_arm64 \
@@ -167,7 +172,7 @@ endif
 		$(DIST)/skills.tar.gz \
 		$(DIST)/install.sh \
 		--title "easyeda-agent $(VERSION)" \
-		--notes "$$(printf 'One-line install/update:\n\`\`\`\ncurl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh\n\`\`\`\n\nInstalls/updates:\n- easyeda CLI/daemon\n- easyeda-agent skill for Codex (~/.codex/skills) and/or Claude Code (~/.claude/skills) when detected\n- prints EasyEDA connector .eext import URL\n\nSkill targets: set \`EASYEDA_INSTALL_SKILLS=codex,claude\` to force targets, \`none\` to skip, or \`EASYEDA_SKILL_PRESERVE=1\` to keep local edits.')"
+		--notes-file $(DIST)/release-notes.md
 	@echo "  publishing skill to ClawHub..."
 	@$(MAKE) publish-skill VERSION=$(VERSION) \
 		|| echo "  ⚠️  ClawHub publish failed — retry with: clawhub login && make publish-skill VERSION=$(VERSION)"

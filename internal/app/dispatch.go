@@ -37,6 +37,10 @@ type appConfig struct {
 	host    string
 	ports   string // "49620-49629"
 	project string // optional stable routing hint (project name/uuid) → windowId
+	// forceReason, when set by a route command's --force <reason>, is attached to
+	// every action request so the daemon-side workflow stage gate honors the same
+	// audited override (per-run; see internal/daemon/stagegate.go).
+	forceReason string
 }
 
 // portRange parses the ports string and returns (start, end, err).
@@ -319,6 +323,9 @@ func postAction(cfg *appConfig, action, window string, payload any, timeout time
 	}
 	if cfg.project != "" {
 		body["project"] = cfg.project
+	}
+	if cfg.forceReason != "" {
+		body["forceReason"] = cfg.forceReason
 	}
 	// Tell the daemon where to drop artifacts: this CLI's working directory. The
 	// daemon writes them under <cwd>/.easyeda/artifacts so screenshots/exports

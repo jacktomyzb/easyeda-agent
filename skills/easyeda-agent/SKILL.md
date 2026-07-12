@@ -33,6 +33,8 @@ EasyEDA tooling.
 10. **RF/天线 keepout 覆盖每一层** — top+bottom no-copper + 内层 no-inner-electrical;top-only 会被底层 pour 灌到失谐。→ pcb.md
 11. **丝印每个标记落在器件本体/courtyard 之外、装配后不被遮** — 端子塑料罩/卡座壳/按键帽会盖住 footprint 内的丝印 = 等于没标。→ design-flow P9
 12. **禁用 `eda.sch_Netlist.getNetlist()`**(已废弃、悬空脚挂死)— 网表走 `sch read/check/netlist/export`;raw 路径不得已才 `getNetlistFile()` 读 `File.text()`。→ schematic.md / actions.md
+13. **电气 clearance ≠ 手焊可达性** — P2 先持久化装配档案:`pcb stage set-assembly --profile hand-solder`(默认/下限40mil;大焊盘烙铁通道60mil);`layout-lint --gate` 有任何 tight pair 即失败,未过门不得确认布局。→ design-flow P2/P6 · issue #99
+14. **阶段门禁是机械强制的,不靠记忆** — 布线(`route-short`/`autoroute`,以及底层 `pcb.line.create`/`pcb.via.create`/`pcb.import_autoroute`)未过 `outline_confirmed`+`pre_route_passed` 一律被拒,**daemon 在 /action 派发层也拦**(raw 调用绕不过);确认与**文档指纹**绑定——GUI 拖动 / `exec_js` 等门外改动会被下一个 gate 自动失效回退。任意阶段切入 / 恢复会话:先 `easyeda workflow status --reconcile` 校准,再 `easyeda workflow advance` 按流程继续;`--force <理由>` 仅本次执行有效且入审计。→ design-flow P6/P7 · issue #97
 
 ## ② 流程停点 + 档位默认 + 块地图速查
 
@@ -47,7 +49,7 @@ EasyEDA tooling.
 | ① S0 方案书 | 进 S1 前 | 架构/叠层/地策略/接口取向每条摊选项+坑+推荐让用户拍板;**必须落成磁盘文件**才算过门,不能停在对话里 |
 | ② sch→PCB 前 | 原理图完成 | 网表逐条对齐 + **`sch drc` 与 `sch check` 都跑且都清零**(两引擎规则不重叠,只跑一个必漏规则)→ design-flow S5 |
 | ③ 发板/交付前 | 导出制造 | 交付摘要说清偏差(降级决策/遗留 WARN) |
-| P2 摆放前 | 布局起手 | 先问两决策:单/双面布局 + 焊接工艺(定封装下限) |
+| P2 摆放前 | 布局起手 | 先问单/双面布局 + 焊接工艺;立即用 `pcb stage set-assembly` 落盘,手焊默认 `min-gap=40mil`/大焊盘通道 `60mil` |
 | P2 边缘接口件 | 端子/USB/SD/排针/按键/IPEX | 朝向 + 边序 = 装配体验,agent 猜不了,**必须用户确认**;先 `blocks show` 读块 placement 摊给用户 |
 | P7 稠密板布线 | 见下档位 + P7 迷你清单 | **停下请用户在 EasyEDA 菜单点「布线→自动布线」**;交出去前必做两步见下方 P7 迷你清单,跑完再接手 |
 | 破坏性操作 / 门禁失败 | clear/delete/bulk;`pcb new-board --force`(已绑板会搬走原理图=旧板原理图丢失);layout-lint ERROR / DRC fatal | 停在失败数据,不带病往下 |
@@ -95,7 +97,7 @@ EasyEDA tooling.
 
 每条带 `→` design-flow 锚点;这些是**同级铁律级**的强顺序约束,散在深处易漏,汇总于此:
 
-1. **摆放过 layout-lint 前不布线**(S3 摆放 → S5 layout-lint 门 → S4/P7 布线)→ design-flow S3/S5
+1. **摆放过 assembly+routability gate 前不布线**(手焊先持久化 profile;`layout-lint --gate` 必须 0 tight)→ design-flow P2/P6
 2. **P6 可布性门在 P7 布线之前**(≥目标分、0 overlap、ratsnest 可控)→ design-flow P6
 3. **P7.0 电源/差分先布并 `track-lock`,再交自动布线**(见上方 P7 迷你清单)→ design-flow P7.0
 4. **禁布区 / 丝印(P4/P5)在布线 P7 之前**(布完再加会逼返工重绕)→ design-flow P4/P5

@@ -200,6 +200,7 @@ P0 新板/切板 → P1 导器件 → P2 摆放(留装配位) → P3 板框 → 
   两条路径都以"布局确认(P2 停点)+ 板框确认(P3 停点)"收尾,再进 P6 可布性门。
 - **P2 摆放 — 按优先级分档,每档过确认(2026-07-09 走查#1 用户反馈定型)**:
   **摆放前先问两个决策**(见 design-decisions.md #13/#14,里程碑档必问):① **单面还是双面布局**(SD 卡槽、去耦帽这类矮件适合底面,双面省板但双面贴装贵);② **焊接工艺**(产线贴片可用 0402;手工焊接封装下限 0603/0805,直接影响选型与间距)。
+  **回答后立即落盘,不能只记在对话里**:`pcb stage set-assembly --profile hand-solder --min-gap 40 --large-pad-access 60`(或 `--profile reflow`)。手焊的 40mil 是普通器件外框间距地板;USB 外壳脚、SOT-223、模组大焊盘等至少留一个 60–80mil 烙铁进入方向。电气 DRC clearance 不能替代此门。每档移动后先截图复核朝向/烙铁入口,完成 P2 全布局后运行一次 `pcb layout-lint --gate`,通过才允许 `confirm-layout`;P3 改板框会使该结果失效,P6 必须在最终板框上重跑。(issue #99)
   **优先级档序(每档摆完→截图/坐标表向用户确认→锁定,再摆下一档)**:
   1. **安装孔/结构孔**(M3 四角等)——最先放+**锁定**,后续所有档避开垫圈净空(M3 头 Ø6mm ≈ R118mil);孔后置必然与边缘件冲突(实测:四角 IPEX/USB 全压在垫圈区上)。
   2. **边缘接口件**(有开口方向的:端子/USB/SD 卡槽/排针/按键/IPEX)——按 spec 的出边意图放到板边,开口朝外;这一档**必须用户确认**(朝向、边序是装配体验,agent 猜不了)。
@@ -209,7 +210,13 @@ P0 新板/切板 → P1 导器件 → P2 摆放(留装配位) → P3 板框 → 
 - **P3 板框**:`pcb outline-round --rect … --margin 120`(**默认圆角**,贴器件包络;半径 ≤ 四角 M3 孔外缘距板边、别切孔,无孔约束取 2–3mm,见 `pcb-layout-conventions.md §2.5`);spec `board:"compact"` 时 margin 收到 **50~120mil**,天线端板边贴模块天线区顶(天线本就该在板边,keepout 条越短越省板)。**插头受体连接器**(USB-C/DC jack)在直边段**突出板框 ~0.5–1mm**(§2.2,焊盘留板内),圆角只在四角不影响。**板框定稿并经用户确认后 `easyeda pcb stage confirm-outline` 落 `outline_confirmed`(需先有 `placement_confirmed`;`outline-fit`/`outline-round` 改框会失效它,须重新确认)。**📸 录制模式:布局+板框成型后抓一张阶段截图。
 - **P4 禁布区(靠前!)**:天线/挖槽用**一个多层区域**即可——`pcb region create --layer 12(多层) --rule no-pours --rule no-wires --rule no-fills`,一个区域盖全铜层,**不用逐层建 4 个**;内层用「填充区域」禁止,不需要 no-inner-electrical。**删旧区域要「删完校验再建」**——delete 紧跟 create 同批次会竞态,删没生效就累积。RF/天线器件清单与禁布层范围读 S0 方案书 spec 的 `rf.parts` / `rf.keepoutLayers`,这里不重新判断该不该禁、禁哪些层。**RF 块的 `pcb_layout` `rf-keepout`/`balun-mirror`(severity=must)与 spec.rf 一并 `blocks show` 读。**
 - **P5 丝印对齐(靠前!)**:`pcb silk-align`(位号摆正+位置感知+`--spacing` 装配间距)。导入的位号常 180° 倒置,这里一并摆正。放布线前,让布线避开丝印占位。📸 录制模式:禁布区+丝印就位后抓一张阶段截图。
-- **P6 可布性门(强制,#97)**:`pcb layout-lint --gate`(≥ `--min-score`、0 overlap/off-board、ratsnest 交叉 ≤ `--max-crossings`)。**通过才落 `pre_route_passed`**;低分/多交叉直接非零退出(如实测 score 32 / 17 crossings 会被挡)。P7 布线命令(`route-short`/`autoroute`)**默认要求 `outline_confirmed` + `pre_route_passed` 才执行**,否则拒绝;确需推进用 `--force <理由>` 显式授权并记入审计,`--dry-run` 只出计划不触发门禁。用 `easyeda pcb stage status` 查当前阶段。
+- **P6 装配+可布性门(强制,#97/#99)**:P3 最终板框确认后重跑 `pcb layout-lint --gate`(P2 的初检会因改框失效)。门读取项目 assembly profile;同时要求 0 overlap、0 off-board、**0 tight spacing**、≥ `--min-score`、ratsnest 交叉 ≤ `--max-crossings`。手焊 profile 未设置或任何器件低于40mil时必须失败,不得进入布线。**通过才重新落 `pre_route_passed`**;P7 布线命令默认要求 `outline_confirmed` + `pre_route_passed`,否则拒绝;确需推进用 `--force <理由>` 显式授权并记入审计(**仅本次执行有效**——不落任何确认,下次无 `--force` 照样被拦)。用 `easyeda pcb stage status` 查装配档案与阶段。
+  **门禁的机械强制面(#97 后续,2026-07-12)**:① 状态**全局持久化**在 `~/.easyeda-agent/workflow/<project>.json`(换 cwd 跑 CLI 骗不过门;`EASYEDA_WORKFLOW_DIR` 可覆写);② **daemon 在 /action 派发层同样拦截** `pcb.line.create`/`pcb.via.create`/`pcb.import_autoroute`(raw HTTP 调用也绕不过),且任何摆放/板框类 action(component.modify/move/arrange/align/add/delete/import_changes/outline.set/clear)成功后**自动失效下游确认**并在响应 warning 里报 `workflow stage invalidated`;③ `confirm-layout`/`confirm-outline` 会把签核**指纹绑定**到当时的器件坐标/旋转/层与板框几何——GUI 拖动、`debug.exec_js`、其它 agent 的门外改动,会在下一次 gate 时指纹失配 → 自动失效并指回该重确认的阶段。
+- **任意阶段切入 / 会话恢复(workflow 命令族)**:换了模型、丢了上下文、或用户手改了板子,都不需要重走流程——
+  1. `easyeda workflow status --reconcile`:拉实况(器件数/板框/已布线数)+ 校验指纹,自动失效漂移的确认,报告不一致(如「有走线但从未过门」);
+  2. `easyeda workflow advance`:幂等推进——机械验收(layout-lint gate)直接代跑,人工签核点(confirm-layout/outline)停下并打印**下一条该执行的命令**(非零退出,脚本循环天然停在签核点);
+  3. `easyeda workflow confirm layout|outline` = `pcb stage confirm-*` 同实现;`workflow init` 新板起手建 marker。
+  每一步的 `next:` 输出就是「默认继续按 workflow 走」的入口,不依赖任何 agent 记忆。
 - **P7 布线 — 三档阶梯(2026-07-09 定型)**:按密度选档,密度预算=layout-lint 的 ratsnest 长度/交叉数。
   > **档位铁律(= 顶层「档位默认」表的展开)**:稀疏板 → ① route-short;**稠密板默认 = ② 人机协作档(停下请用户点原生自动布线),不是 Freerouting**。③ Freerouting 只在**全 headless(无用户可点)**时兜底,**绝不拿它顶替 ② 去图 autonomous**——用户选了 ② 就按 ② 停手交回。(2026-07-09 实测踩过:图省事直接上 Freerouting = 违反本档。)
   **P7.0 关键网络先行(2026-07-10 定,先于把剩余交人工)** —— 自动布线器最不擅长的两类不丢给它、自己确定性布好并**锁定**,只把剩余普通信号交人工档 ②(是对 ② 的**增强**,不是替代):
