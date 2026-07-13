@@ -12,6 +12,11 @@ skill ──▶ Go CLI/daemon ──WebSocket──▶ connector .eext ──▶
 ## 官方插件库调研参考
 文章：docs/ecosystem-survey.md，遇到什么不确认的情况可以来这里参考分析，并更新认知到相应文档；
 
+## 核心概念拉通认知
+[`docs/concepts.md`](docs/concepts.md) = 布局/布线域的**共享词汇表**(网 / 网感知 vs 几何 /
+布局分档 T1–T4 / edge 语义 / 块数据模型 / 可信判据)。**引入或讨论新概念对象先落这里再引用**,
+让后续会话、贡献者、Skill 用同一套心智模型。验收判据见 [`docs/e2e-automation-acceptance.md`](docs/e2e-automation-acceptance.md)。
+
 ## 首要准则 — Skill 优先
 
 > **本项目是「边开发、边更新 Agent Skill」的联合开发模式。**
