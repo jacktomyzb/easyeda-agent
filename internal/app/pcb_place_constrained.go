@@ -190,7 +190,40 @@ var (
 	cpReSwitch   = regexp.MustCompile(`(?i)tact|switch|\bkey\b|button|sw-?smd`)
 	cpReLED      = regexp.MustCompile(`(?i)\bled\b`)
 	cpReCrystal  = regexp.MustCompile(`(?i)xtal|crystal|osc|3225|3215|2016|2520|smd-?4p`)
+	// cpReAnyEdge mirrors the block edge="any" role (RF antenna / radio module —
+	// must sit at *an* edge but any works, so it is NOT grouped with user-facing
+	// I/O). Checked before cpReEdgeConn so an IPEX/U.FL antenna reads as "any", not
+	// a user-facing connector.
+	cpReAnyEdge = regexp.MustCompile(`(?i)wroom|wrover|esp32.*(module|wifi|smd)|ipex|u\.?fl|\bsma\b|\bufl\b|antenna|\bant\b`)
 )
+
+// edgeRoleOf returns the block `edge` semantic for an edge-must part —
+// "user-facing" (USB / SD / screw-terminal / header the user plugs into → group
+// on one accessible edge), "any" (RF antenna / module — any edge is fine → keep
+// nearest), or "" (unknown → treated as any). It consumes the block placement
+// hint (data/*.json placement.<ref>.edge, the source-of-truth) via the
+// DISTINCTIVE designator prefix, and falls back to the device-name regex — the
+// documented mirror of that data — for the generic-prefix connectors (J*, U*)
+// the prefix index deliberately can't reach (see blocks.PlacementIndex).
+func edgeRoleOf(c cpComp) string {
+	des := strings.ToUpper(strings.TrimSpace(c.designator))
+	if h, ok := placementIndex().ByRefPrefix[refPrefixCP(des)]; ok {
+		switch strings.ToLower(strings.TrimSpace(h.Edge)) {
+		case "user-facing":
+			return "user-facing"
+		case "any":
+			return "any"
+		}
+	}
+	fp := c.footprint
+	if cpReAnyEdge.MatchString(fp) {
+		return "any"
+	}
+	if cpReEdgeConn.MatchString(fp) || (strings.HasPrefix(des, "J") && !strings.HasPrefix(des, "JP")) {
+		return "user-facing"
+	}
+	return ""
+}
 
 // cpComp carries a placed component's device NAME (PCB components expose no
 // footprint-name string, so we pattern-match the device name — e.g.
@@ -390,28 +423,30 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 		kinds[i] = classifyCP(c, opt.mainPins)
 	}
 
-	// ── Tier 2: edge-must → snap to nearest board edge, fix. ──────────────────
-	// Order: biggest first (big connectors claim edge space before small ones).
+	// ── Tier 2: edge-must → snap to an edge, fix. ─────────────────────────────
+	// Consume the block `edge` role (data/*.json placement.<ref>.edge — the
+	// source-of-truth): connectors a block marks edge="user-facing" (USB / SD /
+	// screw-terminals / headers the user plugs into) are GROUPED onto ONE shared
+	// board edge and packed along it, so external I/O sits together on one
+	// accessible side instead of each snapping to whichever edge it was nearest
+	// (the scatter the per-part rule caused on a spread seed → oversized board).
+	// edge="any" parts (RF antenna / radio module — must be at *an* edge, any
+	// works) keep the per-part nearest-edge rule.
 	edgeIdx := []int{}
 	for i := range comps {
 		if kinds[i] == cpEdgeMust {
 			edgeIdx = append(edgeIdx, i)
 		}
 	}
+	// Biggest first (big connectors claim edge space before small ones).
 	sort.Slice(edgeIdx, func(a, b int) bool {
 		ca, cb := comps[edgeIdx[a]], comps[edgeIdx[b]]
 		return ca.width()*ca.height() > cb.width()*cb.height()
 	})
-	for _, i := range edgeIdx {
-		c := comps[i]
-		if !c.hasBBox {
-			continue
-		}
-		cx, cy := c.bboxCenter()
-		// nearest edge by bbox-center distance
-		dL, dR, dB, dT := cx-bx0, bx1-cx, cy-by0, by1-cy
-		best := dL
-		edge := edgeLeft
+
+	nearestEdge := func(px, py float64) apEdge {
+		dL, dR, dB, dT := px-bx0, bx1-px, py-by0, by1-py
+		best, edge := dL, edgeLeft
 		if dR < best {
 			best, edge = dR, edgeRight
 		}
@@ -419,36 +454,53 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 			best, edge = dB, edgeBottom
 		}
 		if dT < best {
-			best, edge = dT, edgeTop
+			edge = edgeTop
 		}
-		// Orientation: pick the rotation whose OPENING faces off the edge (pads face
-		// the interior). Recognizes a part the user already oriented correctly and
-		// leaves it — only rotates when the current opening points the wrong way.
+		return edge
+	}
+	// edgeConnDelta is the rotation (relative to current) that turns c's opening
+	// off the assigned edge — block-declared opening first (deterministic), else
+	// the asymmetric pad-geometry guess ONLY when the current opening clearly
+	// faces the interior, else 0 (symmetric / already-correct → preserve).
+	edgeConnDelta := func(c cpComp, edge apEdge) float64 {
+		if lox, loy, ok := connOpeningFor(c.footprint); ok {
+			return openingTargetDelta(c.rotation, lox, loy, edge)
+		}
 		delta, score := bestConnDelta(c, edge)
-		curScore := (func() float64 {
-			pcx, pcy, gx0, gy0, gx1, gy1 := connGeom(c, 0)
-			ix, iy := edgeInteriorDir(edge)
-			return (pcx-(gx0+gx1)/2)*ix + (pcy-(gy0+gy1)/2)*iy
-		})()
-		// Orientation is only auto-corrected for ASYMMETRIC connectors where the pad
-		// geometry actually reveals the opening direction (USB, SD, IPEX). Only rotate
-		// when the CURRENT opening clearly faces the interior (wrong) AND a rotation
-		// clearly fixes it. A symmetric 2-pin terminal / header has near-zero score
-		// either way → the opening direction isn't in the pads, so PRESERVE the
-		// current (user-set) rotation rather than guess. Also recognize an already
-		// edge-flush, outward-facing part and leave it untouched.
+		pcx, pcy, gx0, gy0, gx1, gy1 := connGeom(c, 0)
+		ix, iy := edgeInteriorDir(edge)
+		curScore := (pcx-(gx0+gx1)/2)*ix + (pcy-(gy0+gy1)/2)*iy
+		if curScore < -30 && score > 30 {
+			return delta
+		}
+		return 0
+	}
+	// placeEdgePart orients connector i for `edge`, snaps it flush (opening
+	// off-board), and — when alongCenter != nil (the grouped user-facing path) —
+	// packs its along-edge center to alongCenter. Records the move + diag and adds
+	// it to the fixed set.
+	placeEdgePart := func(i int, edge apEdge, alongCenter *float64) {
+		c := comps[i]
+		cx, cy := c.bboxCenter()
+		var best float64
+		switch edge {
+		case edgeLeft:
+			best = cx - bx0
+		case edgeRight:
+			best = bx1 - cx
+		case edgeBottom:
+			best = cy - by0
+		default: // edgeTop
+			best = by1 - cy
+		}
+		delta := edgeConnDelta(c, edge)
+		_, score := bestConnDelta(c, edge)
+		pcx, pcy, ux0, uy0, ux1, uy1 := connGeom(c, 0)
+		ix, iy := edgeInteriorDir(edge)
+		curScore := (pcx-(ux0+ux1)/2)*ix + (pcy-(uy0+uy1)/2)*iy
 		alreadyGood := best <= opt.edgeMargin+30 && curScore > 15
 		clearlyWrong := curScore < -30 && score > 30
-		blockOriented := false
-		if lox, loy, ok := connOpeningFor(c.footprint); ok {
-			// The block DECLARES which local side the opening faces → deterministic:
-			// rotate so it faces off-board. This overrides the pad-geometry guess AND
-			// the confirm flag — the opening isn't in the pads for a symmetric terminal.
-			delta = openingTargetDelta(c.rotation, lox, loy, edge)
-			blockOriented = true
-		} else if alreadyGood || !clearlyWrong {
-			delta = 0
-		}
+		_, _, blockOriented := connOpeningFor(c.footprint)
 		// Geometry after the chosen rotation (about the anchor).
 		_, _, gx0, gy0, gx1, gy1 := connGeom(c, delta)
 		var shiftX, shiftY float64
@@ -462,6 +514,13 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 		case edgeTop:
 			shiftY = (by1 - opt.edgeMargin) - gy1
 		}
+		if alongCenter != nil { // grouped: pack the along-edge center
+			if edge.vertical() {
+				shiftY += *alongCenter - (gy0+gy1)/2
+			} else {
+				shiftX += *alongCenter - (gx0+gx1)/2
+			}
+		}
 		nx, ny := c.x+shiftX, c.y+shiftY
 		nr := cpRect{gx0 + shiftX - m, gy0 + shiftY - m, gx1 + shiftX + m, gy1 + shiftY + m}
 		addFixed(nr, c.layer)
@@ -469,11 +528,8 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 			moves = append(moves, apMove{ID: c.id, Designator: c.designator,
 				NewX: round1(nx), NewY: round1(ny), NewRot: c.rotation + delta, SetRot: delta != 0, Edge: edge.String()})
 		}
-		// If we could NEITHER confirm the opening already faces out (alreadyGood) NOR
-		// confidently rotate it (clearlyWrong), then the opening direction isn't in the
-		// pad geometry — a symmetric 2-pin terminal / header. Don't silently leave a
-		// possibly-wrong-facing connector: flag it so the user confirms the opening
-		// faces off-board or hand-places it (per the "对称件保留用户手调" rule).
+		// Symmetric connector whose opening isn't in the pads (couldn't confirm or
+		// rotate) → flag for user confirmation (per "对称件保留用户手调").
 		needsConfirm := !blockOriented && !alreadyGood && !clearlyWrong && curScore <= 15
 		reason := "edge:" + edge.String()
 		switch {
@@ -488,7 +544,87 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 		case needsConfirm:
 			reason += ":confirm-orientation"
 		}
+		if alongCenter != nil {
+			reason += ":grouped"
+		}
 		diags = append(diags, apDiag{Designator: c.designator, Reason: reason})
+	}
+
+	// Group block-declared user-facing connectors onto one shared edge (packed
+	// and centered along it). Only engages with >=2 of them — a lone connector
+	// just takes its nearest edge like before.
+	grouped := map[int]bool{}
+	var uf []int
+	for _, i := range edgeIdx {
+		if comps[i].hasBBox && edgeRoleOf(comps[i]) == "user-facing" {
+			uf = append(uf, i)
+		}
+	}
+	if len(uf) >= 2 {
+		var scx, scy float64
+		for _, i := range uf {
+			x, y := comps[i].bboxCenter()
+			scx, scy = scx+x, scy+y
+		}
+		scx, scy = scx/float64(len(uf)), scy/float64(len(uf))
+		shared := nearestEdge(scx, scy)
+		alongExtent := func(i int) float64 {
+			c := comps[i]
+			_, _, gx0, gy0, gx1, gy1 := connGeom(c, edgeConnDelta(c, shared))
+			if shared.vertical() {
+				return gy1 - gy0
+			}
+			return gx1 - gx0
+		}
+		alongOf := func(i int) float64 {
+			x, y := comps[i].bboxCenter()
+			if shared.vertical() {
+				return y
+			}
+			return x
+		}
+		sort.SliceStable(uf, func(a, b int) bool { return alongOf(uf[a]) < alongOf(uf[b]) })
+		total := 0.0
+		for k, i := range uf {
+			if k > 0 {
+				total += opt.partGap
+			}
+			total += alongExtent(i)
+		}
+		var amin, amax, ctr float64
+		if shared.vertical() {
+			amin, amax, ctr = by0, by1, scy
+		} else {
+			amin, amax, ctr = bx0, bx1, scx
+		}
+		lo, hi := amin+opt.edgeMargin, amax-opt.edgeMargin-total
+		if hi < lo {
+			hi = lo
+		}
+		start := ctr - total/2
+		if start < lo {
+			start = lo
+		}
+		if start > hi {
+			start = hi
+		}
+		cursor := start
+		for _, i := range uf {
+			ext := alongExtent(i)
+			center := cursor + ext/2
+			placeEdgePart(i, shared, &center)
+			cursor += ext + opt.partGap
+			grouped[i] = true
+		}
+	}
+
+	// Remaining edge parts (RF/module/any + a lone user-facing connector): nearest edge.
+	for _, i := range edgeIdx {
+		if grouped[i] || !comps[i].hasBBox {
+			continue
+		}
+		cx, cy := comps[i].bboxCenter()
+		placeEdgePart(i, nearestEdge(cx, cy), nil)
 	}
 
 	// ── Tier 3: main chips + crystals + block-anchored parts → keep, fix. ─────

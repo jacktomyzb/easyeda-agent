@@ -409,3 +409,65 @@ func TestConnOrientation(t *testing.T) {
 		t.Errorf("best orientation should put pads on the interior side (score>0), got %v", score)
 	}
 }
+
+func TestEdgeRoleOf(t *testing.T) {
+	cases := []struct {
+		des, name string
+		want      string
+	}{
+		{"J1", "conn.usb_c", "user-facing"},         // USB → user plugs in
+		{"J2", "KF301-5.0-2P terminal", "user-facing"},
+		{"J4", "screw terminal", "user-facing"},
+		{"U1", "esp32-s3-wroom-1", "any"},           // radio module → any edge
+		{"ANT1", "ipex u.fl antenna", "any"},        // RF antenna → any edge
+		{"C1", "cap.100nf", ""},                     // not an edge part
+		{"R1", "res.10k", ""},
+	}
+	for _, c := range cases {
+		if got := edgeRoleOf(mkCP(c.des, c.name, 1, 0, 0, 100, 100, 2)); got != c.want {
+			t.Errorf("edgeRoleOf(%s,%q): got %q, want %q", c.des, c.name, got, c.want)
+		}
+	}
+}
+
+// TestConstrainedPlaceGroupsUserFacing: two block-declared user-facing connectors
+// seeded far apart must be GROUPED onto one shared edge and packed together
+// (consuming placement.<ref>.edge="user-facing"), while an edge="any" radio module
+// keeps its own nearest edge — the compaction the per-part nearest-edge rule missed.
+func TestConstrainedPlaceGroupsUserFacing(t *testing.T) {
+	comps := []cpComp{
+		mkCP("J1", "conn.usb_c", 1, 400, 300, 300, 200, 16),     // user-facing, bottom-left
+		mkCP("J2", "kf301 terminal", 1, 1600, 300, 300, 200, 2), // user-facing, bottom-right (1200mil away)
+		mkCP("U1", "esp32-wroom", 1, 1000, 1700, 700, 300, 41),  // module → edge="any", near top
+		mkCP("U3", "ch340c", 1, 1000, 1000, 300, 250, 16),       // main, fixed
+	}
+	opt := defaultCpOptions()
+	board := cpRect{0, 0, 2000, 2000}
+	opt.board = &board
+	moves, diags := planConstrainedPlace(comps, nil, opt)
+	byDes := map[string]apMove{}
+	for _, m := range moves {
+		byDes[m.Designator] = m
+	}
+	reason := map[string]string{}
+	for _, d := range diags {
+		reason[d.Designator] = d.Reason
+	}
+	j1, ok1 := byDes["J1"]
+	j2, ok2 := byDes["J2"]
+	if !ok1 || !ok2 {
+		t.Fatalf("both user-facing connectors must move; got J1=%v J2=%v", ok1, ok2)
+	}
+	if j1.Edge != j2.Edge {
+		t.Errorf("user-facing connectors must share ONE edge; J1=%q J2=%q", j1.Edge, j2.Edge)
+	}
+	if !strings.Contains(reason["J1"], ":grouped") || !strings.Contains(reason["J2"], ":grouped") {
+		t.Errorf("grouped connectors must be flagged :grouped; J1=%q J2=%q", reason["J1"], reason["J2"])
+	}
+	if d := math.Abs(j1.NewX - j2.NewX); d > 700 {
+		t.Errorf("grouped connectors should be packed; |ΔX|=%.0f (seed spread was 1200)", d)
+	}
+	if strings.Contains(reason["U1"], ":grouped") {
+		t.Errorf("edge=any module must NOT be grouped; U1 reason=%q", reason["U1"])
+	}
+}
