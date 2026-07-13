@@ -288,4 +288,4 @@ Built on / inspired by these open projects — thank you:
 
 Thanks for every star.
 
-[![Star History Chart](docs/assets/star-history.svg)](https://www.star-history.com/#zhoushoujianwork/easyeda-agent&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=zhoushoujianwork/easyeda-agent&type=Date)](https://www.star-history.com/#zhoushoujianwork/easyeda-agent&Date)
