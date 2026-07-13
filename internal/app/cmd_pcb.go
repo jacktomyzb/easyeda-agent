@@ -2887,6 +2887,53 @@ Validated on ceshi: DRC 31 → 0, No-Connection → 0. Run AFTER auto-place + ou
 		pcb.AddCommand(c)
 	}
 
+	// ── power-pour (2-layer 电源走铺铜块) ────────────────────────────────────
+	// The 2-layer analog of power-planes: deliver every power net through copper
+	// POUR area instead of thin tracks (能力 B). GND → board-outline pour on both
+	// layers; each rail → a LOCAL pour over its own pad bbox on top. All dynamic
+	// pours (retreat, never short). Core in pcb_powerpour.go.
+	{
+		var gndLayersSpec, railsMode string
+		var margin, inset float64
+		var replace, rebuild, dryRun bool
+		c := &cobra.Command{
+			Use:   "power-pour",
+			Short: "2-layer power distribution: pour GND + each rail's local copper (电源走铺铜块, not thin tracks)",
+			Long: `Deliver power through copper POUR on a 2-layer board — the 2-layer analog of
+'power-planes' (which forces 4 layers). Thin power tracks are the #1 DRC source
+(design-decisions.md: six thin 3V3 tracks = 18/27 Safe-Spacing violations); this
+pours them instead:
+
+  • GND  → a board-outline-fitted pour on the requested layer(s) (--gnd-layers,
+           default both) — the reference plane.
+  • each non-GND rail (3V3/5V/VBUS…, via isGlobalNet) → a LOCAL pour bounded to
+           the bbox of ITS OWN pads (+ --margin) on the TOP layer, so a small rail
+           doesn't claim the whole board.
+
+Every region is a DYNAMIC pour (retreats from other-net copper by the clearance
+rule), so different-net regions never short — a static fill would. Rails with <2
+pads are skipped. --replace clears same-net pours first (no stacking); --rebuild
+reflows after. Run AFTER auto-place + outline-fit + route-short (signals), then
+'pcb check' (power-not-poured should clear) and 'pcb drc'. For 4-layer boards use
+'power-planes' instead.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda pcb power-pour --project ceshi
+  easyeda pcb power-pour --gnd-layers bottom --rails pour
+  easyeda pcb power-pour --dry-run              # print the pour plan only`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runPowerPour(cfg, window, gndLayersSpec, railsMode, margin, inset, replace, rebuild, dryRun, stdout, stderr)
+			},
+		}
+		c.Flags().StringVar(&gndLayersSpec, "gnd-layers", "both", "GND pour layer(s): both | top | bottom")
+		c.Flags().StringVar(&railsMode, "rails", "pour", "non-GND rail handling: pour (local copper) | skip")
+		c.Flags().Float64Var(&margin, "margin", railMargin, "how far a rail's local pour extends past its pad bbox (mil)")
+		c.Flags().Float64Var(&inset, "inset", 0, "inset from the board outline (mil; default = board's copper-to-edge rule ~8–10)")
+		c.Flags().BoolVar(&replace, "replace", true, "clear existing pours on each net first (avoid stacking)")
+		c.Flags().BoolVar(&rebuild, "rebuild", true, "run pour-rebuild after creating the pours")
+		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the pour plan (nets→layers→rects) without mutating")
+		pcb.AddCommand(c)
+	}
+
 	// ── outline-round (圆角板框) ────────────────────────────────────────────
 	// Replace the board outline with a rounded rectangle (#29). Curves are chord-
 	// approximated (pcb.outline.set takes a polygon). Core in pcb_outline_round.go.
