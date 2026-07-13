@@ -30,7 +30,7 @@ import (
 // dangling-end can't see these: every member endpoint is "anchored" by another
 // member. Islands under a same-net pour are skipped (the pour bonds them);
 // single tracks are left to dangling-end (they'd double-report).
-func findFloatingTrackIslands(tracks []pcbTrack, vias []pcbViaP, pads []pcbPadP, pours []pcbPourP) []pcbCheckFinding {
+func findFloatingTrackIslands(tracks []pcbTrack, vias []pcbViaP, pads []pcbPadP, pours []pcbPourP, arcs []pcbArc) []pcbCheckFinding {
 	n := len(tracks)
 	if n < 2 {
 		return nil
@@ -87,6 +87,34 @@ func findFloatingTrackIslands(tracks []pcbTrack, vias []pcbViaP, pads []pcbPadP,
 		first := -1
 		for i, t := range tracks {
 			if !touchesVia(t, v) {
+				continue
+			}
+			if first < 0 {
+				first = i
+			} else {
+				union(first, i)
+			}
+		}
+	}
+	// Arc bridges: beautify (走线美化) rounds a corner into track→arc→track, so the
+	// two tracks meeting an arc's endpoints are one electrical group. Without this
+	// every rounded corner fragments a net into free-floating segments that report
+	// as islands (DRC sees them connected). Same-layer only.
+	touchesArcEnd := func(t pcbTrack, a pcbArc) bool {
+		if t.Layer != a.Layer {
+			return false
+		}
+		for _, ep := range [][2]float64{{t.X1, t.Y1}, {t.X2, t.Y2}} {
+			if math.Hypot(ep[0]-a.X1, ep[1]-a.Y1) <= pcbCoincEps || math.Hypot(ep[0]-a.X2, ep[1]-a.Y2) <= pcbCoincEps {
+				return true
+			}
+		}
+		return false
+	}
+	for _, a := range arcs {
+		first := -1
+		for i, t := range tracks {
+			if !touchesArcEnd(t, a) {
 				continue
 			}
 			if first < 0 {

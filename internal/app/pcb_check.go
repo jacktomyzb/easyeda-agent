@@ -1421,7 +1421,7 @@ func runPcbCheck(cfg *appConfig, window string, couplingW float64, strict, asJSO
 			}
 		}
 
-		for _, f := range findFloatingTrackIslands(tracks, vias, pads, pours) {
+		for _, f := range findFloatingTrackIslands(tracks, vias, pads, pours, arcs) {
 			rep.Findings = append(rep.Findings, f)
 			rep.Summary.FloatingIslands++
 			rep.Summary.Warnings++

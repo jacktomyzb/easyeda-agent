@@ -16,7 +16,7 @@ func TestFindFloatingTrackIslands(t *testing.T) {
 		{ID: "t1", Net: "N1", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 6},
 		{ID: "t2", Net: "N1", Layer: 1, X1: 100, Y1: 0, X2: 100, Y2: 100, Width: 6},
 	}
-	got := findFloatingTrackIslands(tracks, nil, nil, nil)
+	got := findFloatingTrackIslands(tracks, nil, nil, nil, nil)
 	if len(got) != 1 {
 		t.Fatalf("got %d findings, want 1: %+v", len(got), got)
 	}
@@ -30,13 +30,13 @@ func TestFindFloatingTrackIslands(t *testing.T) {
 
 	// Same island anchored to a same-net pad at one endpoint → silent.
 	pads := []pcbPadP{{Designator: "R1", Net: "N1", Layer: 1, X: 0, Y: 0}}
-	if got := findFloatingTrackIslands(tracks, nil, pads, nil); len(got) != 0 {
+	if got := findFloatingTrackIslands(tracks, nil, pads, nil, nil); len(got) != 0 {
 		t.Errorf("pad-anchored island flagged: %+v", got)
 	}
 
 	// Same-net pour on the island's layer → bonded, silent.
 	pours := []pcbPourP{{ID: "p1", Net: "N1", Layer: 1}}
-	if got := findFloatingTrackIslands(tracks, nil, nil, pours); len(got) != 0 {
+	if got := findFloatingTrackIslands(tracks, nil, nil, pours, nil); len(got) != 0 {
 		t.Errorf("pour-covered island flagged: %+v", got)
 	}
 }
@@ -44,7 +44,7 @@ func TestFindFloatingTrackIslands(t *testing.T) {
 func TestFindFloatingTrackIslandsSingleAndViaBridge(t *testing.T) {
 	// A single floating track is dangling-end's territory — no island finding.
 	single := []pcbTrack{{ID: "t1", Net: "N1", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 6}}
-	if got := findFloatingTrackIslands(single, nil, nil, nil); len(got) != 0 {
+	if got := findFloatingTrackIslands(single, nil, nil, nil, nil); len(got) != 0 {
 		t.Errorf("single track must be left to dangling-end: %+v", got)
 	}
 
@@ -55,15 +55,48 @@ func TestFindFloatingTrackIslandsSingleAndViaBridge(t *testing.T) {
 		{ID: "t2", Net: "N1", Layer: 2, X1: 100, Y1: 0, X2: 200, Y2: 0, Width: 6},
 	}
 	vias := []pcbViaP{{ID: "v1", Net: "N1", X: 100, Y: 0, Dia: 24}}
-	got := findFloatingTrackIslands(tracks, vias, nil, nil)
+	got := findFloatingTrackIslands(tracks, vias, nil, nil, nil)
 	if len(got) != 1 || len(got[0].Primitives) != 2 {
 		t.Fatalf("via-bridged island wrong: %+v", got)
 	}
 
 	// Anchoring EITHER side's endpoint to a pad silences the whole island.
 	pads := []pcbPadP{{Designator: "U1", Net: "N1", Layer: 2, X: 200, Y: 0}}
-	if got := findFloatingTrackIslands(tracks, vias, pads, nil); len(got) != 0 {
+	if got := findFloatingTrackIslands(tracks, vias, pads, nil, nil); len(got) != 0 {
 		t.Errorf("pad on the far side should anchor the island: %+v", got)
+	}
+}
+
+// beautify fragments a net into track→arc→track. The arc must bridge the two track
+// segments into one island (else each segment reports separately), and a pad anchor
+// on either segment must then silence the whole bridged island.
+func TestFindFloatingTrackIslandsArcBridge(t *testing.T) {
+	// Two segments joined ONLY by an arc (endpoints at 90,0 and 100,10). Neither
+	// touches the other directly, so without the arc they'd be two separate groups
+	// — but a single floating track is left to dangling-end, so the pre-fix result
+	// is 0 island findings, not a false island. With the arc they merge into one.
+	tracks := []pcbTrack{
+		{ID: "t1", Net: "N1", Layer: 1, X1: 0, Y1: 0, X2: 90, Y2: 0, Width: 6},
+		{ID: "t2", Net: "N1", Layer: 1, X1: 100, Y1: 10, X2: 100, Y2: 100, Width: 6},
+	}
+	arcs := []pcbArc{{ID: "a1", Net: "N1", Layer: 1, X1: 90, Y1: 0, X2: 100, Y2: 10}}
+
+	// Bridged into ONE floating island (no pad anywhere) → a single 2-track finding.
+	got := findFloatingTrackIslands(tracks, nil, nil, nil, arcs)
+	if len(got) != 1 || len(got[0].Primitives) != 2 {
+		t.Fatalf("arc must bridge the two segments into one island: %+v", got)
+	}
+
+	// A pad on ONE segment now anchors the WHOLE bridged island → silent.
+	pads := []pcbPadP{{Designator: "R1", Net: "N1", Layer: 1, X: 100, Y: 100}}
+	if got := findFloatingTrackIslands(tracks, nil, pads, nil, arcs); len(got) != 0 {
+		t.Errorf("pad on arc-bridged segment should anchor the island: %+v", got)
+	}
+
+	// An arc on a DIFFERENT layer must not bridge (no via = no layer change).
+	otherLayer := []pcbArc{{ID: "a1", Net: "N1", Layer: 2, X1: 90, Y1: 0, X2: 100, Y2: 10}}
+	if got := findFloatingTrackIslands(tracks, nil, nil, nil, otherLayer); len(got) != 0 {
+		t.Errorf("cross-layer arc must not bridge; both stay single (dangling-end territory): %+v", got)
 	}
 }
 
