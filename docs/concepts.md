@@ -60,10 +60,36 @@ regex 兜底(regex 是块数据的镜像)。**仍不解析自由文本 `orientat
 
 ---
 
-## 三、块数据模型(circuit-block library)
+## 三、块(block)—— 本项目定义的一等功能概念
 
-`internal/blocks/data/*.json` 是布局/选型/拓扑知识的**声明式单一源**(见 [[improvements-sink-to-blocks]]:
-改进沉淀成块数据,不做成工具启发式误伤别人板)。一个块携带多维 map,各阶段按需读:
+### 块是什么
+**块 = 一段已在真板上端到端验证过的「外围功能子电路」,作为可复用单元。**(CH340 USB 转串口、
+ESP32 双三极管自动下载、SY8089 buck、RS-485、GNSS 前端、microSD…)。不是零散的器件、也不是
+一整块板,而是**功能粒度**的电路积木——「点灯」「USB 烧录」「5V→3V3」各是一个块。是本项目的
+**旗舰核心能力**:让 agent 照抄验证过的块、只重绑端口,免去从零选型+接线+踩坑。
+
+### 三层库(器件 → 块 → 流程)
+- **器件层** `standard-parts.json`:role → LCSC/UUID,选型单一源。
+- **块层** `internal/blocks/data/*.json`:把器件按功能组成子电路 + 携带多维放置/信号/丝印知识。
+- **流程层** design-flow(S0–S6/P0–P10):把块编排进整板流程。
+块 `parts.<role>` 指回器件层、`block` 引用被流程层的 S0 方案书 module 引用——三层串起来。
+
+### `validated` 门(块的"就绪"判据)
+一个块只有**在真板上跑通** place→wire→`sch check`(0 桥接)→`sch drc`(0 fatal)→netlist 逐网核实
+后,写上**证据 + 署名**(`validated: "<工程> <日期> by @<作者>: <逐网对账数据>"`),才算 `ready`;
+否则是 `draft`。**validated 块信任照抄、不逐块重验**,只验跨块边界重绑。校验折进 `go test ./internal/blocks/`
+(每块 `parts` 必须在 standard-parts 里)。
+
+### 消费与贡献
+- **消费**:`easyeda blocks ls/show/search`(go:embed 进二进制,**离线、无需 daemon/窗口**);手工接任何
+  已知外围**前先查块**(铁律 8)。
+- **贡献**:手接并端到端验证过的新外围**回流入库**(署名 + `validated`)——「一次设计同时是一次贡献」。
+  改进(朝向/贴边/间距)也**沉淀成块声明式数据**,不做成工具猜的启发式(见 [[improvements-sink-to-blocks]]:
+  声明式=共享、不误伤别人板)。
+
+### 块数据模型(多维 map)
+
+`internal/blocks/data/*.json` 是布局/选型/拓扑知识的**声明式单一源**。一个块携带多维 map,各阶段按需读:
 
 | 字段 | 内容 | 谁消费 |
 |---|---|---|
