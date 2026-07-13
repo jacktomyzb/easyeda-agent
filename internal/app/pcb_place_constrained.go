@@ -567,7 +567,59 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 			scx, scy = scx+x, scy+y
 		}
 		scx, scy = scx/float64(len(uf)), scy/float64(len(uf))
+		// Net-aware shared edge: put the group on the edge nearest the FIXED chips
+		// these connectors electrically drive (their partner mains) — so USB lands
+		// beside its CH340 instead of on whichever edge the connectors happened to
+		// cluster, i.e. group WITHOUT lengthening the nets / adding crossings. Local
+		// (signal) nets decide the partner (global GND/VCC are shared by every chip,
+		// so they'd pick a geometrically-near but electrically-unrelated one); fall
+		// back to the geometric group centroid when no partner main is found. Reuses
+		// the Tier-4 net-aware seeding pattern (mainNetPads / nearestPad).
+		mainNetPads := map[string][]apPad{}
+		for j, mc := range comps {
+			if kinds[j] != cpMainChip && kinds[j] != cpAnchored {
+				continue
+			}
+			for _, p := range mc.pads {
+				if n := strings.TrimSpace(p.net); n != "" {
+					mainNetPads[n] = append(mainNetPads[n], p)
+				}
+			}
+		}
+		partnerOf := func(c cpComp) (float64, float64, bool) {
+			collect := func(localOnly bool) []apPad {
+				var cand []apPad
+				seen := map[string]bool{}
+				for _, p := range c.pads {
+					n := strings.TrimSpace(p.net)
+					if n == "" || seen[n] || (localOnly && isGlobalNet(n)) {
+						continue
+					}
+					seen[n] = true
+					cand = append(cand, mainNetPads[n]...)
+				}
+				return cand
+			}
+			cx, cy := c.bboxCenter()
+			if pad, ok := nearestPad(collect(true), cx, cy); ok {
+				return pad.x, pad.y, true
+			}
+			if pad, ok := nearestPad(collect(false), cx, cy); ok {
+				return pad.x, pad.y, true
+			}
+			return 0, 0, false
+		}
+		var tx, ty float64
+		partners := 0
+		for _, i := range uf {
+			if px, py, ok := partnerOf(comps[i]); ok {
+				tx, ty, partners = tx+px, ty+py, partners+1
+			}
+		}
 		shared := nearestEdge(scx, scy)
+		if partners > 0 {
+			shared = nearestEdge(tx/float64(partners), ty/float64(partners))
+		}
 		alongExtent := func(i int) float64 {
 			c := comps[i]
 			_, _, gx0, gy0, gx1, gy1 := connGeom(c, edgeConnDelta(c, shared))

@@ -471,3 +471,34 @@ func TestConstrainedPlaceGroupsUserFacing(t *testing.T) {
 		t.Errorf("edge=any module must NOT be grouped; U1 reason=%q", reason["U1"])
 	}
 }
+
+// TestConstrainedPlaceGroupsNetAware: the shared edge for the user-facing group
+// is chosen by the connectors' PARTNER chips (net-aware), not the connectors'
+// own centroid. Two connectors parked at the RIGHT but electrically tied to a
+// main chip on the LEFT must group on the LEFT edge (beside their partner), so
+// grouping does not lengthen the nets / add crossings.
+func TestConstrainedPlaceGroupsNetAware(t *testing.T) {
+	comps := []cpComp{
+		// main chip on the LEFT, on a local signal net "SER" (partner of both conns)
+		mkCPNet("U2", "ch340c", 400, 1000, 300, 250, 16, "SER"),
+		// two user-facing connectors parked at the RIGHT (geometric centroid = right)
+		mkCPNet("J1", "conn.usb_c", 1700, 500, 300, 200, 16, "SER"),
+		mkCPNet("J2", "kf301 terminal", 1700, 1500, 300, 200, 2, "SER"),
+	}
+	opt := defaultCpOptions()
+	board := cpRect{0, 0, 2000, 2000}
+	opt.board = &board
+	moves, _ := planConstrainedPlace(comps, nil, opt)
+	byDes := map[string]apMove{}
+	for _, m := range moves {
+		byDes[m.Designator] = m
+	}
+	j1, ok1 := byDes["J1"]
+	j2, ok2 := byDes["J2"]
+	if !ok1 || !ok2 {
+		t.Fatalf("both connectors must move; J1=%v J2=%v", ok1, ok2)
+	}
+	if j1.Edge != "left" || j2.Edge != "left" {
+		t.Errorf("net-aware: connectors tied to a LEFT partner must group on left; got J1=%q J2=%q", j1.Edge, j2.Edge)
+	}
+}
