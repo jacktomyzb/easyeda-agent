@@ -21,6 +21,27 @@
   会选到「几何上近但电气无关」的芯片。工具里 `isGlobalNet()` 就是这条线;net-aware 决策
   一律 **local 优先,无 local 才退回全部网**。
 
+### net-class(网络角色分档)—— `netRole` / 规范线宽 / 电源铺铜
+`isGlobalNet` 只把网二分成「电源地 vs 信号」;**net-class** 在电源侧再细分成**载流角色**,
+驱动两件事:走线该多宽、该不该走铺铜。分类器 `netRole()`(`internal/app/pcb_netclass.go`)
+按**网名/电压**启发式给角色(块声明的 per-net 宽度可覆盖):
+
+| role | 判据(net 名) | 规范宽(§7.8,seed 自 live 规则) | 铺铜倾向 |
+|---|---|---|---|
+| `gnd` | 含 `gnd` | (走线 20mil,但**优先 pour**) | 全板 pour / 内电层 |
+| `high-current` | `VBUS`/`VIN`/`VBAT`/`VSYS` 或 ≥9V | ~20mil | pour / fill |
+| `power-trunk` | 5–9V(如 `+5V`) | ~15mil | pour |
+| `power-branch` | <5V 或无电压名(`3V3`/`1V8`/`VCC`/`VDD`) | ~10mil | pour(局部) |
+| `signal` | 其余(非 global) | live 默认(细间距可收窄到最小合规宽) | 走线 |
+
+- **消费点**:`route-short` 按角色查 `netClassWidthTable()` 给宽(不再是 20/10 二分桶);
+  `pcb net-classes` 打印当前表;`pcb check` 的 **width-under-spec**(电源线 < 规范宽)+
+  **power-not-poured**(电源网未铺铜)把关;2 层电源铺铜 `pcb power-pour`、4 层 `power-planes`。
+- **铁律**:width 维度与「该不该 pour」维度**共用同一个 `netRole` 定义**——否则「电源该多宽」
+  与「电源该 pour」两套判据漂移。规范线宽是**设计惯例非制造规则**(live DRC 规则只给单一默认宽),
+  故内联 Go 为真值 + `fab-rules-jlcpcb.json` 文档镜像;精确值由块 `signals.track_width_mil` 声明覆盖
+  (`improvements-sink-to-blocks`,消费待 block-apply)。
+
 ### 网感知(net-aware) vs 几何(geometric)—— 本项目的核心决策二分
 | | 依据 | 例子(连接器分组选边) |
 |---|---|---|

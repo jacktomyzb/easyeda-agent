@@ -93,6 +93,8 @@
 
 **判据**：网络承载电流越大、越关键（主干、大电流路径）→ 线宽越宽；纯低电流信号网 → 用 DRC 默认最小合规宽度即可，无需额外加宽。
 
+**状态（已落地，daemon 侧）**：per-net-class 宽度阶梯已实现（`pcb_netclass.go`）——`netRole()` 按网名/电压分档（signal / power-branch 3V3·1V8 / power-trunk +5V / high-current VBUS·VIN / gnd），`netClassWidthTable()` 给规范宽（内联 Go 真值，§7.8 阶梯，seed 自 live 规则并 clamp）。`route-short` 查表给宽（不再是 20/10 二分桶），`pcb net-classes` 打印表，`pcb check` **width-under-spec** 校验达标，**power-not-poured** 校验电源已铺铜，2 层电源一键 `pcb power-pour`。**仍待 P2**：把角色写进 EasyEDA **原生 net-class 规则**（`createNetClass`/`overwriteNetRules` @beta）让原生 DRC 也认；块声明的 per-net `track_width_mil` 覆盖启发式（消费待 block-apply）。
+
 **来源**：`pcb-layout-conventions.md` §7.8/§7.9（线宽分级与公制圆整）；ceshi 删细线 Safe-Spacing 27→9 为实测沉淀
 
 ---
