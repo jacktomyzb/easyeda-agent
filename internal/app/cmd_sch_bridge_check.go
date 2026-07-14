@@ -19,6 +19,12 @@ import (
 //   • len(set(nets)) > 1                     → BRIDGE (real short, ERROR, gate)
 //   • nets empty & tree touches a comp pin   → ORPHAN (dangling stub, WARN)
 //
+// Rule types (kebab-case, same convention as sch check / pcb check findings;
+// derived from the connector's Kind enum in parseBridgeReport):
+//
+//	wire-bridge   ERROR  one wire tree carries ≥2 net names (real short) — gates
+//	orphan-stub   WARN   wire tree touches pins but carries no net flag/port
+//
 // It is the third pillar of the S5 verification gate (network-semantics vs
 // physical-copper consistency), alongside layout-lint and check/drc. Read-only:
 // it reports each problem tree's wire ids / flag ids / touched pins so the fix
@@ -26,17 +32,35 @@ import (
 // pass. BRIDGE findings drive a non-zero exit so it can gate a workflow.
 
 type bridgeTree struct {
-	Kind    string   `json:"kind"` // BRIDGE | ORPHAN
+	Kind string `json:"kind"` // BRIDGE | ORPHAN (connector enum, kept for compat)
+	// Type/Level are the kebab-case rule name + severity in the same convention
+	// as sch check / pcb check findings, derived Go-side from Kind (the connector
+	// only sends Kind): BRIDGE → wire-bridge/error, ORPHAN → orphan-stub/warn.
+	Type    string   `json:"type,omitempty"`
+	Level   string   `json:"level,omitempty"`
 	WireIds []string `json:"wireIds"`
 	FlagIds []string `json:"flagIds"`
 	Pins    []string `json:"pins"` // designator:pin
 	Nets    []string `json:"nets"`
 }
 
+// bridgeRuleType maps the connector's Kind enum to the kebab-case rule type +
+// level used across sch check / pcb check findings.
+func bridgeRuleType(kind string) (ruleType, level string) {
+	switch strings.ToUpper(kind) {
+	case "BRIDGE":
+		return "wire-bridge", "error"
+	case "ORPHAN":
+		return "orphan-stub", "warn"
+	default:
+		return strings.ToLower(kind), "warn"
+	}
+}
+
 type bridgeSummary struct {
 	Trees          int `json:"trees"`
-	Bridges        int `json:"bridges"`
-	Orphans        int `json:"orphans"`
+	Bridges        int `json:"bridges"` // per-type count of wire-bridge trees
+	Orphans        int `json:"orphans"` // per-type count of orphan-stub trees
 	WireTreesTotal int `json:"wireTreesTotal"`
 }
 
@@ -94,20 +118,42 @@ func parseBridgeReport(result map[string]any) (bridgeReport, error) {
 	if err := json.Unmarshal(b, &rep); err != nil {
 		return rep, fmt.Errorf("unexpected bridge-check result shape: %w", err)
 	}
+	// Stamp the kebab-case rule type + level (the connector only sends Kind), so
+	// both --json consumers and the text render can gate/count by rule type the
+	// same way sch check / pcb check findings are.
+	for i := range rep.Trees {
+		if rep.Trees[i].Type == "" || rep.Trees[i].Level == "" {
+			ruleType, level := bridgeRuleType(rep.Trees[i].Kind)
+			if rep.Trees[i].Type == "" {
+				rep.Trees[i].Type = ruleType
+			}
+			if rep.Trees[i].Level == "" {
+				rep.Trees[i].Level = level
+			}
+		}
+	}
 	return rep, nil
 }
 
 func renderBridgeReport(rep bridgeReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch bridge-check: %d problem tree(s) — %d bridge(s) (real short), %d orphan(s) (dangling stub) across %d wire tree(s)\n",
+	fmt.Fprintf(w, "sch bridge-check: %d problem tree(s) — %d wire-bridge(s) (real short), %d orphan-stub(s) (dangling stub) across %d wire tree(s)\n",
 		s.Trees, s.Bridges, s.Orphans, s.WireTreesTotal)
 
 	for _, t := range rep.Trees {
-		tag := "WARN"
-		if t.Kind == "BRIDGE" {
-			tag = "ERROR"
+		ruleType, level := t.Type, t.Level
+		if ruleType == "" || level == "" {
+			// Trees built directly (not via parseBridgeReport) fall back to Kind.
+			rt, lv := bridgeRuleType(t.Kind)
+			if ruleType == "" {
+				ruleType = rt
+			}
+			if level == "" {
+				level = lv
+			}
 		}
-		line := fmt.Sprintf("  %-5s  %-7s", tag, t.Kind)
+		// Rule-type column aligned with sch check / pcb check's %-17s style.
+		line := fmt.Sprintf("  %-5s  %-17s  %s", strings.ToUpper(level), ruleType, t.Kind)
 		if len(t.Nets) > 0 {
 			line += "  nets=[" + strings.Join(t.Nets, ",") + "]"
 		}

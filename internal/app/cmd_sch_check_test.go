@@ -180,6 +180,75 @@ func TestEncodeResultEnvelope_OmitsEmptyMeta(t *testing.T) {
 	}
 }
 
+// Every connector-produced rule type must survive parse with its kebab-case
+// Type intact, be counted in the per-type summary, and show its type name in
+// the rendered report (the same per-rule gate/count convention as pcb check).
+func TestCheckFindingTypes_AllRules(t *testing.T) {
+	result := map[string]any{
+		"passed": false,
+		"summary": map[string]any{
+			"floatingPins":           float64(2),
+			"componentsWithFloating": float64(1),
+			"geomNetMismatches":      float64(1),
+			"netMarkerMismatches":    float64(1),
+			"multiNetWires":          float64(1),
+			"wireCrossings":          float64(1),
+			"wireOverPins":           float64(1),
+			"zeroLengthWires":        float64(1),
+			"danglingWires":          float64(1),
+			"total":                  float64(8),
+		},
+		"findings": []any{
+			map[string]any{"type": "floating-pin", "level": "warn", "designator": "U1", "pins": []any{"4", "5"}},
+			map[string]any{"type": "geom-net-mismatch", "level": "warn", "designator": "U1", "pins": []any{"7"}},
+			map[string]any{"type": "net-marker-mismatch", "level": "warn", "wirePrimitiveId": "w1", "markerNet": "+3V3", "wireNet": "EN"},
+			map[string]any{"type": "multi-net-wire", "level": "warn", "wirePrimitiveId": "w2", "nets": []any{"EN", "GND"}},
+			map[string]any{"type": "wire-crossing", "level": "warn", "count": float64(1)},
+			map[string]any{"type": "wire-over-pin", "level": "warn", "designator": "U1", "pins": []any{"5"}},
+			map[string]any{"type": "zero-length-wire", "level": "warn", "wirePrimitiveId": "w3"},
+			map[string]any{"type": "dangling-wire", "level": "warn", "wirePrimitiveId": "w4"},
+		},
+	}
+	rep, err := parseCheckReport(result)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	wantTypes := []string{
+		"floating-pin", "geom-net-mismatch", "net-marker-mismatch", "multi-net-wire",
+		"wire-crossing", "wire-over-pin", "zero-length-wire", "dangling-wire",
+	}
+	if len(rep.Findings) != len(wantTypes) {
+		t.Fatalf("expected %d findings, got %d: %+v", len(wantTypes), len(rep.Findings), rep.Findings)
+	}
+	for i, want := range wantTypes {
+		if rep.Findings[i].Type != want {
+			t.Errorf("finding %d: Type=%q, want %q", i, rep.Findings[i].Type, want)
+		}
+	}
+
+	// Per-type summary counts (one field per rule, mirroring pcbCheckSummary).
+	s := rep.Summary
+	if s.FloatingPins != 2 || s.GeomNetMismatches != 1 || s.NetMarkerMismatches != 1 ||
+		s.MultiNetWires != 1 || s.WireCrossings != 1 || s.WireOverPins != 1 ||
+		s.ZeroLengthWires != 1 || s.DanglingWires != 1 || s.Total != 8 {
+		t.Errorf("per-type summary counts wrong: %+v", s)
+	}
+
+	var buf bytes.Buffer
+	renderCheckReport(rep, &buf)
+	out := buf.String()
+	for _, want := range wantTypes {
+		if !strings.Contains(out, want) {
+			t.Errorf("render missing rule type %q\n--- output ---\n%s", want, out)
+		}
+	}
+	// zero-length/dangling wires carry the stray-wire fix hint.
+	if !strings.Contains(out, "stray wires") {
+		t.Errorf("render missing stray-wire hint\n--- output ---\n%s", out)
+	}
+}
+
 // Clean board: no findings → passed, and the "no findings" line.
 func TestRenderCheck_Clean(t *testing.T) {
 	rep := checkReport{Passed: true, Summary: checkSummary{}}

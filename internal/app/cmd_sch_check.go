@@ -19,6 +19,20 @@ import (
 // (suspected missed report). This file renders that report and (with --strict)
 // gates on it. Output is by designator + pin number — feed it straight into
 // `sch no-connect`.
+//
+// Every finding carries a kebab-case rule Type (same convention as pcb check),
+// so findings can be counted/gated per rule. Connector-produced types:
+//
+//	floating-pin        WARN  pin with no wire and no NC marker
+//	geom-net-mismatch   WARN  wire touches pin but netlist puts it on no net
+//	net-marker-mismatch WARN  netflag/port/label name ≠ the wire's net name
+//	multi-net-wire      WARN  one wire primitive carrying multiple net names
+//	wire-crossing       WARN  two wires cross mid-segment
+//	wire-over-pin       WARN  a wire body runs through a pin it doesn't end on
+//	zero-length-wire    WARN  degenerate zero-length segment
+//	dangling-wire       WARN  wire end anchored to nothing (incl. orphan stubs)
+//
+// checkSummary mirrors these with one per-type count field each.
 
 type checkPinDetail struct {
 	Number string  `json:"number"`
@@ -146,7 +160,9 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 		if msg == "" {
 			msg = f.Type
 		}
-		line := fmt.Sprintf("  %-5s  %-14s  ", tag, f.Type)
+		// Rule-type column aligned with renderPcbCheckReport's %-17s style so sch
+		// and pcb findings can be grepped/gated the same way by type name.
+		line := fmt.Sprintf("  %-5s  %-17s  ", tag, f.Type)
 		// Prefer the human designator; fall back to the primitiveId so a finding on
 		// a component with an empty designator is still identifiable.
 		switch {

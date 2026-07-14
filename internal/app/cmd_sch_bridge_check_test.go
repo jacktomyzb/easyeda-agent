@@ -46,11 +46,19 @@ func TestParseAndRenderBridge_BridgeAndOrphan(t *testing.T) {
 	if rep.Summary.Bridges != 1 || rep.Summary.Orphans != 1 || len(rep.Trees) != 2 {
 		t.Errorf("unexpected summary/trees: %+v", rep)
 	}
+	// parseBridgeReport stamps the kebab-case rule type + level from Kind so
+	// --json consumers can gate by type like sch check / pcb check findings.
+	if rep.Trees[0].Type != "wire-bridge" || rep.Trees[0].Level != "error" {
+		t.Errorf("BRIDGE tree not typed wire-bridge/error: %+v", rep.Trees[0])
+	}
+	if rep.Trees[1].Type != "orphan-stub" || rep.Trees[1].Level != "warn" {
+		t.Errorf("ORPHAN tree not typed orphan-stub/warn: %+v", rep.Trees[1])
+	}
 
 	var buf bytes.Buffer
 	renderBridgeReport(rep, &buf)
 	out := buf.String()
-	for _, want := range []string{"ERROR", "BRIDGE", "nets=[GND,VCC]", "pins=[U1:5,R3:1]", "w1, w2", "WARN", "ORPHAN", "C2:2", "bridge", "orphan"} {
+	for _, want := range []string{"ERROR", "wire-bridge", "BRIDGE", "nets=[GND,VCC]", "pins=[U1:5,R3:1]", "w1, w2", "WARN", "orphan-stub", "ORPHAN", "C2:2"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q\n--- output ---\n%s", want, out)
 		}
@@ -74,7 +82,7 @@ func TestEncodeResultEnvelope_BridgeReport(t *testing.T) {
 		Passed:  false,
 		Summary: bridgeSummary{Trees: 1, Bridges: 1},
 		Trees: []bridgeTree{
-			{Kind: "BRIDGE", WireIds: []string{"w1", "w2"}, Nets: []string{"GND", "VCC"}, Pins: []string{"U1:5"}},
+			{Kind: "BRIDGE", Type: "wire-bridge", Level: "error", WireIds: []string{"w1", "w2"}, Nets: []string{"GND", "VCC"}, Pins: []string{"U1:5"}},
 		},
 	}
 	res := &actionResult{ID: "req-9", Type: "response", Version: "1", OK: true}
@@ -100,5 +108,10 @@ func TestEncodeResultEnvelope_BridgeReport(t *testing.T) {
 	}
 	if len(env.Result.Trees) != 1 || env.Result.Trees[0].Kind != "BRIDGE" || len(env.Result.Trees[0].Nets) != 2 {
 		t.Errorf("result.trees not reachable via envelope: %+v", env.Result)
+	}
+	// The kebab-case rule type must survive the envelope round-trip so a JSON
+	// gate can count by type.
+	if env.Result.Trees[0].Type != "wire-bridge" || env.Result.Trees[0].Level != "error" {
+		t.Errorf("rule type/level lost in envelope: %+v", env.Result.Trees[0])
 	}
 }
