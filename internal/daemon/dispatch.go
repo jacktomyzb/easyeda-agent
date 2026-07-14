@@ -221,6 +221,10 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	// Catalog-driven stage invalidation: a successful placement/outline mutation
 	// clears stale downstream confirmations, whoever the client was.
 	s.maybeInvalidateStage(&req, resp)
+	// Stale-read advisory (SKILL iron rule 5): mark the window after a PCB
+	// mutation, clear on reload/pour-rebuild, and annotate PCB reads that arrive
+	// in between with a non-blocking staleRisk field. See stalereads.go.
+	s.staleReads.observe(&req, resp)
 	s.audit.Append(fromResponse(started, &req, resp))
 	// After a successful content-changing action, arm a debounced autosave so the
 	// work reaches disk without the agent having to remember to save (no-op when

@@ -25,7 +25,7 @@ EasyEDA tooling.
 2. **只用 typed `easyeda` action** — 只有无对应 typed action **且**用户明确接受 debug 路径时才 `debug.exec_js`。
 3. **mutate 前先 inspect** — 放/移/连/同步/存之前先读 doc/页/器件/引脚/板层/网络/规则,别盲改;破坏性操作(clear/delete/bulk import)先确认。
 4. **无图纸不摆放/布线** — 找不到 sheet 立即停,让用户建/批准 A4(默认 A4)。→ design-flow S1
-5. **PCB mutation(rip-up/route/delete/via/track)后先 `easyeda doc reload` 再读/判/DRC** — 否则 list/DRC 读 stale;同网 Connection Error 暴增多是 pour 连通性 stale(先 `pour-rebuild`),不是真断。→ pcb.md
+5. **PCB mutation(rip-up/route/delete/via/track)后先 `easyeda doc reload` 再读/判/DRC** — 否则 list/DRC 读 stale;同网 Connection Error 暴增多是 pour 连通性 stale(先 `pour-rebuild`),不是真断。daemon 会在 stale 风险读操作时返回 `staleRisk` 警告(CLI 打到 stderr,机械兜底),但别等警告——mutation 后主动 reload。→ pcb.md
 6. **判对错只看 `list/check/drc/layout-lint`,不看截图** — 截图会 stale/blank;data 有内容但截图空 = 窗口没渲染(切前台),不是设计错。`pcb drc/check` 这类重画布计算**需 PCB 在前台**,超时=切前台**单发一次、绝不循环重试**(重发被 `ACTION_BUSY` 拒)。**录制/演示模式例外**:截图变交付物 → design-flow 录制/演示模式。
 7. **每过一个阶段门显式 `save`(sch/PCB)** — place/wire/modify 只改内存,autosave 只兜底;整板每 ~10 件 save 一次。→ design-flow S 段 💾
 8. **手工连任何已知外围前先查块库 `easyeda blocks`**(离线,无需 daemon/窗口)— 20 块/11 类目,照抄验证过的块只重绑端口。→ ② 块地图速查

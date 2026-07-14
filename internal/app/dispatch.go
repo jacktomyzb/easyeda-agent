@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -293,6 +294,35 @@ func selectWindow(windows []healthWindow, project, window string) (string, error
 	}
 }
 
+// staleRiskSeen deduplicates stale-read warnings within one CLI invocation:
+// composite commands (pcb check, report …) fire many read actions and would
+// otherwise repeat the identical advisory for each. Daemon messages are
+// timestamp-free precisely so identical risks collapse here.
+var (
+	staleRiskMu   sync.Mutex
+	staleRiskSeen = map[string]bool{}
+)
+
+// warnStaleRisk surfaces a daemon-attached staleRisk advisory (PCB read after
+// an un-reloaded PCB mutation — SKILL iron rule 5) on STDERR, so JSON/table
+// output on stdout stays machine-parseable. Best-effort and non-blocking.
+func warnStaleRisk(respBody []byte, stderr io.Writer) {
+	var parsed struct {
+		StaleRisk string `json:"staleRisk"`
+	}
+	if json.Unmarshal(respBody, &parsed) != nil || parsed.StaleRisk == "" {
+		return
+	}
+	staleRiskMu.Lock()
+	seen := staleRiskSeen[parsed.StaleRisk]
+	staleRiskSeen[parsed.StaleRisk] = true
+	staleRiskMu.Unlock()
+	if seen {
+		return
+	}
+	fmt.Fprintf(stderr, "⚠ staleRisk: %s\n", parsed.StaleRisk)
+}
+
 // postAction is the shared HTTP core: find a live daemon, POST the typed action,
 // and return the raw response body.
 func postAction(cfg *appConfig, action, window string, payload any, timeout time.Duration) ([]byte, error) {
@@ -361,6 +391,10 @@ func postAction(cfg *appConfig, action, window string, payload any, timeout time
 	if closeErr != nil {
 		return nil, fmt.Errorf("close response: %w", closeErr)
 	}
+	// Surface a daemon stale-read advisory here — the one choke point all
+	// dispatch paths (dispatch/dispatchCapture/requestAction) share — so every
+	// command warns without per-command wiring. stderr keeps stdout clean.
+	warnStaleRisk(respBody, os.Stderr)
 	return respBody, nil
 }
 

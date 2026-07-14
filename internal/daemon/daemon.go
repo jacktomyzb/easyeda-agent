@@ -52,6 +52,10 @@ type Server struct {
 	audit    *auditWriter
 	autosave *autosaver // nil when Options.AutosaveDebounce <= 0
 
+	// staleReads tracks per-window PCB mutations that have not been followed by
+	// a doc reload, so PCB reads can carry a staleRisk advisory (stalereads.go).
+	staleReads *staleGuard
+
 	// inflight tracks non-reentrant actions currently forwarded, keyed
 	// "<action>|<windowId>" — see acquireExclusive / nonReentrant.
 	inflight sync.Map
@@ -82,9 +86,10 @@ func (s *Server) logf(format string, args ...any) {
 // New builds a Server. It does not bind a port until Run is called.
 func New(opts Options) *Server {
 	s := &Server{
-		opts:  opts,
-		hub:   newHub(),
-		audit: newAuditWriter(opts.AuditDir),
+		opts:       opts,
+		hub:        newHub(),
+		audit:      newAuditWriter(opts.AuditDir),
+		staleReads: newStaleGuard(),
 	}
 	if opts.AutosaveDebounce > 0 {
 		s.autosave = newAutosaver(opts.AutosaveDebounce, s.dispatchSave)

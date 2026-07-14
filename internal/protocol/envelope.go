@@ -44,6 +44,11 @@ type Response struct {
 	Artifacts []Artifact     `json:"artifacts,omitempty"`
 	Warnings  []string       `json:"warnings,omitempty"`
 	Error     *ErrorInfo     `json:"error,omitempty"`
+	// StaleRisk is a daemon-attached, non-blocking advisory set on PCB read
+	// actions (list/DRC/report …) that arrive after a PCB mutation but before a
+	// `doc reload`: the per-document engine state may serve stale data (SKILL
+	// iron rule 5). Purely additive — absent when there is no risk.
+	StaleRisk string `json:"staleRisk,omitempty"`
 }
 
 type Context struct {
