@@ -475,7 +475,7 @@ func findAcuteAngles(tracks []pcbTrack) []pcbCheckFinding {
 				Type: "acute-angle", Level: "WARN", Net: v.net, Layer: v.layer,
 				Primitives: ids, AngleDeg: round2(minAng),
 				At:      &pcbXY{round2(v.x), round2(v.y)},
-				Message: fmt.Sprintf("trace bends %.0f° (<90°) — acid-trap acute angle", minAng),
+				Message: fmt.Sprintf("trace bends %.0f° (<90°) — acid-trap acute angle", minAng) + docRule("4.1", "转角禁直角/锐角"),
 			})
 		}
 	}
@@ -501,7 +501,7 @@ func findNonOrthogonal(tracks []pcbTrack) []pcbCheckFinding {
 				Type: "non-orthogonal", Level: "WARN", Net: t.Net, Layer: t.Layer,
 				Primitives: []string{t.ID}, AngleDeg: round2(ang),
 				At:      &pcbXY{round2((t.X1 + t.X2) / 2), round2((t.Y1 + t.Y2) / 2)},
-				Message: fmt.Sprintf("trace runs at %.1f° — not on the 0/45/90° grid (free-angle routing)", ang),
+				Message: fmt.Sprintf("trace runs at %.1f° — not on the 0/45/90° grid (free-angle routing)", ang) + docRule("4.1", "推荐45°折线或圆弧"),
 			})
 		}
 	}
@@ -538,14 +538,14 @@ func findTrackOverPad(tracks []pcbTrack, pads []pcbPadP) []pcbCheckFinding {
 					Type: "track-over-pad", Level: "ERROR", Net: t.Net, Layer: t.Layer,
 					Designator: p.Designator, Primitives: []string{t.ID},
 					At:      &pcbXY{round2(p.X), round2(p.Y)},
-					Message: fmt.Sprintf("track (net %s) crosses over pad %s (net %s) on the same layer — short circuit", t.Net, padRef, p.Net),
+					Message: fmt.Sprintf("track (net %s) crosses over pad %s (net %s) on the same layer — short circuit", t.Net, padRef, p.Net) + docRule("1", "线宽与间距"),
 				})
 			} else {
 				out = append(out, pcbCheckFinding{
 					Type: "track-over-pad", Level: "WARN", Net: t.Net, Layer: t.Layer,
 					Designator: p.Designator, Primitives: []string{t.ID},
 					At:      &pcbXY{round2(p.X), round2(p.Y)},
-					Message: fmt.Sprintf("track passes through same-net pad %s instead of terminating on it", padRef),
+					Message: fmt.Sprintf("track passes through same-net pad %s instead of terminating on it", padRef) + docRule("1", "线宽与间距"),
 				})
 			}
 		}
@@ -600,7 +600,7 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 				Type: "clearance", Level: "ERROR", Net: t.Net, Layer: t.Layer,
 				Designator: p.Designator, Primitives: []string{t.ID},
 				At:      &pcbXY{round2(p.X), round2(p.Y)},
-				Message: fmt.Sprintf("track (net %s) runs %.1fmil from pad %s (net %s) — under the %.0fmil spacing rule", t.Net, d, ref, p.Net, clearance),
+				Message: fmt.Sprintf("track (net %s) runs %.1fmil from pad %s (net %s) — under the %.0fmil spacing rule", t.Net, d, ref, p.Net, clearance) + docRule("1.1", "最小间距"),
 			})
 		}
 		for _, v := range vias {
@@ -617,7 +617,7 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 			add(pcbCheckFinding{
 				Type: "clearance", Level: "ERROR", Net: t.Net, Layer: t.Layer,
 				Primitives: []string{t.ID, v.ID}, At: &pcbXY{round2(v.X), round2(v.Y)},
-				Message: fmt.Sprintf("track (net %s) runs %.1fmil from via (net %s) — under the %.0fmil spacing rule", t.Net, d, v.Net, clearance),
+				Message: fmt.Sprintf("track (net %s) runs %.1fmil from via (net %s) — under the %.0fmil spacing rule", t.Net, d, v.Net, clearance) + docRule("1.1", "最小间距"),
 			})
 		}
 	}
@@ -633,7 +633,7 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 				add(pcbCheckFinding{
 					Type: "clearance", Level: "ERROR", Nets: uniqStr([]string{a.Net, b.Net}), Layer: a.Layer,
 					Primitives: []string{a.ID, b.ID}, At: &pcbXY{round2(mx), round2(my)},
-					Message: fmt.Sprintf("tracks (net %s / %s) run %.1fmil apart — under the %.0fmil spacing rule", a.Net, b.Net, d, clearance),
+					Message: fmt.Sprintf("tracks (net %s / %s) run %.1fmil apart — under the %.0fmil spacing rule", a.Net, b.Net, d, clearance) + docRule("1.1", "最小间距"),
 				})
 			}
 		}
@@ -657,7 +657,7 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 					Type: "clearance", Level: "ERROR", Nets: uniqStr([]string{v.Net, p.Net}),
 					Designator: p.Designator, Primitives: []string{v.ID},
 					At:      &pcbXY{round2(v.X), round2(v.Y)},
-					Message: fmt.Sprintf("via (net %s) sits ~%.1fmil from pad %s (net %s) — under the %.0fmil spacing rule", v.Net, math.Max(d, 0), ref, p.Net, clearance),
+					Message: fmt.Sprintf("via (net %s) sits ~%.1fmil from pad %s (net %s) — under the %.0fmil spacing rule", v.Net, math.Max(d, 0), ref, p.Net, clearance) + docRule("1.1", "最小间距"),
 				})
 			}
 		}
@@ -672,7 +672,7 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 				add(pcbCheckFinding{
 					Type: "clearance", Level: "ERROR", Nets: uniqStr([]string{a.Net, b.Net}),
 					Primitives: []string{a.ID, b.ID}, At: &pcbXY{round2(a.X), round2(a.Y)},
-					Message: fmt.Sprintf("vias (net %s / %s) sit ~%.1fmil apart — under the %.0fmil spacing rule", a.Net, b.Net, math.Max(d, 0), clearance),
+					Message: fmt.Sprintf("vias (net %s / %s) sit ~%.1fmil apart — under the %.0fmil spacing rule", a.Net, b.Net, math.Max(d, 0), clearance) + docRule("1.1", "最小间距"),
 				})
 			}
 		}
@@ -690,7 +690,7 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 				add(pcbCheckFinding{
 					Type: "clearance", Level: "ERROR", Net: t.Net, Layer: t.Layer,
 					Primitives: []string{s.ID, t.ID}, At: &pcbXY{round2(mx), round2(my)},
-					Message: fmt.Sprintf("track (net %s) runs ~%.1fmil from a board cutout/slot — under the %.0fmil copper-to-cutout rule", t.Net, math.Max(d, 0), slotClr),
+					Message: fmt.Sprintf("track (net %s) runs ~%.1fmil from a board cutout/slot — under the %.0fmil copper-to-cutout rule", t.Net, math.Max(d, 0), slotClr) + docRule("1.1", "最小间距"),
 				})
 			}
 		}
@@ -702,7 +702,7 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 				add(pcbCheckFinding{
 					Type: "clearance", Level: "ERROR", Net: v.Net,
 					Primitives: []string{s.ID, v.ID}, At: &pcbXY{round2(v.X), round2(v.Y)},
-					Message: fmt.Sprintf("via (net %s) sits ~%.1fmil from a board cutout/slot — under the %.0fmil copper-to-cutout rule", v.Net, math.Max(d, 0), slotClr),
+					Message: fmt.Sprintf("via (net %s) sits ~%.1fmil from a board cutout/slot — under the %.0fmil copper-to-cutout rule", v.Net, math.Max(d, 0), slotClr) + docRule("1.1", "最小间距"),
 				})
 			}
 		}
@@ -729,7 +729,7 @@ func findViaIssues(tracks []pcbTrack, vias []pcbViaP) []pcbCheckFinding {
 					Type: "overlapping-via", Level: "WARN", Nets: nets,
 					Primitives: []string{vias[i].ID, vias[j].ID},
 					At:         &pcbXY{round2(vias[i].X), round2(vias[i].Y)},
-					Message:    "two vias occupy the same spot — stacked/redundant",
+					Message:    "two vias occupy the same spot — stacked/redundant" + docRule("2", "过孔设计"),
 				})
 			}
 		}
@@ -756,7 +756,7 @@ func findViaIssues(tracks []pcbTrack, vias []pcbViaP) []pcbCheckFinding {
 			out = append(out, pcbCheckFinding{
 				Type: "single-layer-via", Level: "WARN", Net: v.Net,
 				Primitives: []string{v.ID}, At: &pcbXY{round2(v.X), round2(v.Y)},
-				Message: fmt.Sprintf("signal via touches tracks on %d layer(s) — no layer transition (pointless or dangling)", len(layers)),
+				Message: fmt.Sprintf("signal via touches tracks on %d layer(s) — no layer transition (pointless or dangling)", len(layers)) + docRule("2", "过孔设计"),
 			})
 		}
 	}
@@ -794,7 +794,7 @@ func findWidthMismatch(tracks []pcbTrack, pads []pcbPadP) []pcbCheckFinding {
 			out = append(out, pcbCheckFinding{
 				Type: "width-mismatch", Level: "INFO", Designator: d, Net: ps[0].Net,
 				Widths:  []float64{round2(w0), round2(w1)},
-				Message: fmt.Sprintf("2-pin part %s: entering track widths differ (%.1f vs %.1f mil)", d, w0, w1),
+				Message: fmt.Sprintf("2-pin part %s: entering track widths differ (%.1f vs %.1f mil)", d, w0, w1) + docRule("1.2", "推荐线宽"),
 			})
 		}
 	}
@@ -910,7 +910,7 @@ func findParallelCoupling(tracks []pcbTrack, couplingW float64) []pcbCheckFindin
 					Type: "parallel-coupling", Level: "WARN", Nets: []string{na, nb}, Layer: a.Layer,
 					Primitives: []string{a.ID, b.ID},
 					Message: fmt.Sprintf("parallel traces %.1f mil apart over %.0f mil (< %.1f mil = %.0f×W) — crosstalk/3W risk",
-						gap, ovlp, need, couplingW),
+						gap, ovlp, need, couplingW) + docRule("4.2", "减少串扰"),
 				})
 			}
 		}
@@ -962,7 +962,7 @@ func findSilkscreenFlipped(silk []pcbSilkText) []pcbCheckFinding {
 					Type: "silkscreen-flipped", Level: "ERROR", Layer: s.Layer, Designator: label,
 					Primitives: []string{s.ID}, At: &pcbXY{round2(s.X), round2(s.Y)},
 					Message: fmt.Sprintf("designator '%s' is on the %s silkscreen but its component sits on the %s side — silkscreen flipped to the wrong side",
-						label, sideName(s.Layer), sideName(s.CompLayer)),
+						label, sideName(s.Layer), sideName(s.CompLayer)) + docRule("11.2", "位号清晰可辨"),
 				})
 				continue
 			}
@@ -981,7 +981,7 @@ func findSilkscreenFlipped(silk []pcbSilkText) []pcbCheckFinding {
 				Type: "silkscreen-flipped", Level: "ERROR", Layer: s.Layer, Designator: label,
 				Primitives: []string{s.ID}, At: &pcbXY{round2(s.X), round2(s.Y)},
 				Message: fmt.Sprintf("silkscreen text '%s' on the %s silk is %s — it reads backwards (放反)",
-					label, sideName(s.Layer), state),
+					label, sideName(s.Layer), state) + docRule("11.2", "底层丝印需镜像"),
 			})
 			continue
 		}
@@ -997,7 +997,7 @@ func findSilkscreenFlipped(silk []pcbSilkText) []pcbCheckFinding {
 				out = append(out, pcbCheckFinding{
 					Type: "silkscreen-flipped", Level: "WARN", Layer: s.Layer, Designator: label,
 					Primitives: []string{s.ID}, At: &pcbXY{round2(s.X), round2(s.Y)},
-					Message: fmt.Sprintf("designator '%s' is rotated %g° (%s) — not upright (放反/朝向不正)", label, rot, ori),
+					Message: fmt.Sprintf("designator '%s' is rotated %g° (%s) — not upright (放反/朝向不正)", label, rot, ori) + docRule("11.2", "位号清晰可辨"),
 				})
 			}
 		}
@@ -1185,7 +1185,7 @@ func findPowerNotPoured(pads []pcbPadP, pouredNets map[string]bool) []pcbCheckFi
 		fix := fmt.Sprintf("`pcb pour-fit --net %s` (2-layer) or `pcb power-planes` (4-layer)", n)
 		out = append(out, pcbCheckFinding{
 			Type: "power-not-poured", Level: "WARN", Net: n,
-			Message: fmt.Sprintf("power net %s (%d pads) has no copper pour/plane — power should be poured, not carried by thin tracks: %s", n, padCount[n], fix),
+			Message: fmt.Sprintf("power net %s (%d pads) has no copper pour/plane — power should be poured, not carried by thin tracks: %s", n, padCount[n], fix) + docRule("5.2", "铺铜策略"),
 		})
 	}
 	return out
@@ -1273,7 +1273,7 @@ func findWidthUnderSpec(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, width
 			Widths: []float64{round2(o.thinnest), round2(o.spec)},
 			At:     &pcbXY{o.at.X, o.at.Y},
 			Message: fmt.Sprintf("power net %s: %d track(s) below the %s spec width %.3g mil (thinnest %.3g mil) — widen for current capacity (route-short sizes by role; pour it instead, or --width-power to override)",
-				n, o.count, netRole(n), o.spec, o.thinnest),
+				n, o.count, netRole(n), o.spec, o.thinnest) + docRule("1.2", "推荐线宽"),
 		}
 		if o.prim != "" {
 			f.Primitives = []string{o.prim}
@@ -1385,7 +1385,7 @@ func findAntennaKeepout(ants []pcbAntComp, regions []pcbKeepRegion, copperLayers
 			out = append(out, pcbCheckFinding{
 				Type: "antenna-keepout", Level: "WARN", Designator: a.Designator,
 				Message: fmt.Sprintf("antenna component %s (%s) lacks a no-copper keep-out on: %s — copper there detunes the antenna (每层都要禁铺铜)",
-					a.Designator, dev, strings.Join(missing, ", ")),
+					a.Designator, dev, strings.Join(missing, ", ")) + docRule("5.3", "天线下禁止铺铜"),
 			})
 		}
 	}

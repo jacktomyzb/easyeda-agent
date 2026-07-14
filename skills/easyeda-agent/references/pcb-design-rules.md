@@ -3,6 +3,13 @@
 > 基于 JLC嘉立创工艺能力 + IPC-2221 + 业界最佳实践整理。
 > 本文档是 easyeda-agent 自动化流程的规则基准，Skill 执行时参照此文档做 DRC / check 门禁。
 
+**本手册与代码的关系**：数值门禁的**运行时正本在 Go 代码**——`internal/app/pcb_rules.go`
+（defaultPcbRules 兜底规则）、`internal/app/pcb_netclass.go`（net-class 线宽阶梯）、
+`internal/app/pcb_check*.go`（各条 check 规则）；JLC 官网采集凭证是
+`references/fab-rules-jlcpcb.json`。本手册是**人读依据**，也是 `pcb check` 报错里
+`[规范 §N …]` 引用的跳转目标。改本手册不会改变 daemon 行为；两者冲突时以
+**代码 + JLC 官网**为准，并回改本手册对齐。
+
 ---
 
 ## 目录
@@ -41,13 +48,13 @@
 
 | 网络角色 | 推荐线宽 | 说明 |
 |---------|---------|------|
-| 信号（signal） | 0.15mm (6mil) | 普通数字信号 |
-| 分支电源（branch） | 0.25mm (10mil) | 器件到去耦电容段 |
-| 主干电源（trunk） | 0.4mm (15mil) | 电源轨主干 |
-| 大电流（high-current） | 0.5mm (20mil) | >500mA 的走线 |
-| GND | 0.3mm (12mil) | 或铺铜平面替代 |
+| 信号（signal） | 0.15mm (≈6mil) | 普通数字信号；实现中取板载 live 规则默认值（不做公制圆整——用户自己的设定只报告、不改写） |
+| 分支电源（branch） | 0.25mm (≈9.84mil) | 器件到去耦电容段 |
+| 主干电源（trunk） | 0.4mm (≈15.75mil) | 电源轨主干 |
+| 大电流（high-current） | 0.5mm (≈19.69mil) | >500mA 的走线 |
+| GND | 同 high-current 0.5mm | 若必须走线；首选铺铜/平面替代（power-not-poured 门禁） |
 
-> 线宽公制圆整原则：用 0.1mm 步进（0.15/0.2/0.25/0.3/0.4/0.5），不用 mil 碎值如 0.127mm。
+> 线宽公制圆整原则：用 **0.05mm 步进**（0.15/0.2/0.25/0.3/0.4/0.5…），不用 mil 碎值如 0.127mm 或 10mil=0.254mm。`pcb net-classes` 阶梯的电源各档即按本表落地（`pcb_netclass.go`），旧 10/15/20mil 碎值阶梯已废弃；width-under-spec 有 1mil 容差，按旧 10/15/20mil 布的存量板不会被追溯 WARN。
 
 ### 1.3 电流承载估算
 

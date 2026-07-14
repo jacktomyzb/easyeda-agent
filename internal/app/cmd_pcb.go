@@ -692,7 +692,9 @@ data but NOT consumed yet — phase-2; today the name/voltage heuristic decides.
 
 Widths are seeded from the board's LIVE DRC rules (signal = the live default,
 power roles step up per pcb-layout-conventions.md §7.8), clamped ≥ the fab's
-legal minimum.`,
+legal minimum. Power-rung widths are METRIC-round per pcb-design-rules.md §1.2
+(0.05mm grid): branch 0.25mm (9.84mil) / trunk 0.4mm (15.75mil) /
+high-current 0.5mm (19.69mil) — not mil fragments like 10/15/20.`,
 			Example: `  easyeda pcb net-classes            # human table
   easyeda pcb net-classes --json     # {role: {mil, mm}}`,
 			RunE: func(cmd *cobra.Command, args []string) error {
@@ -721,7 +723,7 @@ legal minimum.`,
 				fmt.Fprintf(stdout, "net-class spec widths (rules: %s)\n", rules.source)
 				fmt.Fprintf(stdout, "  %-14s %6s  %6s   %s\n", "ROLE", "mil", "mm", "note")
 				for _, role := range netClassRolesByWidth {
-					fmt.Fprintf(stdout, "  %-14s %6.2g  %6.3g   %s\n", role, table[role], table[role]/mmToMil, notes[role])
+					fmt.Fprintf(stdout, "  %-14s %6.4g  %6.3g   %s\n", role, table[role], table[role]/mmToMil, notes[role])
 				}
 				return nil
 			},
@@ -2401,7 +2403,7 @@ emits a chord-approximated fillet (native arcs do not commit on this build).
 		c.Flags().Float64Var(&maxLen, "max-len", 0, "longest hop to route (Manhattan mil, default 1000)")
 		c.Flags().Float64Var(&width, "width", 0, "force ALL tracks to this width (mil); overrides --width-signal/--width-power")
 		c.Flags().Float64Var(&signalWidth, "width-signal", 0, "signal-net track width (mil); overrides the ladder's signal role (default = live rule track width)")
-		c.Flags().Float64Var(&powerWidth, "width-power", 0, "force ONE width across all power roles (mil); overrides the branch/trunk/high-current ladder (default = §7.8 ladder: 10/15/20)")
+		c.Flags().Float64Var(&powerWidth, "width-power", 0, "force ONE width across all power roles (mil); overrides the branch/trunk/high-current ladder (default = §1.2 metric ladder: 0.25/0.4/0.5mm = 9.84/15.75/19.69mil)")
 		c.Flags().StringVar(&corner, "corner", "90", "corner style: 90 (L), 45 (chamfer), round (chord fillet)")
 		c.Flags().Float64Var(&roundRadius, "round-radius", 0, "max fillet radius for --corner round (mil, default 20)")
 		c.Flags().BoolVar(&noAvoid, "no-avoid", false, "disable obstacle-aware L-orientation (v1 naive horizontal-first)")
@@ -2754,7 +2756,7 @@ Rules:
                         (power should be poured, not carried by thin tracks;
                         fix: 'pcb pour-fit --net N' 2-layer / 'pcb power-planes' 4-layer)
   • width-under-spec  — a routed power track thinner than its net-class spec  → WARN
-                        (branch 10 / trunk 15 / high-current 20 mil — see
+                        (branch 0.25mm / trunk 0.4mm / high-current 0.5mm — see
                         'pcb net-classes'; fine-pitch narrowing + stitch stubs exempt)
 
 Complements 'pcb drc' (rule clearance) and 'pcb layout-lint' (placement/routability).

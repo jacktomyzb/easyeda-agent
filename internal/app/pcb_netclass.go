@@ -103,17 +103,76 @@ func netRole(net string) string {
 	return rolePowerBranch
 }
 
+// metricStepMM is the metric width grid of 规范手册 §1.2 (pcb-design-rules.md):
+// track widths are METRIC-round values in 0.05mm steps (0.15/0.2/0.25/0.3/0.4/
+// 0.5mm …), never mil fragments (10mil = 0.254mm is a fragment; 0.25mm is not).
+const metricStepMM = 0.05
+
+// roundMetricMil snaps a width (mil) to the nearest 0.05mm multiple, expressed in
+// mil (规范 §1.2 metric rounding). Guard rail: nearest-rounding can shave up to
+// half a step (0.025mm ≈ 0.98mil) off the input; if that loses more than 10% of
+// the input width (only possible below ~9.8mil) the value steps UP to the next
+// 0.05mm multiple instead, so a spec width never degrades materially. The fab
+// clamp floor is re-checked by the caller AFTER rounding (netClassWidthTable) —
+// a rounded value may not sit below the legal minimum.
+func roundMetricMil(w float64) float64 {
+	if w <= 0 {
+		return w
+	}
+	mm := w / mmToMil
+	steps := math.Round(mm / metricStepMM)
+	r := steps * metricStepMM * mmToMil
+	if r < w*0.9 { // nearest rounding lost >10% — take the next 0.05mm step up
+		r = (steps + 1) * metricStepMM * mmToMil
+	}
+	return r
+}
+
 // netClassWidthTable returns the canonical role→width (mil) ladder, seeded from the
 // board's live rules. Signal tracks the board's live default; each power role steps
-// up per the §7.8 ladder (branch 10 / trunk 15 / high-current 20); every width is
-// floored at the fab's legal minimum and the ladder is kept monotonic
-// (signal ≤ branch ≤ trunk ≤ high-current) so a loose live default never inverts it.
+// up per the §7.8 role split, with rung values on the metric grid of 规范手册 §1.2:
+// branch 0.25mm (9.84mil) / trunk 0.4mm (15.75mil) / high-current 0.5mm (19.69mil)
+// — replacing the old mil-fragment bases 10/15/20 (= 0.254/0.381/0.508mm, all
+// off-grid). Every width is floored at the fab's legal minimum.
+//
+// Metric-rounding decisions (do not "fix" these without re-reading §1.2):
+//   - branch stays 0.25mm (9.84mil) even though 9.84 < the old 10mil base.
+//     Rounding UP to 0.3mm (11.81mil) would make width-under-spec retro-flag
+//     every existing board routed at the old 10mil branch (10 < 11.81−1mil tol);
+//     with 0.25mm the whole legacy 10/15/20 ladder stays ≥ spec−pcbWidthTolMil
+//     (10 ≥ 9.84−1, 15 ≥ 15.75−1, 20 ≥ 19.69−1) — zero false WARNs.
+//   - signal is NOT metric-rounded: it is the board's LIVE rule value (the
+//     user's own setting), which we report, never rewrite.
+//   - monotonicity: the power rungs (branch ≤ trunk ≤ high-current) are kept
+//     STRICTLY monotonic. The signal→branch edge is monotonic up to metric
+//     quantization: snapping a live width onto the 0.05mm grid can dip at most
+//     half a step (≈0.98mil) below the raw live value — under pcbWidthTolMil,
+//     so width-under-spec's tolerance absorbs it (e.g. live signal 10mil,
+//     branch 9.84mil is a grid artifact, not an inversion).
 func netClassWidthTable(r pcbRules) map[string]float64 {
 	sig := r.clampWidth(r.trackWidthMil)
-	branch := r.clampWidth(math.Max(10, sig))
-	trunk := r.clampWidth(math.Max(15, branch))
-	// High-current ties to the board's power width (default 20), never below trunk.
-	high := r.clampWidth(math.Max(r.powerWidthMil, trunk))
+	// §1.2 recommended metric bases for the power rungs.
+	const (
+		branchBaseMM = 0.25 // 分支电源 — 9.84mil
+		trunkBaseMM  = 0.40 // 主干电源 — 15.75mil
+		highBaseMM   = 0.50 // 大电流 — 19.69mil
+	)
+	// rung folds one ladder step: at least the §1.2 metric base, at least the
+	// previous rung (strict power-rung monotonicity), metric-rounded, and never
+	// below the fab's legal minimum — nearest-rounding can dip under the clamp
+	// floor by less than one step, so a single 0.05mm step up always clears it.
+	rung := func(baseMM, prev float64) float64 {
+		w := roundMetricMil(r.clampWidth(math.Max(baseMM*mmToMil, prev)))
+		if w < r.trackWidthMinMil {
+			w += metricStepMM * mmToMil
+		}
+		return w
+	}
+	branch := rung(branchBaseMM, sig)
+	trunk := rung(trunkBaseMM, branch)
+	// High-current also honors the board's power width (default 20mil → rounds
+	// onto the grid at 0.5mm), never below trunk.
+	high := rung(highBaseMM, math.Max(r.powerWidthMil, trunk))
 	return map[string]float64{
 		roleSignal:      sig,
 		rolePowerBranch: branch,

@@ -44,12 +44,13 @@ func TestFindPowerNotPoured(t *testing.T) {
 }
 
 func TestFindWidthUnderSpec(t *testing.T) {
-	widths := netClassWidthTable(defaultPcbRules()) // signal10 branch10 trunk15 high20 gnd20
+	// §1.2 metric ladder: signal 10 / branch 0.25mm(9.84) / trunk 0.4mm(15.75) / high+gnd 0.5mm(19.69)
+	widths := netClassWidthTable(defaultPcbRules())
 	tracks := []pcbTrack{
-		{ID: "t1", Net: "+5V", Width: 8, X1: 0, Y1: 0, X2: 100, Y2: 0},     // trunk 15 → under
-		{ID: "t2", Net: "+5V", Width: 20, X1: 100, Y1: 0, X2: 200, Y2: 0},  // ok
-		{ID: "t3", Net: "VBUS", Width: 10, X1: 0, Y1: 50, X2: 100, Y2: 50}, // high 20 → under
-		{ID: "t4", Net: "3V3", Width: 10, X1: 0, Y1: 100, X2: 100, Y2: 100}, // branch 10 → ok
+		{ID: "t1", Net: "+5V", Width: 8, X1: 0, Y1: 0, X2: 100, Y2: 0},      // trunk 15.75 → under
+		{ID: "t2", Net: "+5V", Width: 20, X1: 100, Y1: 0, X2: 200, Y2: 0},   // ok
+		{ID: "t3", Net: "VBUS", Width: 10, X1: 0, Y1: 50, X2: 100, Y2: 50},  // high 19.69 → under
+		{ID: "t4", Net: "3V3", Width: 10, X1: 0, Y1: 100, X2: 100, Y2: 100}, // branch 9.84, 10 ≥ 9.84−1mil tol → ok (legacy-board compat)
 		{ID: "t5", Net: "SDA", Width: 4, X1: 0, Y1: 150, X2: 100, Y2: 150},  // signal → exempt
 		{ID: "t6", Net: "GND", Width: 8, X1: 0, Y1: 200, X2: 30, Y2: 200},   // short stub on a via → exempt
 	}
@@ -66,14 +67,14 @@ func TestFindWidthUnderSpec(t *testing.T) {
 	if len(out) != 2 {
 		t.Fatalf("got %d findings (%v), want 2 (+5V, VBUS)", len(out), keys2(byNet))
 	}
-	if f, ok := byNet["+5V"]; !ok || f.Widths[0] != 8 || f.Widths[1] != 15 {
+	if f, ok := byNet["+5V"]; !ok || f.Widths[0] != 8 || f.Widths[1] != 15.75 {
 		t.Errorf("+5V finding wrong: %+v", f)
 	}
-	if f, ok := byNet["VBUS"]; !ok || f.Widths[1] != 20 {
+	if f, ok := byNet["VBUS"]; !ok || f.Widths[1] != 19.69 {
 		t.Errorf("VBUS finding wrong: %+v", f)
 	}
 	if _, ok := byNet["3V3"]; ok {
-		t.Error("3V3 at branch spec 10 must not be flagged")
+		t.Error("3V3 at 10mil vs branch spec 0.25mm(9.84) must not be flagged")
 	}
 	if _, ok := byNet["SDA"]; ok {
 		t.Error("SDA (signal) must not be flagged")
