@@ -70,10 +70,19 @@ profile 里持久化)。
 3. evaluate_script 在编辑器页里执行:
    - DB = User_<teamUuid>_v6(teamUuid 从 easyeda project info 读)
    - store extensionsObjectStorage,key = <extensionUuid>|dist/index.js,
-     把 record.source 换成 new File([bytes],'index.js')
-   - store extensionsIndex,key = <extensionUuid>,把 config.version 改成新
-     版本号(isAllowExternalInteractions 别动,权限就是这个布尔)
-4. navigate reload 页面(#id= 还在,工程随 boot 重开)
+     把 record.source 换成 **new File([bytes],'index.js',{type:'text/javascript'})**
+     ——**MIME 必须带**(0.11.4→0.12.1 实踩:空 type 的 File 扩展 loader 静默不执行,
+     对照原生记录 README.md 是 text/markdown 才定位到)
+   - store extensionsIndex,key = <extensionUuid>:
+     ① config.version 改新版本号(isAllowExternalInteractions 别动,权限就是这个布尔)
+     ② **顶层 fileSize 字段同步成新 blob 的字节数**(0.12.1 实踩:index 记录顶层有
+     fileSize(旧值),与 ObjectStorage 里新 File.size 不一致时 boot 校验静默不加载
+     ——两处都要写,漏 fileSize 就白灌)
+   - 两个 store 都是 **in-line key**:put(record) 不带 key 参数(带了报 DataError)
+4. navigate reload 页面(#id= 还在,工程随 boot 重开)。若 reload 后 health 仍空但
+   页面 window._EXTAPI_SCRIPT_SPACES_ 里有本扩展 uuid = 代码已在跑、只是 WS 尚在
+   端口扫描,再等 ≤60s;裸 /editor(无 #id)会反复报 "Get an illegal project!" 卡 boot
+   ——直接开 #id=<uuid> 直达页
 5. until … grep connectorVersion → 应显示新版本(版本号编译在 bundle 里,
    变了就是新代码在跑的铁证)
 ```

@@ -588,9 +588,22 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 			if isEnd(p.X, p.Y, t.X1, t.Y1, t.X2, t.Y2) {
 				continue // legitimate termination
 			}
-			d := segPtDist(p.X, p.Y, t.X1, t.Y1, t.X2, t.Y2)
-			if d >= clearance+p.halfExt() || d <= pcbOverPadEps {
-				continue // over-pad short is track-over-pad's; ≥clearance is fine
+			centerD := segPtDist(p.X, p.Y, t.X1, t.Y1, t.X2, t.Y2)
+			if centerD <= pcbOverPadEps {
+				continue // over-pad short is track-over-pad's
+			}
+			// Edge distance: with a real extent the pad is its axis-aligned RECT —
+			// a radial max(W,H)/2 would false-flag a track running legitimately
+			// beside an elongated pad (USB-C 1.0mm pads: half-length 19.7mil ≫
+			// half-width 5.9mil, seen on ceshi). Nominal radius only as fallback.
+			var edgeD float64
+			if p.W > 0 && p.H > 0 {
+				edgeD = rectSegDist(p.X-p.W/2, p.Y-p.H/2, p.X+p.W/2, p.Y+p.H/2, t.X1, t.Y1, t.X2, t.Y2)
+			} else {
+				edgeD = centerD - nominalPadHalf
+			}
+			if edgeD >= clearance {
+				continue
 			}
 			ref := p.Designator
 			if p.Number != "" {
@@ -600,7 +613,7 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 				Type: "clearance", Level: "ERROR", Net: t.Net, Layer: t.Layer,
 				Designator: p.Designator, Primitives: []string{t.ID},
 				At:      &pcbXY{round2(p.X), round2(p.Y)},
-				Message: fmt.Sprintf("track (net %s) runs %.1fmil from pad %s (net %s) — under the %.0fmil spacing rule", t.Net, d, ref, p.Net, clearance) + docRule("1.1", "最小间距"),
+				Message: fmt.Sprintf("track (net %s) runs %.1fmil from pad %s (net %s) — under the %.0fmil spacing rule", t.Net, math.Max(edgeD, 0), ref, p.Net, clearance) + docRule("1.1", "最小间距"),
 			})
 		}
 		for _, v := range vias {
@@ -648,7 +661,15 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 			if p.Net == v.Net || strings.TrimSpace(p.Net) == "" {
 				continue
 			}
-			if d := math.Hypot(v.X-p.X, v.Y-p.Y) - v.Dia/2 - p.halfExt(); d < clearance {
+			// Rect model for real-extent pads (see track↔pad above) — a radial
+			// max-half would false-flag vias beside elongated connector pads.
+			var d float64
+			if p.W > 0 && p.H > 0 {
+				d = rectPtDist(p.X-p.W/2, p.Y-p.H/2, p.X+p.W/2, p.Y+p.H/2, v.X, v.Y) - v.Dia/2
+			} else {
+				d = math.Hypot(v.X-p.X, v.Y-p.Y) - v.Dia/2 - nominalPadHalf
+			}
+			if d < clearance {
 				ref := p.Designator
 				if p.Number != "" {
 					ref += "." + p.Number
