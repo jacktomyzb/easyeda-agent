@@ -93,12 +93,21 @@ func pullLayoutPoses(cfg *appConfig, window string) ([]stageComponentPose, error
 		if !ok {
 			continue
 		}
+		// layer is a NUMBER in the connector payload — asString() would coerce
+		// it to "" and make a TOP↔BOTTOM flip invisible to the fingerprint
+		// (issue #100 review). Accept number or string.
+		layer := asString(cm["layer"])
+		if layer == "" {
+			if n, ok := asFloatOK(cm["layer"]); ok && n != 0 {
+				layer = fmt.Sprintf("%.0f", n)
+			}
+		}
 		poses = append(poses, stageComponentPose{
 			Designator: asString(cm["designator"]),
 			X:          asFloat(cm["x"]),
 			Y:          asFloat(cm["y"]),
 			Rotation:   asFloat(cm["rotation"]),
-			Layer:      asString(cm["layer"]),
+			Layer:      layer,
 		})
 	}
 	return poses, nil

@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -180,5 +181,49 @@ func TestCheckRouteGateForceDoesNotConfirm(t *testing.T) {
 	// Un-forced call right after: still blocked.
 	if CheckRouteGate(st, false, "").Allowed {
 		t.Fatal("gate must block again after a forced run")
+	}
+}
+
+// Issue #100: representation noise from a doc reload — float tails, -0.0,
+// rotation aliasing, layer number-vs-name — must NOT change the hash; only a
+// real geometric change may.
+func TestHashLayoutNormalization(t *testing.T) {
+	base := []ComponentPose{
+		{Designator: "U1", X: 1470, Y: 700, Rotation: 0, Layer: "1"},
+		{Designator: "C1", X: 100, Y: 200, Rotation: 90, Layer: "2"},
+	}
+	h0 := HashLayout(base)
+
+	// Float tails (sub-mil), -0.0 rotation, 360≡0, layer name aliases.
+	noisy := []ComponentPose{
+		{Designator: "U1", X: 1470.0001, Y: 699.9999, Rotation: math.Copysign(0, -1), Layer: "Top Layer"},
+		{Designator: "C1", X: 100, Y: 200, Rotation: 450, Layer: "Bottom"},
+	}
+	if HashLayout(noisy) != h0 {
+		t.Fatal("representation noise must not change the layout hash (issue #100)")
+	}
+	// Negative rotation alias: -90 ≡ 270 ≠ 90 — this IS a change.
+	rotated := []ComponentPose{
+		{Designator: "U1", X: 1470, Y: 700, Rotation: 0, Layer: "1"},
+		{Designator: "C1", X: 100, Y: 200, Rotation: -90, Layer: "2"},
+	}
+	if HashLayout(rotated) == h0 {
+		t.Fatal("a real rotation change (90 → -90/270) must change the hash")
+	}
+	// A real move (≥1 mil) must change the hash.
+	moved := []ComponentPose{
+		{Designator: "U1", X: 1472, Y: 700, Rotation: 0, Layer: "1"},
+		{Designator: "C1", X: 100, Y: 200, Rotation: 90, Layer: "2"},
+	}
+	if HashLayout(moved) == h0 {
+		t.Fatal("a 2 mil move must change the hash")
+	}
+	// A layer flip must change the hash (the old asString bug hid it as "").
+	flipped := []ComponentPose{
+		{Designator: "U1", X: 1470, Y: 700, Rotation: 0, Layer: "2"},
+		{Designator: "C1", X: 100, Y: 200, Rotation: 90, Layer: "2"},
+	}
+	if HashLayout(flipped) == h0 {
+		t.Fatal("a TOP→BOTTOM flip must change the hash")
 	}
 }

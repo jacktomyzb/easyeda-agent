@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -379,8 +380,11 @@ func CheckRouteGate(s *State, force bool, reason string) Gate {
 // ── fingerprints ───────────────────────────────────────────────────────────
 
 // ComponentPose is the placement identity of one component: what a layout
-// fingerprint is derived from. Coordinates are rounded to 0.1 mil so float
-// noise from a round-trip re-read never reads as drift.
+// fingerprint is derived from. Values are NORMALIZED before hashing (see
+// normPose) so representation noise from a round-trip re-read — float tails,
+// -0.0, rotation aliasing (360≡0), layer reported as number vs name — never
+// reads as drift (issue #100: a plain `doc reload` used to invalidate
+// placement_confirmed with zero components moved).
 type ComponentPose struct {
 	Designator string
 	X, Y       float64
@@ -388,9 +392,51 @@ type ComponentPose struct {
 	Layer      string
 }
 
+// normCoord rounds to 1 mil and squashes -0.0 → 0.0. 1 mil (vs the old 0.1)
+// absorbs connector float tails; no real placement edit is sub-mil.
+func normCoord(v float64) float64 {
+	r := math.Round(v)
+	if r == 0 {
+		return 0 // canonicalize -0.0
+	}
+	return r
+}
+
+// normRotation folds rotation into [0,360) at 1° granularity (-90 ≡ 270,
+// 360 ≡ 0) and squashes -0.0.
+func normRotation(v float64) float64 {
+	r := math.Mod(math.Round(v), 360)
+	if r < 0 {
+		r += 360
+	}
+	if r == 0 {
+		return 0
+	}
+	return r
+}
+
+// normLayer canonicalizes the layer to "1"/"2"/… — the connector reports it
+// as a number, some readers stringify it, and the old asString() coercion
+// turned numeric layers into "" (so a TOP↔BOTTOM flip was INVISIBLE to the
+// fingerprint). Names map to their EPCB ids; unknown strings pass through
+// lowercased so at least equal inputs hash equally.
+func normLayer(s string) string {
+	t := strings.ToLower(strings.TrimSpace(s))
+	switch t {
+	case "", "0":
+		return ""
+	case "1", "top", "toplayer", "top layer":
+		return "1"
+	case "2", "bottom", "bottomlayer", "bottom layer":
+		return "2"
+	}
+	return t
+}
+
 // HashLayout derives a deterministic fingerprint hash from component poses
 // (sorted by designator; primitive ids are excluded — they churn across window
-// reloads while the placement itself is unchanged).
+// reloads while the placement itself is unchanged). Poses are normalized so
+// only a GEOMETRIC change (move/rotate/flip) changes the hash.
 func HashLayout(poses []ComponentPose) string {
 	sorted := make([]ComponentPose, len(poses))
 	copy(sorted, poses)
@@ -404,7 +450,8 @@ func HashLayout(poses []ComponentPose) string {
 	})
 	h := sha256.New()
 	for _, p := range sorted {
-		fmt.Fprintf(h, "%s|%.1f|%.1f|%.1f|%s\n", p.Designator, p.X, p.Y, p.Rotation, p.Layer)
+		fmt.Fprintf(h, "%s|%.0f|%.0f|%.0f|%s\n", p.Designator,
+			normCoord(p.X), normCoord(p.Y), normRotation(p.Rotation), normLayer(p.Layer))
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
