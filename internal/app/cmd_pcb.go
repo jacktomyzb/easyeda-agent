@@ -216,6 +216,28 @@ so in a single-design project you can just run 'easyeda pcb new-board'.`,
 				if includePads {
 					payload["includePads"] = true
 				}
+				if includeBBox {
+					// Read-side of `pcb modify --center` (#105): annotate each
+					// bbox'd component with center:{x,y} (bbox geometric center)
+					// CLI-side, so planners consume center coordinates directly
+					// instead of mistaking the anchor x/y for the body center.
+					respBody, err := postAction(cfg, "pcb.components.list", window, payload, defaultActionTimeout)
+					if err != nil {
+						return err
+					}
+					out := injectBBoxCenters(respBody)
+					_, _ = stdout.Write(out)
+					if len(out) > 0 && out[len(out)-1] != '\n' {
+						fmt.Fprintln(stdout)
+					}
+					var parsed struct {
+						OK bool `json:"ok"`
+					}
+					if json.Unmarshal(respBody, &parsed) != nil || !parsed.OK {
+						return errActionFailed
+					}
+					return nil
+				}
 				if len(payload) == 0 {
 					return dispatch(cfg, "pcb.components.list", window, nil, stdout, stderr)
 				}
@@ -223,7 +245,7 @@ so in a single-design project you can just run 'easyeda pcb new-board'.`,
 			},
 		}
 		c.Flags().StringVar(&layer, "layer", "", "filter by layer (e.g. TOP, BOTTOM)")
-		c.Flags().BoolVar(&includeBBox, "include-bbox", false, "attach each component's rendered extent {minX,minY,maxX,maxY}")
+		c.Flags().BoolVar(&includeBBox, "include-bbox", false, "attach each component's rendered extent {minX,minY,maxX,maxY} + center {x,y} (bbox geometric center, CLI-computed)")
 		c.Flags().BoolVar(&includePads, "include-pads", false, "attach each component's pads (net-by-name surface)")
 		pcb.AddCommand(c)
 	}
@@ -450,54 +472,91 @@ schematic is active, so you pass them). Workflow:
 	// pcb.component.modify
 	{
 		var id, patchJSON string
+		var center bool
+		var centerX, centerY float64
 		c := &cobra.Command{
 			Use:   "modify",
 			Short: "Lay out a PCB component: move/rotate/flip layer/lock/designator",
-			Args:  cobra.NoArgs,
-			Example: `  easyeda pcb modify --id <pid> --patch '{"x":1000,"y":2000}'
-  easyeda pcb modify --id <pid> --patch '{"rotation":90,"layer":"BOTTOM"}'`,
+			Long: `Patch one placed component. The patch's x/y are the component ANCHOR (footprint
+origin) — usually NOT the bbox center, and the offset rotates with the part.
+
+--center flips the write to CENTER semantics: --x/--y are the DESIRED BBOX
+CENTER; the CLI reads the live rendered bbox (rotation already baked in),
+converts to anchor coordinates, and dispatches the anchor patch. Exact by
+construction — moving never changes the anchor-to-center offset. Because
+ROTATING does change it, --center refuses a patch that also sets rotation:
+rotate first ('--patch {"rotation":…}'), then --center in a second call.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda pcb modify --id <pid> --patch '{"x":1000,"y":2000}'   # x/y = ANCHOR
+  easyeda pcb modify --id <pid> --patch '{"rotation":90,"layer":"BOTTOM"}'
+  easyeda pcb modify --id <pid> --center --x 1500 --y 2200      # x/y = desired bbox CENTER`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if id == "" {
 					return fmt.Errorf("--id is required")
 				}
-				if patchJSON == "" {
-					return fmt.Errorf("--patch is required")
+				if patchJSON == "" && !center {
+					return fmt.Errorf("--patch is required (or --center --x --y)")
 				}
-				var patch map[string]any
-				if err := json.Unmarshal([]byte(patchJSON), &patch); err != nil {
-					return fmt.Errorf("invalid --patch json (expected object): %w", err)
+				patch := map[string]any{}
+				if patchJSON != "" {
+					if err := json.Unmarshal([]byte(patchJSON), &patch); err != nil {
+						return fmt.Errorf("invalid --patch json (expected object): %w", err)
+					}
+				}
+				if center {
+					if !cmd.Flags().Changed("x") || !cmd.Flags().Changed("y") {
+						return fmt.Errorf("--center requires --x and --y (desired bbox center, mil)")
+					}
+					if _, ok := patch["x"]; ok {
+						return fmt.Errorf("--center conflicts with \"x\" in --patch (pick anchor OR center semantics)")
+					}
+					if _, ok := patch["y"]; ok {
+						return fmt.Errorf("--center conflicts with \"y\" in --patch (pick anchor OR center semantics)")
+					}
+					if _, ok := patch["rotation"]; ok {
+						return fmt.Errorf("--center and a rotation change are mutually exclusive (rotating changes the anchor-to-bbox-center offset the conversion reads) — rotate first with --patch '{\"rotation\":…}', then run --center in a second call")
+					}
+					ax, ay, err := resolveAnchorForCenter(cfg, window, id, centerX, centerY)
+					if err != nil {
+						return err
+					}
+					patch["x"], patch["y"] = ax, ay
 				}
 				return dispatch(cfg, "pcb.component.modify", window,
 					map[string]any{"primitiveId": id, "patch": patch}, stdout, stderr)
 			},
 		}
 		c.Flags().StringVar(&id, "id", "", "component primitiveId (required)")
-		c.Flags().StringVar(&patchJSON, "patch", "", "JSON patch object (required), e.g. '{\"x\":1000,\"y\":2000}'")
+		c.Flags().StringVar(&patchJSON, "patch", "", "JSON patch object, e.g. '{\"x\":1000,\"y\":2000}' (x/y = anchor)")
+		c.Flags().BoolVar(&center, "center", false, "interpret --x/--y as the desired BBOX CENTER (converted to anchor via the live bbox)")
+		c.Flags().Float64Var(&centerX, "x", 0, "desired bbox-center x (mil; with --center)")
+		c.Flags().Float64Var(&centerY, "y", 0, "desired bbox-center y (mil; with --center)")
 		pcb.AddCommand(c)
 	}
 
 	// ── delete ────────────────────────────────────────────────────────────
 	// pcb.component.delete
 	{
-		var idsJSON string
+		var idsRaw string
 		c := &cobra.Command{
-			Use:     "delete",
-			Short:   "Delete PCB component primitives by id",
-			Args:    cobra.NoArgs,
-			Example: `  easyeda pcb delete --ids '["id1","id2"]'`,
+			Use:   "delete",
+			Short: "Delete PCB component primitives by id",
+			Args:  cobra.NoArgs,
+			Example: `  easyeda pcb delete --ids '["id1","id2"]'
+  easyeda pcb delete --ids id1,id2          # CSV works too`,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				if idsJSON == "" {
+				if idsRaw == "" {
 					return fmt.Errorf("--ids is required")
 				}
-				var ids []any
-				if err := json.Unmarshal([]byte(idsJSON), &ids); err != nil {
-					return fmt.Errorf("invalid --ids json (expected array): %w", err)
+				ids, err := parseIDList(idsRaw)
+				if err != nil {
+					return err
 				}
 				return dispatch(cfg, "pcb.component.delete", window,
 					map[string]any{"primitiveIds": ids}, stdout, stderr)
 			},
 		}
-		c.Flags().StringVar(&idsJSON, "ids", "", `JSON array of primitive IDs to delete (required)`)
+		c.Flags().StringVar(&idsRaw, "ids", "", `primitive IDs to delete — CSV (id1,id2) or JSON array '["id1","id2"]' (required)`)
 		pcb.AddCommand(c)
 	}
 
