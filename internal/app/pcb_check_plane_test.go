@@ -61,8 +61,11 @@ func TestFindViaCrossesPlane(t *testing.T) {
 }
 
 func TestFindViaCrossesPlaneNetlessPlane(t *testing.T) {
-	// A PLANE layer with no net-bound pour: net unknown → one WARN about the
+	// A PLANE layer with no net-bound pour: net unknown → one INFO about the
 	// plane itself, and NO per-via findings (we can't tell foreign from own).
+	// INFO, not WARN (#110): after `doc reload` PLANE-layer pours are invisible
+	// to pcb.pour.list, so this state is usually a reload artifact, not a defect
+	// — it must not gate --strict, and the message must defer to native DRC.
 	planes := []pcbPlaneLayer{{Layer: 15, Name: "Inner1"}}
 	vias := []pcbViaP{{ID: "v1", Net: "+5V"}, {ID: "v2", Net: "GND"}}
 	got := findViaCrossesPlane(vias, planes)
@@ -70,11 +73,14 @@ func TestFindViaCrossesPlaneNetlessPlane(t *testing.T) {
 		t.Fatalf("got %d findings, want 1: %+v", len(got), got)
 	}
 	f := got[0]
-	if f.Type != "via-crosses-plane" || f.Level != "WARN" || f.Layer != 15 {
-		t.Errorf("bad finding: %+v", f)
+	if f.Type != "via-crosses-plane" || f.Level != "INFO" || f.Layer != 15 {
+		t.Errorf("bad finding (want Level=INFO per #110): %+v", f)
 	}
 	if !strings.Contains(f.Message, "no net-bound pour") {
 		t.Errorf("message should explain the unknown plane net: %q", f.Message)
+	}
+	if !strings.Contains(f.Message, "doc reload") || !strings.Contains(f.Message, "pcb drc") {
+		t.Errorf("message must carry the #110 reload caveat + native-DRC arbiter guidance: %q", f.Message)
 	}
 }
 

@@ -27,7 +27,7 @@
 
 | 来源 | 字段 | 用途 |
 |---|---|---|
-| `pcb.components.list` | `primitiveId, designator, layer, x, y, rotation, bbox, pads` | 位置/尺寸/层/朝向；`pads` 含**每 pad 的 net 与相对偏移、pad 序号** |
+| `pcb.components.list` | `primitiveId, designator, layer, x, y, rotation, bbox, pads` | 位置/尺寸/层/朝向；`pads` 含**每 pad 的 net 与相对偏移、pad 序号**。⚠️ `x/y` = **锚点**（footprint 原点），常非 bbox 中心且偏移随旋转变化（#105）——规划一律用 `pcb list --include-bbox` 返回的 `center`（bbox 几何中心），写入用 `pcb modify --center` 或自行换算 |
 | `pcb.layers.list` | `copperLayerCount, currentLayer, layers[]` | **判定叠层**（2 层 vs 4+ 层）——去耦/平面规则的开关 |
 | `pcb.nets.list` | `net, length, color` | net 全集；配合 pad→net 做分类 |
 

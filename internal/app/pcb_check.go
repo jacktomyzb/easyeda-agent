@@ -1068,7 +1068,8 @@ func findNetlessPours(pours []pcbPourP) []pcbCheckFinding {
 // flagged too — cross-check with `pcb drc`, only vias that also show Plane Zone
 // errors are actually broken; blind/buried vias that don't reach the plane are
 // indistinguishable from through vias (all flagged); a PLANE layer with no
-// net-bound pour has an unknown net and gets its own WARN instead of via checks.
+// net-bound pour has an unknown net and gets its own INFO instead of via checks
+// (INFO, not WARN — see the #110 note in findViaCrossesPlane).
 
 // pcbPlaneLayer is one inner copper layer of type PLANE (内电层), plus the
 // net(s) bound to it via its pour(s).
@@ -1104,9 +1105,20 @@ func findViaCrossesPlane(vias []pcbViaP, planes []pcbPlaneLayer) []pcbCheckFindi
 			name = fmt.Sprintf("layer %d", pl.Layer)
 		}
 		if len(pl.Nets) == 0 {
+			// #110: INFO, not WARN. After `doc reload`, a pour stored on a PLANE
+			// (内电层) layer is loaded into the negative-plane store, NOT the Pour
+			// primitive store — eda.pcb_PrimitivePour.getAll() (pcb.pour.list)
+			// returns nothing for that layer, and no extension API exposes it
+			// (probed live: getAll(net)/getAll(undefined,layer), PrimitiveFill,
+			// PrimitiveRegion, cross-probe-select by net, physical stacking config
+			// all come back empty; flipping the layer back to SIGNAL + reload makes
+			// the same pours reappear, proving the data is intact but invisible).
+			// So "no net-bound pour" cannot distinguish a genuinely empty plane
+			// from a healthy plane read after reload → downgrade to INFO so
+			// --strict doesn't gate on it, and point at native DRC as the arbiter.
 			out = append(out, pcbCheckFinding{
-				Type: "via-crosses-plane", Level: "WARN", Layer: pl.Layer,
-				Message: fmt.Sprintf("inner PLANE %s has no net-bound pour — plane net unknown; pour the net while the layer is still SIGNAL, then flip to PLANE and pour-rebuild (`pcb power-planes` does this)", name),
+				Type: "via-crosses-plane", Level: "INFO", Layer: pl.Layer,
+				Message: fmt.Sprintf("inner PLANE %s has no net-bound pour visible — plane net unknown; NOTE (#110): after `doc reload` PLANE-layer pours are invisible to pcb.pour.list, so this may be a false positive — treat `pcb drc` Connection=0 as the arbiter before adding any pour; if the plane is genuinely empty, pour the net while the layer is still SIGNAL, then flip to PLANE and pour-rebuild (`pcb power-planes` does this)", name),
 			})
 			continue
 		}
@@ -1679,7 +1691,12 @@ func gatherPcbCheckReport(cfg *appConfig, window string, couplingW float64, stde
 			for _, f := range findViaCrossesPlane(vias, planes) {
 				rep.Findings = append(rep.Findings, f)
 				rep.Summary.ViaCrossesPlane++
-				rep.Summary.Warnings++
+				// #110: the plane-net-unknown finding is INFO (a reload artifact,
+				// not a defect) — it stays in the summary/total but must not trip
+				// --strict, which gates on Summary.Warnings.
+				if f.Level != "INFO" {
+					rep.Summary.Warnings++
+				}
 				rep.Summary.Total++
 			}
 		}
