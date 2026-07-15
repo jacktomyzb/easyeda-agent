@@ -6,6 +6,13 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-16
+
+**「规范进代码」版**:PCB 设计规范从「文档等 AI 自觉去读」变成**机器强制**——26 条
+`pcb check` 规则的报错自带 `[规范 §N]` 章节引用、布完线必须过 `post_route_checked`
+门才能进交付、电源线宽按公制阶梯自动给宽。配套补齐芯片级(ESP32-S3 裸片)选型与电路块,
+并新增 `pcb clear` / `pcb mount-holes` 两条命令。
+
 ### Added
 - **`pcb.page.clear` — 一键整版清空 PCB**(`easyeda pcb clear`),`schematic.page.clear`
   的 PCB 对称版。一次删掉所有板级内容:器件 + 布线(轨/弧/过孔)+ 铺铜/填充 + keep-out/规则区域
@@ -14,6 +21,81 @@ follow [SemVer](https://semver.org/).
   **默认保留锁定图元 + 板框(layer 11)**;`--only components,routing,copper,regions,silk` 收窄、
   `--no-preserve-outline` 连板框删、`--include-locked` 连锁定件删。`--dry-run` 只统计不删。
   复用 `rip_up` 的 copper-only 规则,布线永不误伤丝印/板框。无 undo,确认门控。
+  **内部枚举→删除→再枚举循环到 0**(上限 5 轮,返回 `rounds`)——首轮枚举可能读到 stale
+  引擎态漏项(实测 153 轨清完仍剩 8),循环补清等价于用户手工再跑一遍;dry-run 不循环;
+  撞轮次上限仍有残留则追加 warning 提示 save+reload 再跑,绝不假报干净(#112)。
+- **`easyeda pcb mount-holes` — 四角 M3 安装孔自动放置**(#102):读板框 bbox 四角内缩放孔
+  (`--dia` 默认 126mil=Ø3.2mm / `--inset` 197mil≈5mm / `--corners tl,tr,bl,br` 子集 /
+  `--dry-run`)。孔形态 = layer-12 多边形 fill(与 `pcb slot` 同原语,零新增 action);
+  keep-out = max(孔半径+40, 垫圈118mil),圆-矩形相交逐角查器件 bbox,**冲突警告+跳过,
+  绝不压件**;已有孔报 `exists`(幂等重跑)。
+- **`post_route_checked` 阶段门 —— 「布完必查」机械化**(#97 续):`workflow advance` 在
+  布线后自动跑 `pcb check`,**ERROR + power-not-poured + width-under-spec 三项清零**才放行
+  丝印/交付;其余 WARN 报告不拦。13 个布线类 action 标 `InvalidatesStage` → 改线后门
+  自动重新关上。拒门时逐条打印 blocking finding(自带 `[规范 §N]` 引用)。
+- **`easyeda pcb modify --center`**(#105):`--x/--y` 解释为**期望的 bbox 中心**而非器件
+  锚点(锚点常偏中心,实测 ESP32 模组偏 135mil,旋转件更甚);`pcb list --include-bbox`
+  输出注入 `center` 字段。默认语义不变。
+- **`pcb fill create --at x,y --size w,h`** 别名(#109):消除 `--rect` = 两角点的歧义。
+- **audit 客户端归因 + 并发写 advisory**(#108):Request 带 `clientId`
+  (`<hostname>:<pid>[:EASYEDA_CLIENT_LABEL]`),audit JSONL 每行可归因;不同会话 10 分钟内
+  写同一板 → 响应附 `concurrentWriter` 警告(不阻断,CLI 打 stderr)。
+- **`staleRisk` advisory —— 铁律 5 机械化**:PCB mutation 后未 `doc reload` 就读/DRC →
+  daemon 在响应附警告(CLI stderr),`pour-rebuild`/reload 后自动解除。
+- **芯片级(ESP32-S3 裸片)物料链**:`standard-parts.json` 补 6 类选型(#106,S3R8 裸片
+  C2913194 内封 8MB PSRAM / W25Q64 / APS6404L / 40MHz 晶振 / 2.4G 陶瓷天线 / π 匹配);
+  电路块库新增 2 个 draft 块 `block.esp32s3r8_chip_minsys` + `block.ant_2g4_ceramic_pi`
+  (共 23 块:20 ready / 3 draft)。
+- **`pcb.components.list --include-pads` 返回焊盘真实铜皮 `width`/`height`**、
+  **`pcb.silk.list` 返回 `fontSize`**(0.12.1 起):clearance/DFM/避障从名义常量升级实测值。
+- **PCB 设计规范手册**(`skills/easyeda-agent/references/pcb-design-rules.md`):13 章,
+  JLC 工艺 + IPC-2221;`pcb check` 报错的 `[规范 §N]` 即指向此手册章节。
+- **`sch bridge-check` 规则类型化**:`wire-bridge`(ERROR)/`orphan-stub`(WARN),
+  JSON 可按类型 gate,对齐 `pcb check` 强制力。
+
+### Changed
+- **`pcb check` 新增 5 条 DFM 规则**(共 26 条),全部自带 `[规范 §N]` 引用:
+  `silk-over-pad`(§11.2 丝印压焊盘)、`decap-too-far`(§3.1 去耦电容离 IC >2.5mm)、
+  `via-in-pad`(§2.3 同网过孔打在焊盘上)、`copper-near-edge`(§5.1 铜距板边)、
+  `fiducial-missing`(§9 SMT 板缺 Mark 点,INFO)。旧的 11 类规则也补上了章节引用。
+- **net-class 线宽阶梯改公制圆整**(规范 §1.2):电源分档从 mil 碎值(10/15/20mil =
+  0.254/0.381/0.508mm)改为公制推荐值 **branch 0.25mm / trunk 0.4mm / high-current 0.5mm**
+  (9.84/15.75/19.69mil);signal 仍取板的 live 规则值。存量按旧阶梯布的板零追溯告警。
+- **`easyeda pcb power-pour`**:2 层板电源自动铺铜(`power-planes` 的 2 层版)——GND 全板
+  pour + 各电源轨局部**动态 pour**(非 static fill,防异网短路)。
+- **删除类命令统一收 CSV 与 JSON 数组**(#109):`pcb delete` / `pour-delete` /
+  `region delete` / `fill delete` / `track-delete` / `via-delete` —— `pcb drc --json`
+  的 `objs` 数组现在可直接粘贴。
+
+### Fixed
+- **clearance 判据改铜皮边缘距**:track↔pad / via↔pad 原按径向 max(w,h)/2 判(USB-C 长条
+  焊盘旁的合法走线被误报 21 条);track↔via / track↔track 原按**中心线**距判并打印,导致
+  「runs 16.9mil — under the 6mil rule」自相矛盾文案,且**两条 10mil 线中心距 8mil(铜皮
+  已重叠)竟放行 = 漏报短路**。现全部按真实矩形/半宽算边缘距。
+- **route-short detour 段 fine-pitch 收窄改子段级**(#107):原为整 hop 级,任一端点落在
+  密脚场就把整条多层绕行(含对侧层电源 trunk)连坐收窄到 6mil,载流严重不足。
+- **workflow 指纹 reload 后误报 placement drift**(#100):坐标取整放粗到 1mil + 压平
+  -0.0、旋转折进 [0,360)、layer 数字与名称统一映射;顺带修掉 `asString` 读数字 layer 恒
+  空串导致**翻面对指纹不可见**的隐藏 bug。
+- **`place-constrained` 检测不到 slot 挖的 M3 孔**(#104,holes 恒 0 → Tier-1 避让失明):
+  根因是解析 `pcb.fill.list` 的 `points` 字段,而连接器只在 `includeBBox` 里给几何。
+- **`via-crosses-plane` 的「plane 无网」分支降为 INFO**(#110):实证 PLANE 层 pour 在
+  `doc reload` 后被装进负片存储、扩展 API 无任何读取路径(平台行为,非本项目 bug),
+  该分支在 reload 后必然假阳性 → 不再计入 warnings/拦 `--strict`,message 指引以
+  `pcb drc` Connection=0 为准。
+- **`pcb.silk_netnames` 碰撞检测**从硬编码 50×50mil 改真实焊盘 extent。
+- **`--dry-run` 预览不再被当成 mutation**(#112):daemon 侧统一按 payload 的 `dryRun`
+  标志把预览排除出 `Mutates` 判定 —— 之前只跑 `pcb clear --dry-run`(不改板)也会 arm
+  `staleRisk` 并触发 autosave;现在 staleRisk / autosave / concurrentWriter 三处一致。
+- **`workflow advance` 门失败时非零退出**(#113):post_route_checked 拒门(或门跑不起来)
+  时 exit≠0,脚本 `set -e` / CI 循环终于拦得住;与既有「阻塞在人工签核时非零」OR 合并。
+- **门与 `power-planes` 不再自相矛盾**(#114):`power-planes` 判定「内层已被占用 → 该网
+  改走线」(`routeAsTracks`)的电源网记进 workflow state,post_route_checked 门豁免其
+  `power-not-poured`(仍打印并标注 exempt)。此前两个工具互相打架:去铺撞已有平面、
+  不铺过不了门。豁免跟着**布局**失效(placement_confirmed 及更早)而非布线。
+- **`bom export` 定位 `bom-enrich.py`**(#115):六级探测(`--script` → `EASYEDA_SKILLS_DIR`
+  → 已安装 skill 目录(复用 `skill status` 同一份逻辑) → 可执行文件兄弟路径 → cwd → `$PATH`),
+  非仓库 cwd 下不再找不到;找不到时列出**每一条**探测过的路径。
 
 ## [0.12.1] - 2026-07-14
 
