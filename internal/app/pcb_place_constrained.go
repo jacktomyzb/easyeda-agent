@@ -872,34 +872,54 @@ func parseCpComps(result map[string]any) []cpComp {
 }
 
 // readCpHoles reads mounting-hole cutouts (fills on the MULTI layer, id 12 — where
-// `pcb slot` puts board cutouts) and reduces each to a center + radius obstacle.
-// Best-effort: a fill without readable points is skipped.
+// `pcb slot` / `pcb mount-holes` put board cutouts) and reduces each to a center +
+// radius obstacle. Geometry MUST be requested as the rendered bbox (includeBBox,
+// the fetchPcbSlots precedent): pcb.fill.list never returns a polygon "points"
+// field, which is why the old points-parsing version always saw 0 holes (issue
+// #104 — `pcb slot`-milled M3 holes were invisible to Tier-1 avoidance).
 func readCpHoles(cfg *appConfig, window string) []cpHole {
-	res, err := requestAction(cfg, "pcb.fill.list", window, nil)
+	res, err := requestAction(cfg, "pcb.fill.list", window,
+		map[string]any{"layer": 12, "includeBBox": true})
 	if err != nil || res == nil {
 		return nil
 	}
 	fills, _ := res.Result["fills"].([]any)
+	return cpHolesFromFills(fills)
+}
+
+// cpHolesFromFills is the pure parse half of readCpHoles (unit-testable):
+// layer-12 fill entries → center+radius obstacles. Prefers the bbox field
+// (what pcb.fill.list --includeBBox returns); falls back to a raw points array
+// when a caller feeds primitive data directly. Unreadable fills are skipped.
+func cpHolesFromFills(fills []any) []cpHole {
 	var out []cpHole
 	for _, fi := range fills {
 		fm, ok := fi.(map[string]any)
 		if !ok || int(asFloat(fm["layer"])) != 12 {
 			continue
 		}
-		pts, _ := fm["points"].([]any)
-		if len(pts) < 3 {
-			continue
-		}
 		minX, minY := math.Inf(1), math.Inf(1)
 		maxX, maxY := math.Inf(-1), math.Inf(-1)
-		for _, pi := range pts {
-			p, ok := pi.([]any)
-			if !ok || len(p) < 2 {
-				continue
+		if bb, ok := fm["bbox"].(map[string]any); ok {
+			x0, ok1 := asFloatOK(bb["minX"])
+			y0, ok2 := asFloatOK(bb["minY"])
+			x1, ok3 := asFloatOK(bb["maxX"])
+			y1, ok4 := asFloatOK(bb["maxY"])
+			if ok1 && ok2 && ok3 && ok4 {
+				minX, minY, maxX, maxY = x0, y0, x1, y1
 			}
-			x, y := asFloat(p[0]), asFloat(p[1])
-			minX, minY = math.Min(minX, x), math.Min(minY, y)
-			maxX, maxY = math.Max(maxX, x), math.Max(maxY, y)
+		}
+		if math.IsInf(minX, 1) { // no bbox → raw points fallback (debug/exec paths)
+			pts, _ := fm["points"].([]any)
+			for _, pi := range pts {
+				p, ok := pi.([]any)
+				if !ok || len(p) < 2 {
+					continue
+				}
+				x, y := asFloat(p[0]), asFloat(p[1])
+				minX, minY = math.Min(minX, x), math.Min(minY, y)
+				maxX, maxY = math.Max(maxX, x), math.Max(maxY, y)
+			}
 		}
 		if math.IsInf(minX, 1) {
 			continue

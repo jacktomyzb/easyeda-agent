@@ -2671,6 +2671,50 @@ x0,y0,x1,y1, or --ref <designator> (+ --margin to expand). Inspect / remove with
 		pcb.AddCommand(c)
 	}
 
+	// ── mount-holes (M3 安装孔按板框角自动放置) ─────────────────────────────
+	// Issue #102: corner mounting holes used to be hand-placed at guessed coords
+	// and landed on parts. This reads the REAL outline + component bboxes and
+	// refuses a conflicting corner instead. Core in pcb_place_constrained_mountholes.go.
+	{
+		var dia, inset, clearance float64
+		var corners string
+		var dryRun bool
+		c := &cobra.Command{
+			Use:   "mount-holes",
+			Short: "Place M3 mounting holes at the board-outline corners (collision-checked cutouts)",
+			Long: `Place mounting holes at the board-outline corners — the "四角 M3 孔" requirement,
+automated (issue #102). Reads the real board outline (pcb.outline.get — errors if
+none is set; run 'pcb outline-fit' first), computes each requested corner center
+at --inset from both edges, and mills a near-circular cutout there: a MULTI-layer
+(12) fill, the same primitive 'pcb slot' creates (manufacturing emits a
+BoardCutout), so 'pcb place-constrained' avoids it as a Tier-1 obstacle and
+'pcb check' keeps copper off the milled edge.
+
+Safety: each corner is checked against every component's rendered bbox using the
+fastener keep-out radius max(hole R + 40mil, M3 washer/head R 118mil) — a
+conflicting corner is WARNED and SKIPPED, never force-placed on a part
+(--clearance overrides the keep-out radius for a smaller fastener head you
+knowingly accept). A corner that already has a cutout is reported as "exists"
+(idempotent rerun). Defaults: Ø3.2mm M3 clearance hole (126mil), center ~5mm
+(197mil) from each edge.
+
+Inspect / remove with 'pcb fill list --layer 12' / 'pcb fill delete'; save after.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda pcb mount-holes --dry-run          # plan only
+  easyeda pcb mount-holes                    # 4 corners, M3 defaults
+  easyeda pcb mount-holes --corners tl,tr --dia 126 --inset 250`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runPcbMountHoles(cfg, window, dia, inset, clearance, corners, dryRun, stdout, stderr)
+			},
+		}
+		c.Flags().Float64Var(&dia, "dia", mhDefaultDiaMil, "hole diameter in mil (default 126 = M3 clearance Ø3.2mm)")
+		c.Flags().Float64Var(&inset, "inset", mhDefaultInsetMil, "hole-center inset from each board edge in mil (default 197 ≈ 5mm)")
+		c.Flags().Float64Var(&clearance, "clearance", 0, "override the fastener keep-out radius in mil (0 = auto: max(hole R+40, washer 118))")
+		c.Flags().StringVar(&corners, "corners", "tl,tr,bl,br", "comma-separated corner subset: tl,tr,bl,br")
+		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the per-corner plan without milling anything")
+		pcb.AddCommand(c)
+	}
+
 	// ── layout-lint (布局质量 + 可布性预测) ──────────────────────────────────
 	// PCB sibling of `sch layout-lint`: overlap / off-board / tight-spacing PLUS a
 	// routability score from the ratsnest (signal-net MST length + cross-net
