@@ -27,9 +27,12 @@ func TestRouteWithAvoid_PicksClearOrientation(t *testing.T) {
 	opt := defaultRtOptions()
 	opt.corner = "90"
 
-	got := routeWithAvoid("S", a, b, 10, opt, placed, nil, nil)
+	got, ok := routeWithAvoid("S", a, b, 10, opt, placed, nil, nil)
 	if len(got) == 0 {
 		t.Fatal("no segments returned")
+	}
+	if !ok {
+		t.Error("no other-net pads in play — the hop must be feasible")
 	}
 	// Vertical-first ⇒ the first segment runs from (0,10) straight down to (0,0).
 	first := got[0]
@@ -39,7 +42,7 @@ func TestRouteWithAvoid_PicksClearOrientation(t *testing.T) {
 
 	// With avoidance OFF, it reverts to the naive horizontal-first L (corner at 10,10).
 	opt.avoid = false
-	naive := routeWithAvoid("S", a, b, 10, opt, placed, nil, nil)
+	naive, _ := routeWithAvoid("S", a, b, 10, opt, placed, nil, nil)
 	if naive[0].X2 != 10 || naive[0].Y2 != 10 {
 		t.Errorf("no-avoid should be horizontal-first (corner 10,10), got corner (%.0f,%.0f)", naive[0].X2, naive[0].Y2)
 	}

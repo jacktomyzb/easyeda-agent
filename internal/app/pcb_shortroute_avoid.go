@@ -22,13 +22,15 @@ package app
 import "math"
 
 // obPad is a pad as an obstacle: its net (a same-net pad is never an obstacle), center
-// (mil), copper layer, and half-extent. half is the REAL max-extent/2 when the
-// connector reports pad width/height, else 0 → halfOr() falls back to the nominal.
+// (mil), copper layer, and extent. w/h are the REAL copper extents when the connector
+// reports them (0 = unknown → the nominal circle model); half is max(w,h)/2, kept for
+// the radial cost/fine-pitch math that doesn't need the rect.
 type obPad struct {
 	net   string
 	x, y  float64
 	layer int
 	half  float64
+	w, h  float64
 }
 
 // halfOr is the pad's half-extent for clearance math — the real value when known,
@@ -38,6 +40,37 @@ func (p obPad) halfOr() float64 {
 		return p.half
 	}
 	return nominalPadHalf
+}
+
+// hasExtent reports whether the connector gave this pad a real copper rect. Without
+// one (old connector / polygon pad) every model falls back to the nominal circle, so
+// a sizeless board keeps routing exactly as it did before real extents existed.
+func (p obPad) hasExtent() bool { return p.w > 0 && p.h > 0 }
+
+func (p obPad) rect() (float64, float64, float64, float64) {
+	return p.x - p.w/2, p.y - p.h/2, p.x + p.w/2, p.y + p.h/2
+}
+
+// edgeDistSeg is the copper-edge gap between a segment and this pad — the SAME judge
+// `pcb check`'s findClearanceViolations uses: the axis-aligned RECT of the real extent
+// (a radial max(w,h)/2 would false-flag a track running legitimately beside an
+// elongated pad, and would under-model a big square EPAD's corners), falling back to
+// the nominal circle when the extent is unknown.
+func (p obPad) edgeDistSeg(x1, y1, x2, y2 float64) float64 {
+	if p.hasExtent() {
+		minX, minY, maxX, maxY := p.rect()
+		return rectSegDist(minX, minY, maxX, maxY, x1, y1, x2, y2)
+	}
+	return segPointDist(x1, y1, x2, y2, p.x, p.y) - p.halfOr()
+}
+
+// edgeDistPt is edgeDistSeg for a point (a via center) — same rect/circle split.
+func (p obPad) edgeDistPt(x, y float64) float64 {
+	if p.hasExtent() {
+		minX, minY, maxX, maxY := p.rect()
+		return rectPtDist(minX, minY, maxX, maxY, x, y)
+	}
+	return math.Hypot(x-p.x, y-p.y) - p.halfOr()
 }
 
 // obVia is a via as an obstacle. A via is through-hole, so it obstructs every copper
@@ -53,22 +86,95 @@ type obVia struct {
 // input, and a typical 0402/SMD pad is ~15-25mil across.
 const nominalPadHalf = 12
 
-// routeWithAvoid returns the hop's segments in whichever L orientation hits fewer
-// other-net obstacles. With opt.avoid off, or a straight (aligned) hop, it's just
-// the default horizontal-first route.
-func routeWithAvoid(net string, a, b rtPad, w float64, opt rtOptions, placed []rtSeg, obstacles []obPad, vias []obVia) []rtSeg {
-	if !opt.avoid || a.x == b.x || a.y == b.y {
-		return routeHop(net, a, b, w, opt, true)
+// hopFeasible is the HARD clearance gate on other-net pads (#111). hopCost prices a
+// pad strike as mere cost (+4), so when BOTH L orientations hit copper the planner
+// still drew the "cheaper" one — on a QFN-56 that meant a track ploughing through
+// five other-net pads and a via landing on the EPAD. Copper-to-copper under the
+// spacing rule is not a preference, it is a short: a candidate that fails this is
+// unroutable at any cost, and the caller must detour or report it — never draw it.
+//
+// The judge is `pcb check`'s (obPad.edgeDistSeg → rectSegDist over the real extent),
+// so the router can no longer emit what the checker will flag. Layer-aware exactly
+// like the check (an SMD pad only obstructs copper on its own layer); the hop's own
+// endpoint pads are not obstacles.
+//
+// UNNAMED pads are obstacles too — the one place this is deliberately stricter than
+// findClearanceViolations, which skips net:"" pads. Copper is copper regardless of
+// what the netlist calls it: on the #43 board U1.36-41 are unconnected QFN pins with
+// no net and 26×8mil of real copper each, and SPID's MST hop ran straight down the
+// column through all five — which the checker duly reported as five track-over-pad
+// SHORTS (that rule does not skip net:""). A pad the router is free to ignore is a
+// pad it will eventually drive a track through.
+//
+// Other-net VIAS are gated the same way (through-hole → every layer, check's edge
+// formula: centre distance less the via's radius and the track's half-width). They
+// were +4 cost as well, and the planner appends each detour's vias to obVias as it
+// goes — so on ceshi SPIWP drew straight through two vias route-short itself had
+// dropped for SPICLK seconds earlier.
+func hopFeasible(cand []rtSeg, net string, a, b rtPad, obPads []obPad, obVias []obVia, clearance float64) bool {
+	for _, s := range cand {
+		for _, pd := range obPads {
+			if pd.net == net || pd.layer != s.Layer {
+				continue
+			}
+			if samePoint(pd.x, pd.y, a.x, a.y) || samePoint(pd.x, pd.y, b.x, b.y) {
+				continue // this hop's own endpoints
+			}
+			if pd.edgeDistSeg(s.X1, s.Y1, s.X2, s.Y2) < clearance {
+				return false
+			}
+		}
+		for _, vp := range obVias {
+			if vp.net == net {
+				continue // a same-net via is a legal touch (that's what a detour joint IS)
+			}
+			if samePoint(vp.x, vp.y, a.x, a.y) || samePoint(vp.x, vp.y, b.x, b.y) {
+				continue
+			}
+			if segPointDist(s.X1, s.Y1, s.X2, s.Y2, vp.x, vp.y)-vp.r-s.Width/2 < clearance {
+				return false
+			}
+		}
 	}
-	h := routeHop(net, a, b, w, opt, true)  // horizontal-first
-	v := routeHop(net, a, b, w, opt, false) // vertical-first
+	return true
+}
+
+// pickL chooses between the two L orientations: a FEASIBLE candidate always beats an
+// infeasible one (hopFeasible is a gate, not a cost); among equals the cheaper cost
+// wins and ties keep the conventional horizontal-first. ok=false means neither
+// orientation clears the other-net pad field — the returned segments must NOT be
+// drawn, they are only the caller's least-bad candidate for diagnostics.
+func pickL(net string, a, b rtPad, h, v []rtSeg, opt rtOptions, placed []rtSeg, obstacles []obPad, vias []obVia) ([]rtSeg, bool) {
+	hOK := hopFeasible(h, net, a, b, obstacles, vias, opt.clearance)
+	vOK := hopFeasible(v, net, a, b, obstacles, vias, opt.clearance)
 	clr := opt.clearance + nominalPadHalf
 	hc := hopCost(h, net, a, b, placed, obstacles, vias, clr) + hopSlotCost(h, opt.slots, opt.clearance)
 	vc := hopCost(v, net, a, b, placed, obstacles, vias, clr) + hopSlotCost(v, opt.slots, opt.clearance)
-	if vc < hc {
-		return v
+	if (vOK && !hOK) || (vOK == hOK && vc < hc) {
+		return v, vOK
 	}
-	return h // ties keep the conventional horizontal-first
+	return h, hOK
+}
+
+// routeWithAvoid returns the hop's segments in whichever L orientation hits fewer
+// other-net obstacles, plus whether that route is clearance-FEASIBLE at all (#111 —
+// ok=false ⇒ the caller detours or reports; drawing it would short). With opt.avoid
+// off it's the v1 naive horizontal-first route, ungated (an explicit opt-out).
+func routeWithAvoid(net string, a, b rtPad, w float64, opt rtOptions, placed []rtSeg, obstacles []obPad, vias []obVia) ([]rtSeg, bool) {
+	if !opt.avoid {
+		return routeHop(net, a, b, w, opt, true), true
+	}
+	// A straight (aligned) hop has no orientation to choose — but it still has to
+	// clear the pad field: an aligned pad row is exactly how SPID ran down x=793
+	// through five of U1's pads.
+	if a.x == b.x || a.y == b.y {
+		cand := routeHop(net, a, b, w, opt, true)
+		return cand, hopFeasible(cand, net, a, b, obstacles, vias, opt.clearance)
+	}
+	return pickL(net, a, b,
+		routeHop(net, a, b, w, opt, true),  // horizontal-first
+		routeHop(net, a, b, w, opt, false), // vertical-first
+		opt, placed, obstacles, vias)
 }
 
 // hopSlotCost penalizes a candidate whose copper lands inside a board cutout's
@@ -113,9 +219,10 @@ func hopCost(cand []rtSeg, net string, a, b rtPad, placed []rtSeg, obstacles []o
 			if samePoint(pd.x, pd.y, a.x, a.y) || samePoint(pd.x, pd.y, b.x, b.y) {
 				continue // this hop's own endpoints
 			}
-			// clr bakes in the nominal pad half; swap it for the REAL half-extent
-			// when the connector reported one (identical when unknown).
-			if segPointDist(s.X1, s.Y1, s.X2, s.Y2, pd.x, pd.y) < clr-nominalPadHalf+pd.halfOr() {
+			// clr bakes in the nominal pad half, so clr-nominalPadHalf is the bare
+			// spacing rule to compare the copper-edge gap against (rect model on a
+			// real extent, nominal circle when unknown — same judge as hopFeasible).
+			if pd.edgeDistSeg(s.X1, s.Y1, s.X2, s.Y2) < clr-nominalPadHalf {
 				cost += 4
 			}
 		}
@@ -144,7 +251,7 @@ func viaClearanceCost(v rtVia, obPads []obPad, obVias []obVia, clr, r float64) i
 		if pd.net == v.Net || pd.net == "" {
 			continue
 		}
-		if math.Hypot(v.X-pd.x, v.Y-pd.y) < clr-nominalPadHalf+pd.halfOr()+r {
+		if pd.edgeDistPt(v.X, v.Y)-r < clr-nominalPadHalf {
 			cost += 4
 		}
 	}

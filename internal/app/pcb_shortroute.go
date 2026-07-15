@@ -135,7 +135,7 @@ func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOption
 	for _, c := range comps {
 		for _, pd := range c.pads {
 			net := strings.TrimSpace(pd.net)
-			obPads = append(obPads, obPad{net: net, x: pd.x, y: pd.y, layer: pd.layer, half: math.Max(pd.w, pd.h) / 2})
+			obPads = append(obPads, obPad{net: net, x: pd.x, y: pd.y, layer: pd.layer, half: math.Max(pd.w, pd.h) / 2, w: pd.w, h: pd.h})
 			if net == "" {
 				continue
 			}
@@ -193,28 +193,34 @@ func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOption
 			}
 
 			// Same-layer L candidate (obstacle-aware orientation) + its clearance cost.
+			// singleOK is the HARD gate (#111): false ⇒ every orientation of this L
+			// runs through another net's pad copper, so it is not drawable at all.
 			single := []rtSeg(nil)
+			singleOK := false
 			singleCost := 1 << 30
 			if !mustDetour {
-				single = routeWithAvoid(net, a, b, w, opt, obstacleSegs, obPads, obVias)
-				singleCost = hopCost(single, net, a, b, obstacleSegs, obPads, obVias, clr) + hopSlotCost(single, opt.slots, opt.clearance)
+				single, singleOK = routeWithAvoid(net, a, b, w, opt, obstacleSegs, obPads, obVias)
+				if singleOK {
+					singleCost = hopCost(single, net, a, b, obstacleSegs, obPads, obVias, clr) + hopSlotCost(single, opt.slots, opt.clearance)
+				}
 			}
 
-			// Detour onto the emptier copper layer when the hop needs it, or when the
-			// same-layer L would violate clearance and a bottom-layer trunk is cleaner
-			// (all SMD pads sit on top, so the bottom trunk clears the pad field).
-			if opt.multilayer && (mustDetour || singleCost > 0) {
+			// Detour onto the emptier copper layer when the hop needs it, when the
+			// same-layer L can't clear the pad field at all, or when it would merely
+			// run close and a bottom-layer trunk is cleaner (all SMD pads sit on top,
+			// so the bottom trunk clears the pad field).
+			if opt.multilayer && (mustDetour || !singleOK || singleCost > 0) {
 				// Pass the un-narrowed class width: the detour narrows each
 				// sub-segment independently (#107), so a bottom-layer trunk far
 				// from a fine-pitch field keeps the full net-class width.
-				ml, mv := routeMultilayerHop(net, a, b, classW, opt, obPads, obVias, obstacleSegs)
+				ml, mv, mlOK := routeMultilayerHop(net, a, b, classW, opt, obPads, obVias, obstacleSegs)
 				// The detour's cost includes its own vias landing near other nets —
 				// otherwise it would trade a track-over-pad short for a worse via-over-pad.
 				mlCost := hopCost(ml, net, a, b, obstacleSegs, obPads, obVias, clr) + hopSlotCost(ml, opt.slots, opt.clearance)
 				for _, vv := range mv {
 					mlCost += viaClearanceCost(vv, obPads, obVias, clr, opt.viaDia/2)
 				}
-				if mustDetour || mlCost < singleCost {
+				if mlOK && (mustDetour || !singleOK || mlCost < singleCost) {
 					segs = append(segs, ml...)
 					obstacleSegs = append(obstacleSegs, ml...)
 					vias = append(vias, mv...)
@@ -223,6 +229,13 @@ func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOption
 					}
 					continue
 				}
+			}
+			// Neither a same-layer L nor a detour clears the other-net pads: report
+			// the hop instead of shorting the board (#111). The maze tier / a human
+			// gets a real corridor; route-short's job here is to do no harm.
+			if !singleOK {
+				diags = append(diags, rtNetDiag{net, fmt.Sprintf("%s no clearance-safe path (other-net pad field) — maze tier / manual", hop)})
+				continue
 			}
 			segs = append(segs, single...)
 			obstacleSegs = append(obstacleSegs, single...)
@@ -233,13 +246,17 @@ func planShortRoutes(comps []apComp, alreadyRouted map[string]bool, opt rtOption
 
 // viaSpotClear reports whether a via at (x,y) sits clear of every other-net pad,
 // every via (any net — the drill web), and every other-net segment already down.
+// A via is through-hole, so pads count on EVERY layer. The pad test is the rect
+// model of the real extent (obPad.edgeDistPt — the same judge as `pcb check`'s
+// via↔pad rule): a 60mil EPAD scored as a nominal 12mil circle is how SPIWP's via
+// ended up drilled through U1's thermal pad (#111).
 func viaSpotClear(x, y float64, net string, obPads []obPad, obVias []obVia, segs []rtSeg, opt rtOptions) bool {
 	viaR := opt.viaDia / 2
 	for _, p := range obPads {
 		if p.net == net {
 			continue
 		}
-		if math.Hypot(x-p.x, y-p.y) < opt.clearance+viaR+p.halfOr() {
+		if p.edgeDistPt(x, y)-viaR < opt.clearance {
 			return false
 		}
 	}
@@ -265,18 +282,28 @@ func viaSpotClear(x, y float64, net string, obPads []obPad, obVias []obVia, segs
 }
 
 // findViaSpot picks a clearance-clean via position near (px,py), searching a ring
-// of candidates at growing offsets. Falls back to the fixed stub offset toward
-// (tx,ty) when nothing is clean (the caller's cost model then judges it).
-func findViaSpot(px, py, tx, ty float64, net string, opt rtOptions, obPads []obPad, obVias []obVia, segs []rtSeg) (float64, float64) {
+// of candidates at growing offsets, preferring the ones toward (tx,ty). ok=false
+// when NO candidate is clean — the hop then has no drillable layer change and the
+// caller must give it up. (It used to fall back to a fixed stub offset and let the
+// cost model "judge" it, which is how a via got drilled into an EPAD: a cost is not
+// a veto — #111.)
+func findViaSpot(px, py, tx, ty float64, net string, opt rtOptions, obPads []obPad, obVias []obVia, segs []rtSeg) (float64, float64, bool) {
+	// Try the directions pointing at (tx,ty) first, so the layer change happens on
+	// the target's side and the trunk stays short.
+	dirs := append([][2]float64(nil), stitchDirs[:]...)
+	dx, dy := tx-px, ty-py
+	sort.SliceStable(dirs, func(i, j int) bool {
+		return dirs[i][0]*dx+dirs[i][1]*dy > dirs[j][0]*dx+dirs[j][1]*dy
+	})
 	for _, off := range []float64{opt.stub, opt.stub * 2, opt.stub * 3} {
-		for _, d := range stitchDirs {
+		for _, d := range dirs {
 			x, y := px+d[0]*off, py+d[1]*off
 			if viaSpotClear(x, y, net, obPads, obVias, segs, opt) {
-				return x, y
+				return x, y, true
 			}
 		}
 	}
-	return px + sign(tx-px)*opt.stub, py
+	return 0, 0, false
 }
 
 // routeMultilayerHop routes a→b when a single-layer L won't do — either the pads
@@ -291,7 +318,12 @@ func findViaSpot(px, py, tx, ty float64, net string, opt rtOptions, obPads []obP
 // power-trunk width instead of inheriting a narrow-down forced by a far-away
 // endpoint — and a stub that terminates between 20mil-pitch pads still narrows
 // exactly like a single-layer hop would.
-func routeMultilayerHop(net string, a, b rtPad, classW float64, opt rtOptions, obPads []obPad, obVias []obVia, obstacleSegs []rtSeg) ([]rtSeg, []rtVia) {
+//
+// The bool is the HARD clearance verdict (#111): false ⇒ some piece of this detour
+// (a stub, the trunk, or a via with nowhere clean to land) would sit inside another
+// net's pad copper. The segments are then NOT drawable — the caller must report the
+// hop, not weigh it against a cost.
+func routeMultilayerHop(net string, a, b rtPad, classW float64, opt rtOptions, obPads []obPad, obVias []obVia, obstacleSegs []rtSeg) ([]rtSeg, []rtVia, bool) {
 	fp := func(x1, y1, x2, y2 float64) float64 {
 		return applyFinePitch(classW, net, opt, obPads, [2]float64{x1, y1}, [2]float64{x2, y2})
 	}
@@ -300,46 +332,54 @@ func routeMultilayerHop(net string, a, b rtPad, classW float64, opt rtOptions, o
 		// A through-hole pad (multi-layer, id outside 1/2) reaches every copper
 		// layer by itself — route the whole L on the SMD side's layer, no via.
 		if isTH(a.layer) && !isTH(b.layer) {
-			return lShape90(net, rtPad{x: a.x, y: a.y, layer: b.layer}, b, fp(a.x, a.y, b.x, b.y), true), nil
+			s, ok := bestL(net, rtPad{x: a.x, y: a.y, layer: b.layer}, b, fp(a.x, a.y, b.x, b.y), opt, obstacleSegs, obPads, obVias)
+			return s, nil, ok
 		}
 		if isTH(b.layer) && !isTH(a.layer) {
-			return lShape90(net, a, rtPad{x: b.x, y: b.y, layer: a.layer}, fp(a.x, a.y, b.x, b.y), true), nil
+			s, ok := bestL(net, a, rtPad{x: b.x, y: b.y, layer: a.layer}, fp(a.x, a.y, b.x, b.y), opt, obstacleSegs, obPads, obVias)
+			return s, nil, ok
 		}
 		if isTH(a.layer) && isTH(b.layer) {
-			return lShape90(net, rtPad{x: a.x, y: a.y, layer: 1}, rtPad{x: b.x, y: b.y, layer: 1}, fp(a.x, a.y, b.x, b.y), true), nil
+			s, ok := bestL(net, rtPad{x: a.x, y: a.y, layer: 1}, rtPad{x: b.x, y: b.y, layer: 1}, fp(a.x, a.y, b.x, b.y), opt, obstacleSegs, obPads, obVias)
+			return s, nil, ok
 		}
 		// True SMD top↔bottom: L on a.layer to a clear via, then b.layer to b.
-		vx, vy := findViaSpot(b.x, a.y, a.x, a.y, net, opt, obPads, obVias, obstacleSegs)
-		segs := bestL(net, a, rtPad{x: vx, y: vy, layer: a.layer}, fp(a.x, a.y, vx, vy), opt, obstacleSegs, obPads, obVias)
-		segs = append(segs, bestL(net, rtPad{x: vx, y: vy, layer: b.layer}, b, fp(vx, vy, b.x, b.y), opt, obstacleSegs, obPads, obVias)...)
-		return segs, []rtVia{{net, vx, vy}}
+		vx, vy, ok := findViaSpot(b.x, a.y, a.x, a.y, net, opt, obPads, obVias, obstacleSegs)
+		if !ok {
+			return nil, nil, false // no clean spot to change layer on
+		}
+		segs, ok1 := bestL(net, a, rtPad{x: vx, y: vy, layer: a.layer}, fp(a.x, a.y, vx, vy), opt, obstacleSegs, obPads, obVias)
+		tail, ok2 := bestL(net, rtPad{x: vx, y: vy, layer: b.layer}, b, fp(vx, vy, b.x, b.y), opt, obstacleSegs, obPads, obVias)
+		return append(segs, tail...), []rtVia{{net, vx, vy}}, ok1 && ok2
 	}
 
 	other := 2
 	if a.layer == 2 {
 		other = 1
 	}
-	v1x, v1y := findViaSpot(a.x, a.y, b.x, b.y, net, opt, obPads, obVias, obstacleSegs)
-	v2x, v2y := findViaSpot(b.x, b.y, a.x, a.y, net, opt, obPads, obVias, obstacleSegs)
-	segs := bestL(net, a, rtPad{x: v1x, y: v1y, layer: a.layer}, fp(a.x, a.y, v1x, v1y), opt, obstacleSegs, obPads, obVias) // pad-side stub (a.layer)
-	segs = append(segs, bestL(net, rtPad{x: v1x, y: v1y, layer: other}, rtPad{x: v2x, y: v2y, layer: other}, fp(v1x, v1y, v2x, v2y), opt, obstacleSegs, obPads, obVias)...) // trunk
-	segs = append(segs, bestL(net, rtPad{x: v2x, y: v2y, layer: b.layer}, b, fp(v2x, v2y, b.x, b.y), opt, obstacleSegs, obPads, obVias)...) // stub into b
-	return segs, []rtVia{{net, v1x, v1y}, {net, v2x, v2y}}
+	v1x, v1y, ok1 := findViaSpot(a.x, a.y, b.x, b.y, net, opt, obPads, obVias, obstacleSegs)
+	v2x, v2y, ok2 := findViaSpot(b.x, b.y, a.x, a.y, net, opt, obPads, obVias, obstacleSegs)
+	if !ok1 || !ok2 {
+		return nil, nil, false
+	}
+	stubA, okA := bestL(net, a, rtPad{x: v1x, y: v1y, layer: a.layer}, fp(a.x, a.y, v1x, v1y), opt, obstacleSegs, obPads, obVias)                                 // pad-side stub (a.layer)
+	trunk, okT := bestL(net, rtPad{x: v1x, y: v1y, layer: other}, rtPad{x: v2x, y: v2y, layer: other}, fp(v1x, v1y, v2x, v2y), opt, obstacleSegs, obPads, obVias) // trunk
+	stubB, okB := bestL(net, rtPad{x: v2x, y: v2y, layer: b.layer}, b, fp(v2x, v2y, b.x, b.y), opt, obstacleSegs, obPads, obVias)                                 // stub into b
+	segs := append(stubA, trunk...)
+	segs = append(segs, stubB...)
+	return segs, []rtVia{{net, v1x, v1y}, {net, v2x, v2y}}, okA && okT && okB
 }
 
-// bestL picks the cheaper L orientation between two points on the FROM point's
-// layer — the multilayer hop's sub-segments get the same obstacle-aware
-// orientation choice a plain hop gets, instead of a hardcoded corner.
-func bestL(net string, from, to rtPad, w float64, opt rtOptions, obstacleSegs []rtSeg, obPads []obPad, obVias []obVia) []rtSeg {
-	h := lShape90(net, from, to, w, true)
-	v := lShape90(net, from, to, w, false)
-	clr := opt.clearance + nominalPadHalf
-	hc := hopCost(h, net, from, to, obstacleSegs, obPads, obVias, clr) + hopSlotCost(h, opt.slots, opt.clearance)
-	vc := hopCost(v, net, from, to, obstacleSegs, obPads, obVias, clr) + hopSlotCost(v, opt.slots, opt.clearance)
-	if vc < hc {
-		return v
-	}
-	return h
+// bestL picks the cheaper *feasible* L orientation between two points on the FROM
+// point's layer — the multilayer hop's sub-segments get the same obstacle-aware
+// orientation choice (and the same hard other-net-pad gate, #111) a plain hop gets,
+// instead of a hardcoded corner. ok=false ⇒ neither orientation clears the pad
+// field; the segments are the least-bad candidate, not something to draw.
+func bestL(net string, from, to rtPad, w float64, opt rtOptions, obstacleSegs []rtSeg, obPads []obPad, obVias []obVia) ([]rtSeg, bool) {
+	return pickL(net, from, to,
+		lShape90(net, from, to, w, true),
+		lShape90(net, from, to, w, false),
+		opt, obstacleSegs, obPads, obVias)
 }
 
 // routeHop connects a→b in the requested corner style, all on a.layer at width w.
