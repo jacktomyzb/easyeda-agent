@@ -1088,30 +1088,36 @@ pours reflow under the new clearance.`,
 			use: "via-delete", kind: "via",
 			short: "Delete specific vias by primitiveId (rip-up is net-scoped; this is surgical)",
 			example: `  easyeda pcb via-delete --ids 184fd1d7742ac942
-  easyeda pcb via-delete --ids id1,id2      # ids from 'pcb via-list' or 'pcb drc --json' objs`,
+  easyeda pcb via-delete --ids id1,id2      # ids from 'pcb via-list' or 'pcb drc --json' objs
+  easyeda pcb via-delete --ids '["id1","id2"]'   # JSON array works too`,
 		},
 		{
 			use: "track-delete", kind: "track",
 			short: "Delete specific copper tracks by primitiveId (rip-up is net-scoped; this is surgical)",
 			example: `  easyeda pcb track-delete --ids 666de996beeb75f4
-  easyeda pcb track-delete --ids id1,id2    # ids from 'pcb track-list' or 'pcb drc --json' objs`,
+  easyeda pcb track-delete --ids id1,id2    # ids from 'pcb track-list' or 'pcb drc --json' objs
+  easyeda pcb track-delete --ids '["id1","id2"]' # JSON array works too`,
 		},
 	} {
-		var ids []string
+		var idsRaw string
 		c := &cobra.Command{
 			Use:     spec.use,
 			Short:   spec.short,
 			Args:    cobra.NoArgs,
 			Example: spec.example,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				if len(ids) == 0 {
+				if idsRaw == "" {
 					return fmt.Errorf("--ids is required (pull fresh ids from 'pcb %s-list', they churn after edits)", spec.kind)
+				}
+				ids, err := parseIDList(idsRaw)
+				if err != nil {
+					return err
 				}
 				payload := map[string]any{"primitiveIds": ids, "kind": spec.kind}
 				return dispatch(cfg, "pcb.route.delete", window, payload, stdout, stderr)
 			},
 		}
-		c.Flags().StringSliceVar(&ids, "ids", nil, "primitiveId(s) to delete; repeat or comma-separate")
+		c.Flags().StringVar(&idsRaw, "ids", "", `primitiveId(s) to delete — CSV (id1,id2) or JSON array '["id1","id2"]'`)
 		pcb.AddCommand(c)
 	}
 
@@ -1328,25 +1334,26 @@ plane. fill = solid (default) | grid | grid45.`,
 		pcb.AddCommand(c)
 	}
 	{
-		var idsJSON string
+		var idsRaw string
 		c := &cobra.Command{
-			Use:     "pour-delete",
-			Short:   "Delete copper pour regions by primitiveId",
-			Args:    cobra.NoArgs,
-			Example: `  easyeda pcb pour-delete --ids '["id1","id2"]'`,
+			Use:   "pour-delete",
+			Short: "Delete copper pour regions by primitiveId",
+			Args:  cobra.NoArgs,
+			Example: `  easyeda pcb pour-delete --ids '["id1","id2"]'
+  easyeda pcb pour-delete --ids id1,id2     # CSV works too`,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				if idsJSON == "" {
+				if idsRaw == "" {
 					return fmt.Errorf("--ids is required")
 				}
-				var ids []any
-				if err := json.Unmarshal([]byte(idsJSON), &ids); err != nil {
-					return fmt.Errorf("invalid --ids json (expected array): %w", err)
+				ids, err := parseIDList(idsRaw)
+				if err != nil {
+					return err
 				}
 				return dispatch(cfg, "pcb.pour.delete", window,
 					map[string]any{"primitiveIds": ids}, stdout, stderr)
 			},
 		}
-		c.Flags().StringVar(&idsJSON, "ids", "", `JSON array of pour primitiveIds to delete (required)`)
+		c.Flags().StringVar(&idsRaw, "ids", "", `pour primitiveIds to delete — CSV (id1,id2) or JSON array '["id1","id2"]' (required)`)
 		pcb.AddCommand(c)
 	}
 	{
@@ -2632,25 +2639,26 @@ no-pours(7), no-inner-electrical(8), follow-rule(9). Default is a hard keep-out
 			region.AddCommand(c)
 		}
 		{
-			var idsJSON string
+			var idsRaw string
 			c := &cobra.Command{
-				Use:     "delete",
-				Short:   "Delete keep-out / rule regions by primitiveId",
-				Args:    cobra.NoArgs,
-				Example: `  easyeda pcb region delete --ids '["id1","id2"]'`,
+				Use:   "delete",
+				Short: "Delete keep-out / rule regions by primitiveId",
+				Args:  cobra.NoArgs,
+				Example: `  easyeda pcb region delete --ids '["id1","id2"]'
+  easyeda pcb region delete --ids id1,id2   # CSV works too`,
 				RunE: func(cmd *cobra.Command, args []string) error {
-					if idsJSON == "" {
+					if idsRaw == "" {
 						return fmt.Errorf("--ids is required")
 					}
-					var ids []any
-					if err := json.Unmarshal([]byte(idsJSON), &ids); err != nil {
-						return fmt.Errorf("invalid --ids json (expected array): %w", err)
+					ids, err := parseIDList(idsRaw)
+					if err != nil {
+						return err
 					}
 					return dispatch(cfg, "pcb.region.delete", window,
 						map[string]any{"primitiveIds": ids}, stdout, stderr)
 				},
 			}
-			c.Flags().StringVar(&idsJSON, "ids", "", `JSON array of region primitiveIds to delete (required)`)
+			c.Flags().StringVar(&idsRaw, "ids", "", `region primitiveIds to delete — CSV (id1,id2) or JSON array '["id1","id2"]' (required)`)
 			region.AddCommand(c)
 		}
 		pcb.AddCommand(region)
@@ -2669,21 +2677,50 @@ net (a 3V3/RF-ground patch, thermal copper, odd-shaped plane). Unlike 'pcb pour'
 carries a net. fillMode: solid (default) | mesh | inner.`,
 		}
 		{
-			var pointsJSON, rectSpec, ref, net, fillMode string
+			var pointsJSON, rectSpec, at, size, ref, net, fillMode string
 			var layer int
 			var width, margin float64
-			var locked bool
+			var locked, forceLarge bool
 			c := &cobra.Command{
 				Use:   "create",
-				Short: "Create a net-bound filled region (area via --points | --rect | --ref)",
+				Short: "Create a net-bound filled region (area via --points | --rect | --at/--size | --ref)",
 				Args:  cobra.NoArgs,
 				Example: `  easyeda pcb fill create --points '[[100,100],[400,100],[400,300],[100,300]]' --net 3V3 --layer 1
-  easyeda pcb fill create --rect 2150,-1550,2400,-1400 --net GND --fill-mode mesh
+  easyeda pcb fill create --rect 2150,-1550,2400,-1400 --net GND    # --rect = 两个对角点 x0,y0,x1,y1（不是 x,y,宽,高！）
+  easyeda pcb fill create --at 2150,-1550 --size 250,150 --net GND  # 同一块铜：角点 + 宽高（无歧义写法）
   easyeda pcb fill create --ref U3 --margin 20 --net GND   # copper patch over U3`,
 				RunE: func(cmd *cobra.Command, args []string) error {
-					points, err := areaPointsFrom(cfg, window, pointsJSON, rectSpec, ref, margin)
+					effRect := rectSpec
+					if at != "" || size != "" {
+						if rectSpec != "" {
+							return fmt.Errorf("--at/--size and --rect are mutually exclusive (they describe the same box two ways)")
+						}
+						r, err := atSizeToRectSpec(at, size)
+						if err != nil {
+							return err
+						}
+						effRect = r
+					}
+					points, err := areaPointsFrom(cfg, window, pointsJSON, effRect, ref, margin)
 					if err != nil {
 						return err
+					}
+					// Oversized-fill guard (issue #109): a --rect passed as
+					// x,y,w,h instead of two corners generates a giant fill.
+					if !forceLarge {
+						boardArea, haveBoard := 0.0, false
+						if ores, oerr := requestAction(cfg, "pcb.outline.get", window, nil); oerr == nil && ores != nil {
+							if bb, ok := ores.Result["bbox"].(map[string]any); ok && bb != nil {
+								w := asFloat(bb["maxX"]) - asFloat(bb["minX"])
+								h := asFloat(bb["maxY"]) - asFloat(bb["minY"])
+								if w > 0 && h > 0 {
+									boardArea, haveBoard = w*h, true
+								}
+							}
+						}
+						if err := checkFillAreaGuard(points, boardArea, haveBoard, false); err != nil {
+							return err
+						}
 					}
 					payload := map[string]any{"points": points}
 					if net != "" {
@@ -2704,10 +2741,13 @@ carries a net. fillMode: solid (default) | mesh | inner.`,
 					return dispatch(cfg, "pcb.fill.create", window, payload, stdout, stderr)
 				},
 			}
-			c.Flags().StringVar(&pointsJSON, "points", "", `JSON array of [x,y] points in mil (or use --rect / --ref)`)
-			c.Flags().StringVar(&rectSpec, "rect", "", "axis-aligned rect 'x0,y0,x1,y1' (mil)")
+			c.Flags().StringVar(&pointsJSON, "points", "", `JSON array of [x,y] points in mil (or use --rect / --at+--size / --ref)`)
+			c.Flags().StringVar(&rectSpec, "rect", "", "axis-aligned rect as TWO OPPOSITE CORNERS 'x0,y0,x1,y1' (mil) — NOT x,y,w,h; for width/height use --at + --size")
+			c.Flags().StringVar(&at, "at", "", "rect anchor corner 'x,y' (mil, y-up); pairs with --size — unambiguous alternative to --rect")
+			c.Flags().StringVar(&size, "size", "", "rect size 'w,h' (mil), extends +x/+y from --at")
 			c.Flags().StringVar(&ref, "ref", "", "designator of a placed component — fill over its bbox")
 			c.Flags().Float64Var(&margin, "margin", 0, "expand the --rect/--ref box outward by this many mil")
+			c.Flags().BoolVar(&forceLarge, "force-large", false, "allow a fill larger than 25% of the board bbox (guard catches --rect mistakenly passed as x,y,w,h)")
 			c.Flags().StringVar(&net, "net", "", "net to bind the fill to (e.g. 3V3, GND)")
 			c.Flags().IntVar(&layer, "layer", 1, "layer id (TOP=1, BOTTOM=2; inner via 'easyeda pcb layers')")
 			c.Flags().StringVar(&fillMode, "fill-mode", "", "fill mode: solid (default) | mesh | inner")
@@ -2739,25 +2779,26 @@ carries a net. fillMode: solid (default) | mesh | inner.`,
 			fill.AddCommand(c)
 		}
 		{
-			var idsJSON string
+			var idsRaw string
 			c := &cobra.Command{
-				Use:     "delete",
-				Short:   "Delete net-bound filled regions by primitiveId",
-				Args:    cobra.NoArgs,
-				Example: `  easyeda pcb fill delete --ids '["id1","id2"]'`,
+				Use:   "delete",
+				Short: "Delete net-bound filled regions by primitiveId",
+				Args:  cobra.NoArgs,
+				Example: `  easyeda pcb fill delete --ids '["id1","id2"]'
+  easyeda pcb fill delete --ids id1,id2     # CSV works too`,
 				RunE: func(cmd *cobra.Command, args []string) error {
-					if idsJSON == "" {
+					if idsRaw == "" {
 						return fmt.Errorf("--ids is required")
 					}
-					var ids []any
-					if err := json.Unmarshal([]byte(idsJSON), &ids); err != nil {
-						return fmt.Errorf("invalid --ids json (expected array): %w", err)
+					ids, err := parseIDList(idsRaw)
+					if err != nil {
+						return err
 					}
 					return dispatch(cfg, "pcb.fill.delete", window,
 						map[string]any{"primitiveIds": ids}, stdout, stderr)
 				},
 			}
-			c.Flags().StringVar(&idsJSON, "ids", "", `JSON array of fill primitiveIds to delete (required)`)
+			c.Flags().StringVar(&idsRaw, "ids", "", `fill primitiveIds to delete — CSV (id1,id2) or JSON array '["id1","id2"]' (required)`)
 			fill.AddCommand(c)
 		}
 		pcb.AddCommand(fill)
