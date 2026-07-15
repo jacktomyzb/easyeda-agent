@@ -1,6 +1,9 @@
 package app
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func countType(rep pcbCheckReport, typ string) int {
 	n := 0
@@ -505,5 +508,44 @@ func TestFindClearanceViolations_SlotAndVia(t *testing.T) {
 	nearVia := []pcbViaP{{ID: "v2", Net: "+5V", X: 25, Y: 0, Dia: 24}}
 	if got := countType(pcbCheckReport{Findings: findClearanceViolations(nil, pad, nearVia, nil, 6)}, "clearance"); got != 1 {
 		t.Fatalf("via near other-net pad: clearance = %d, want 1", got)
+	}
+}
+
+// #43 regression: clearance must be judged (and PRINTED) as a COPPER-EDGE gap,
+// not a centerline distance. The old centerline test produced self-contradictory
+// messages ("runs 16.9mil from via — under the 6mil rule") and under-reported
+// track↔track overlap.
+func TestFindClearance_EdgeDistanceSemantics(t *testing.T) {
+	// track↔via: 10mil track, 24mil via (r=12). Centerline 16.9 → edge 16.9-12-5 = -0.1 → violation.
+	tracks := []pcbTrack{{ID: "t1", Net: "A", Layer: 1, X1: 0, Y1: 16.9, X2: 200, Y2: 16.9, Width: 10}}
+	vias := []pcbViaP{{ID: "v1", Net: "B", X: 100, Y: 0, Hole: 12, Dia: 24}}
+	out := findClearanceViolations(tracks, nil, vias, nil, 6)
+	if len(out) != 1 {
+		t.Fatalf("track 16.9mil (centerline) from a 24mil via = edge -0.1mil, want 1 violation, got %d", len(out))
+	}
+	if !strings.Contains(out[0].Message, "0.0mil") {
+		t.Errorf("message must print the EDGE gap (0.0), got: %s", out[0].Message)
+	}
+	// Same via, track pulled far enough that the EDGE gap clears 6mil:
+	// need centerD >= 6 + 12 + 5 = 23.
+	farTracks := []pcbTrack{{ID: "t2", Net: "A", Layer: 1, X1: 0, Y1: 23.5, X2: 200, Y2: 23.5, Width: 10}}
+	if out := findClearanceViolations(farTracks, nil, vias, nil, 6); len(out) != 0 {
+		t.Errorf("edge gap 6.5mil clears the 6mil rule, got %d violation(s): %+v", len(out), out)
+	}
+	// track↔track: two 10mil tracks 8mil apart on centerlines OVERLAP (edge -2).
+	pair := []pcbTrack{
+		{ID: "a", Net: "A", Layer: 1, X1: 0, Y1: 0, X2: 200, Y2: 0, Width: 10},
+		{ID: "b", Net: "B", Layer: 1, X1: 0, Y1: 8, X2: 200, Y2: 8, Width: 10},
+	}
+	if out := findClearanceViolations(pair, nil, nil, nil, 6); len(out) != 1 {
+		t.Fatalf("two 10mil tracks 8mil apart on centerlines overlap — want 1 violation, got %d", len(out))
+	}
+	// Centerline 16.5 → edge 6.5 → clears.
+	okPair := []pcbTrack{
+		{ID: "a", Net: "A", Layer: 1, X1: 0, Y1: 0, X2: 200, Y2: 0, Width: 10},
+		{ID: "b", Net: "B", Layer: 1, X1: 0, Y1: 16.5, X2: 200, Y2: 16.5, Width: 10},
+	}
+	if out := findClearanceViolations(okPair, nil, nil, nil, 6); len(out) != 0 {
+		t.Errorf("edge gap 6.5mil clears, got %d: %+v", len(out), out)
 	}
 }

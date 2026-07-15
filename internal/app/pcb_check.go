@@ -623,14 +623,19 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 			if isEnd(v.X, v.Y, t.X1, t.Y1, t.X2, t.Y2) {
 				continue
 			}
-			d := segPtDist(v.X, v.Y, t.X1, t.Y1, t.X2, t.Y2)
-			if d >= clearance+v.Dia/2 {
+			// EDGE distance (copper-to-copper): center distance minus the via's
+			// outer radius AND the track's half-width. Printing the CENTER
+			// distance made the message self-contradictory ("runs 16.9mil …
+			// under the 6mil rule" — #43 regression); the gap a human/agent
+			// must widen is the edge gap.
+			edgeD := segPtDist(v.X, v.Y, t.X1, t.Y1, t.X2, t.Y2) - v.Dia/2 - t.Width/2
+			if edgeD >= clearance {
 				continue
 			}
 			add(pcbCheckFinding{
 				Type: "clearance", Level: "ERROR", Net: t.Net, Layer: t.Layer,
 				Primitives: []string{t.ID, v.ID}, At: &pcbXY{round2(v.X), round2(v.Y)},
-				Message: fmt.Sprintf("track (net %s) runs %.1fmil from via (net %s) — under the %.0fmil spacing rule", t.Net, d, v.Net, clearance) + docRule("1.1", "最小间距"),
+				Message: fmt.Sprintf("track (net %s) runs %.1fmil from via (net %s) — under the %.0fmil spacing rule", t.Net, math.Max(edgeD, 0), v.Net, clearance) + docRule("1.1", "最小间距"),
 			})
 		}
 	}
@@ -641,12 +646,16 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 			if a.Layer != b.Layer || a.Net == b.Net || strings.TrimSpace(a.Net) == "" || strings.TrimSpace(b.Net) == "" {
 				continue
 			}
-			if d := segSegDist(a.X1, a.Y1, a.X2, a.Y2, b.X1, b.Y1, b.X2, b.Y2); d < clearance && d > pcbOverPadEps {
+			// EDGE gap: centerline distance minus BOTH half-widths. The old
+			// centerline test under-reported (two 10mil tracks 8mil apart on
+			// centerlines already OVERLAP, yet printed "8mil apart") — #43.
+			centerD := segSegDist(a.X1, a.Y1, a.X2, a.Y2, b.X1, b.Y1, b.X2, b.Y2)
+			if edgeD := centerD - a.Width/2 - b.Width/2; edgeD < clearance && centerD > pcbOverPadEps {
 				mx, my := (a.X1+a.X2)/2, (a.Y1+a.Y2)/2
 				add(pcbCheckFinding{
 					Type: "clearance", Level: "ERROR", Nets: uniqStr([]string{a.Net, b.Net}), Layer: a.Layer,
 					Primitives: []string{a.ID, b.ID}, At: &pcbXY{round2(mx), round2(my)},
-					Message: fmt.Sprintf("tracks (net %s / %s) run %.1fmil apart — under the %.0fmil spacing rule", a.Net, b.Net, d, clearance) + docRule("1.1", "最小间距"),
+					Message: fmt.Sprintf("tracks (net %s / %s) run %.1fmil apart — under the %.0fmil spacing rule", a.Net, b.Net, math.Max(edgeD, 0), clearance) + docRule("1.1", "最小间距"),
 				})
 			}
 		}
