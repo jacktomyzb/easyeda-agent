@@ -138,29 +138,48 @@ func workflowNext(st *pcbStageState, f workflowFacts) (next, why string) {
 // stage is confirmed with a CheckGateSummary snapshot; on fail the offending
 // findings (with their 规范 § references) are printed and the stage stays
 // unconfirmed.
+//
+// One documented exemption (issue #114): a power net that `pcb power-planes`
+// itself decided to route as tracks (no inner plane left for it — recorded in
+// State.PowerTracksNets) is NOT counted as blocking. Its power-not-poured
+// finding is still printed, flagged as exempt. Without this the two tools
+// contradict each other and the flow deadlocks.
 func runPostRouteCheckGate(cfg *appConfig, window, project string, st *pcbStageState, f workflowFacts, stdout, stderr io.Writer) error {
 	rep, err := gatherPcbCheckReport(cfg, window, 0, stderr)
 	if err != nil {
 		return fmt.Errorf("post-route check gate: %w", err)
 	}
-	blocking := rep.Summary.Errors + rep.Summary.PowerNotPoured + rep.Summary.WidthUnderSpec
+	pnpBlocking, pnpExempt := splitPowerNotPoured(rep.Findings, st.IsPowerTracksNet)
+	for _, fd := range pnpExempt {
+		fmt.Fprintf(stderr, "   %-5s %-17s %s  (exempt: power-planes routed it as tracks)\n",
+			"INFO", fd.Type, fd.Message)
+	}
+	blocking := rep.Summary.Errors + len(pnpBlocking) + rep.Summary.WidthUnderSpec
 	if blocking > 0 {
 		fmt.Fprintf(stderr, "❌ post-route check gate FAILED — %d blocking finding(s) (ERROR=%d powerNotPoured=%d widthUnderSpec=%d):\n",
-			blocking, rep.Summary.Errors, rep.Summary.PowerNotPoured, rep.Summary.WidthUnderSpec)
+			blocking, rep.Summary.Errors, len(pnpBlocking), rep.Summary.WidthUnderSpec)
 		for _, fd := range rep.Findings {
+			if fd.Type == "power-not-poured" && st.IsPowerTracksNet(fd.Net) {
+				continue // already printed above as exempt
+			}
 			if fd.Level == "ERROR" || fd.Type == "power-not-poured" || fd.Type == "width-under-spec" {
 				fmt.Fprintf(stderr, "   %-5s %-17s %s\n", fd.Level, fd.Type, fd.Message)
 			}
 		}
 		return errActionFailed
 	}
+	// The snapshot records the EFFECTIVE (post-exemption) power-not-poured count —
+	// what the gate actually judged on.
 	st.Check = &pcbCheckGateSummary{
 		Errors: rep.Summary.Errors, Warnings: rep.Summary.Warnings,
-		WidthUnderSpec: rep.Summary.WidthUnderSpec, PowerNotPoured: rep.Summary.PowerNotPoured,
+		WidthUnderSpec: rep.Summary.WidthUnderSpec, PowerNotPoured: len(pnpBlocking),
 		Tracks: f.RoutedLines, At: time.Now().Format(time.RFC3339),
 	}
-	st.Confirm(stagePostRouteChecked, "gate-pass",
-		fmt.Sprintf("pcb check: 0 blocking (warnings=%d, tracks=%d)", rep.Summary.Warnings, f.RoutedLines))
+	note := fmt.Sprintf("pcb check: 0 blocking (warnings=%d, tracks=%d)", rep.Summary.Warnings, f.RoutedLines)
+	if len(pnpExempt) > 0 {
+		note += fmt.Sprintf(", %d power-not-poured exempt (power-planes routed as tracks)", len(pnpExempt))
+	}
+	st.Confirm(stagePostRouteChecked, "gate-pass", note)
 	if err := savePcbStageState(st); err != nil {
 		return fmt.Errorf("persist post_route_checked: %w", err)
 	}
@@ -364,7 +383,12 @@ func newWorkflowAdvanceCmd(cfg *appConfig, window *string, stdout, stderr io.Wri
 
 Human sign-offs (confirm-layout / confirm-outline) are never auto-performed —
 advance exits non-zero when it is blocked on one, so scripted loops stop at
-exactly the points a human must approve.`,
+exactly the points a human must approve.
+
+Exit code: 0 only when the flow is free to continue. Non-zero when it is blocked
+on a human sign-off, when a mechanical gate REJECTS (post-route pcb check found
+blocking findings), or when a gate cannot run — so 'set -e' scripts and CI loops
+stop at every acceptance, not just the human ones.`,
 		Args:    cobra.NoArgs,
 		Example: `  easyeda workflow advance --project ceshi`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -404,10 +428,22 @@ exactly the points a human must approve.`,
 
 			// Mechanical acceptance #2: the post-route check gate (布完必查).
 			// Runs once the board is routed and every earlier stage is in.
+			//
+			// A gate that REJECTS (blocking findings) and a gate that cannot RUN
+			// (connection/report failure) are both hard stops: advance must exit
+			// non-zero or a `set -e` script / CI loop walks straight on with a
+			// sick board — exactly what issue #113 caught. The gate prints its
+			// own diagnosis (findings, or the ❌ below), so the deferred error is
+			// the silent errActionFailed; `next` is still printed first because
+			// the caller needs to know what to fix.
+			gateBlocked := false
 			if st.Has(stagePreRoutePassed) && facts.RoutedLines > 0 && !st.Has(stagePostRouteChecked) {
 				fmt.Fprintf(stderr, "→ running the post-route `pcb check` gate (ERROR / power-not-poured / width-under-spec must be 0)\n")
-				if gerr := runPostRouteCheckGate(cfg, *window, project, st, facts, stdout, stderr); gerr != nil && gerr != errActionFailed {
-					fmt.Fprintf(stderr, "❌ post-route check gate could not run: %v\n", gerr)
+				if gerr := runPostRouteCheckGate(cfg, *window, project, st, facts, stdout, stderr); gerr != nil {
+					gateBlocked = true
+					if gerr != errActionFailed {
+						fmt.Fprintf(stderr, "❌ post-route check gate could not run: %v\n", gerr)
+					}
 				}
 				if reloaded, rerr := loadPcbStageState(project); rerr == nil {
 					st = reloaded
@@ -416,10 +452,7 @@ exactly the points a human must approve.`,
 
 			next, why := workflowNext(st, facts)
 			fmt.Fprintf(stdout, "next: %s\n  (%s)\n", next, why)
-			// Non-zero when blocked on a human sign-off, so scripted advance loops
-			// stop exactly at the approval points.
-			if strings.Contains(next, "confirm-layout") || strings.Contains(next, "confirm-outline") ||
-				strings.Contains(next, "set-assembly") {
+			if workflowAdvanceBlocked(gateBlocked, next) {
 				return errActionFailed
 			}
 			return nil
@@ -428,6 +461,24 @@ exactly the points a human must approve.`,
 	c.Flags().IntVar(&minScore, "min-score", 60, "minimum routability score for the gate")
 	c.Flags().IntVar(&maxCrossings, "max-crossings", 8, "maximum ratline crossings for the gate (-1 = unlimited)")
 	return c
+}
+
+// workflowAdvanceBlocked decides `advance`'s exit code (issue #113): the flow is
+// blocked — so the command must exit NON-ZERO — when either
+//
+//	(a) a mechanical gate rejected or could not run (gateBlocked), or
+//	(b) the next step is a human sign-off advance must never self-approve.
+//
+// Both can hold at once, so this is one OR, not two return paths that could
+// cancel out. Pure, so the contract scripts rely on (`set -e` must stop here) is
+// unit-testable without a live window.
+func workflowAdvanceBlocked(gateBlocked bool, next string) bool {
+	if gateBlocked {
+		return true
+	}
+	return strings.Contains(next, "confirm-layout") ||
+		strings.Contains(next, "confirm-outline") ||
+		strings.Contains(next, "set-assembly")
 }
 
 // ── confirm ─────────────────────────────────────────────────────────────────

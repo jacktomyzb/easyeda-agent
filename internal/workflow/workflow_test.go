@@ -250,3 +250,78 @@ func TestPostRouteCheckedStage(t *testing.T) {
 		t.Fatal("legacy state must not have post_route_checked")
 	}
 }
+
+// TestPowerTracksNetsRoundTrip: power-planes' routeAsTracks verdict must survive
+// a save/load cycle — the gate reads it from disk in a LATER process (issue #114).
+func TestPowerTracksNetsRoundTrip(t *testing.T) {
+	t.Setenv(EnvDir, t.TempDir())
+
+	st, err := Load("proj-pt")
+	if err != nil {
+		t.Fatalf("fresh load: %v", err)
+	}
+	st.SetPowerTracksNets([]string{"VDD_SPI", " 5V ", "VDD_SPI", ""})
+	if got, want := st.PowerTracksNets, []string{"5V", "VDD_SPI"}; len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("SetPowerTracksNets must trim/dedup/sort: got %v, want %v", got, want)
+	}
+	if err := Save(st); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := Load("proj-pt")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !got.IsPowerTracksNet("VDD_SPI") || !got.IsPowerTracksNet("vdd_spi") || !got.IsPowerTracksNet("5V") {
+		t.Fatalf("recorded nets must survive the reload: %v", got.PowerTracksNets)
+	}
+	if got.IsPowerTracksNet("3V3") || got.IsPowerTracksNet("") {
+		t.Fatal("unrecorded nets must not be exempt")
+	}
+
+	// Empty verdict clears the record (a later run that poured everything).
+	got.SetPowerTracksNets(nil)
+	if got.PowerTracksNets != nil {
+		t.Fatalf("empty verdict must clear the record, got %v", got.PowerTracksNets)
+	}
+	if err := Save(got); err != nil {
+		t.Fatalf("save cleared: %v", err)
+	}
+	reloaded, err := Load("proj-pt")
+	if err != nil {
+		t.Fatalf("reload cleared: %v", err)
+	}
+	if reloaded.IsPowerTracksNet("VDD_SPI") {
+		t.Fatal("a cleared record must not resurrect after a reload")
+	}
+}
+
+// TestPowerTracksNetsInvalidationSemantics pins the #114 lifetime decision:
+// the verdict dies with the PLACEMENT, not with the routing.
+func TestPowerTracksNetsInvalidationSemantics(t *testing.T) {
+	cases := []struct {
+		name string
+		from Stage
+		want bool // still recorded afterwards?
+	}{
+		{"routing-class invalidation keeps it", StagePostRouteChecked, true},
+		{"routing_authorized keeps it", StageRoutingAuthorized, true},
+		{"pre_route_passed keeps it", StagePreRoutePassed, true},
+		{"outline change keeps it", StageOutlineConfirmed, true},
+		{"placement_confirmed drops it", StagePlacementConfirmed, false},
+		{"placement_ready drops it", StagePlacementReady, false},
+		{"imported drops it", StageImported, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &State{Project: "p", Confirmed: map[Stage]bool{}}
+			for _, s := range Order {
+				st.Confirm(s, "confirm", "")
+			}
+			st.SetPowerTracksNets([]string{"VDD_SPI"})
+			st.InvalidateFrom(tc.from, "test")
+			if got := st.IsPowerTracksNet("VDD_SPI"); got != tc.want {
+				t.Fatalf("InvalidateFrom(%s): recorded=%v, want %v", tc.from, got, tc.want)
+			}
+		})
+	}
+}

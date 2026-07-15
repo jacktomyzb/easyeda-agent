@@ -248,6 +248,14 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 		fmt.Fprintf(stderr, "power-planes: pour rebuild failed: %v\n", err)
 	}
 
+	// 6. Publish the "these nets are tracks, not planes" verdict to the project's
+	//    workflow state so the post_route_checked gate stops treating our own
+	//    deliberate decision as a blocking defect (issue #114). Written LAST: the
+	//    mutating actions above make the daemon invalidate downstream stages
+	//    (which reloads + rewrites this same file), so an earlier write could be
+	//    clobbered.
+	recordPowerTracksNets(cfg, window, routeAsTracks, stderr)
+
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(map[string]any{
@@ -256,6 +264,40 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 		"planes": plan, "stitch": stitchStats, "routedAsTracks": routedTrackNets,
 		"warnings": warnings,
 	})
+}
+
+// recordPowerTracksNets persists power-planes' routeAsTracks verdict into the
+// project's workflow state (State.PowerTracksNets) — the state-interop half of
+// issue #114: the post_route_checked gate reads it to exempt these nets from
+// power-not-poured. An EMPTY list is written too (clears a stale exemption from
+// an earlier run that had to punt a net to tracks).
+//
+// Best-effort by design: power-planes is a copper tool, and the copper is
+// already on the board by the time this runs — a state file that cannot be
+// resolved/read/written is a warning, never a failure of the pour itself.
+func recordPowerTracksNets(cfg *appConfig, window string, nets []string, stderr io.Writer) {
+	project, err := resolveStageProject(cfg, window)
+	if err != nil {
+		fmt.Fprintf(stderr, "power-planes: could not resolve the project for the workflow state (%v) — "+
+			"the post-route check gate may flag %d track-routed power net(s) as power-not-poured (issue #114); "+
+			"re-run with --project to record them\n", err, len(nets))
+		return
+	}
+	st, err := loadPcbStageState(project)
+	if err != nil {
+		fmt.Fprintf(stderr, "power-planes: workflow state for %q unreadable (%v) — track-routed power nets not recorded\n", project, err)
+		return
+	}
+	st.SetPowerTracksNets(nets)
+	if err := savePcbStageState(st); err != nil {
+		fmt.Fprintf(stderr, "power-planes: could not persist the track-routed power nets (%v)\n", err)
+		return
+	}
+	if len(nets) > 0 {
+		fmt.Fprintf(stderr, "power-planes: recorded %s as routed-as-tracks in the workflow state — "+
+			"the post-route check gate will not block on their power-not-poured findings (issue #114)\n",
+			strings.Join(nets, ", "))
+	}
 }
 
 // padsToComps groups flat pads back into minimal apComp containers — the shape

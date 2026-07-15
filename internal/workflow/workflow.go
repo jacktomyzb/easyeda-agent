@@ -135,15 +135,66 @@ type Fingerprint struct {
 
 // State is the persisted per-project record.
 type State struct {
-	Project   string           `json:"project"`
-	Confirmed map[Stage]bool   `json:"confirmed"`
-	Assembly  *AssemblyProfile `json:"assembly,omitempty"`
-	Layout    *GateSummary     `json:"layoutGate,omitempty"`
+	Project   string            `json:"project"`
+	Confirmed map[Stage]bool    `json:"confirmed"`
+	Assembly  *AssemblyProfile  `json:"assembly,omitempty"`
+	Layout    *GateSummary      `json:"layoutGate,omitempty"`
 	Check     *CheckGateSummary `json:"checkGate,omitempty"`
-	LayoutFP  *Fingerprint     `json:"layoutFingerprint,omitempty"`
-	OutlineFP *Fingerprint     `json:"outlineFingerprint,omitempty"`
-	History   []Event          `json:"history,omitempty"`
-	UpdatedAt string           `json:"updatedAt"`
+	LayoutFP  *Fingerprint      `json:"layoutFingerprint,omitempty"`
+	OutlineFP *Fingerprint      `json:"outlineFingerprint,omitempty"`
+	// PowerTracksNets are the power nets `pcb power-planes` DELIBERATELY did not
+	// pour: every inner plane layer was already assigned (GND + the largest power
+	// net), so it routed these as fat tracks instead (its `routedAsTracks`
+	// output + warning). The post_route_checked gate reads this list and does NOT
+	// count their `power-not-poured` findings as blocking — without it the two
+	// tools contradict each other ("this net must be tracks" vs "no pour, no
+	// pass") and the agent deadlocks: pouring it collides with the net that owns
+	// the plane, not pouring it fails the gate (issue #114). Exempt findings are
+	// still PRINTED, just not blocking.
+	PowerTracksNets []string `json:"powerTracksNets,omitempty"`
+	History         []Event  `json:"history,omitempty"`
+	UpdatedAt       string   `json:"updatedAt"`
+}
+
+// SetPowerTracksNets records power-planes' "route these as tracks, don't pour
+// them" decision (normalized: trimmed, de-duplicated, sorted). Passing an empty
+// list CLEARS the record — a power-planes run that poured everything must not
+// leave a stale exemption standing.
+func (s *State) SetPowerTracksNets(nets []string) {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(nets))
+	for _, n := range nets {
+		n = strings.TrimSpace(n)
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	if len(out) == 0 {
+		s.PowerTracksNets = nil
+		return
+	}
+	s.PowerTracksNets = out
+}
+
+// IsPowerTracksNet reports whether a net was recorded as "routed as tracks by
+// power-planes" (case-insensitive: net names round-trip through several readers).
+func (s *State) IsPowerTracksNet(net string) bool {
+	if s == nil {
+		return false
+	}
+	net = strings.TrimSpace(net)
+	if net == "" {
+		return false
+	}
+	for _, n := range s.PowerTracksNets {
+		if strings.EqualFold(strings.TrimSpace(n), net) {
+			return true
+		}
+	}
+	return false
 }
 
 // Has reports whether a stage confirmation is currently set.
@@ -189,6 +240,19 @@ func (s *State) InvalidateFrom(from Stage, cause string) []Stage {
 	}
 	if Rank(StagePlacementConfirmed) >= fromRank {
 		s.LayoutFP = nil
+		// PowerTracksNets dies with the PLACEMENT, not with the routing. The
+		// decision is derived from the stackup + the net set + pad counts (which
+		// net owns each plane layer), so:
+		//   • a routing-class mutation (InvalidateFrom(post_route_checked)) must
+		//     KEEP it — power-planes' verdict is still the truth about this board,
+		//     and clearing it here would resurrect the #114 deadlock on the very
+		//     next `workflow advance`;
+		//   • a placement-class invalidation (this branch: placement_confirmed or
+		//     earlier — re-import, parts added/removed, board redesign) DROPS it:
+		//     the net set may be different now, so the old exemption could hide a
+		//     genuinely un-poured power net. The next power-planes run re-derives
+		//     and re-records it.
+		s.PowerTracksNets = nil
 	}
 	if Rank(StageOutlineConfirmed) >= fromRank {
 		s.OutlineFP = nil
