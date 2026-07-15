@@ -5,6 +5,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
 )
 
 func TestAutosaver_CoalescesBurst(t *testing.T) {
@@ -91,5 +93,53 @@ func TestMutatesActionMap(t *testing.T) {
 	// avoid recursion; that exclusion is asserted by the action==saveAction guard.
 	if !mutatesAction["schematic.save"] {
 		t.Error("schematic.save is expected to be Mutates=true (the recursion trap)")
+	}
+}
+
+// TestMaybeAutosave_DryRunDoesNotArm pins issue #112b on the autosave side: a
+// `--dry-run` preview writes nothing, so there is nothing to save — arming the
+// debounce would fire a pointless save (and, on pcb.page.clear, one that looks
+// to the user like the preview touched the board).
+func TestMaybeAutosave_DryRunDoesNotArm(t *testing.T) {
+	var armed atomic.Int32
+	s := &Server{autosave: newAutosaver(10*time.Millisecond, func(_, _ string) { armed.Add(1) })}
+
+	s.maybeAutosave(&protocol.Request{
+		Envelope: protocol.Envelope{WindowID: "w1"},
+		Action:   "pcb.page.clear",
+		Payload:  map[string]any{"dryRun": true},
+	})
+	time.Sleep(40 * time.Millisecond)
+	if n := armed.Load(); n != 0 {
+		t.Errorf("a dry-run preview must not arm autosave, fired %d save(s)", n)
+	}
+
+	// The same action for real still arms it — the fix must not disable autosave.
+	s.maybeAutosave(&protocol.Request{
+		Envelope: protocol.Envelope{WindowID: "w1"},
+		Action:   "pcb.page.clear",
+		Payload:  map[string]any{"dryRun": false},
+	})
+	time.Sleep(40 * time.Millisecond)
+	if n := armed.Load(); n != 1 {
+		t.Errorf("a real pcb.page.clear must arm exactly 1 autosave, got %d", n)
+	}
+}
+
+func TestRequestMutates(t *testing.T) {
+	mutating := &protocol.Request{Action: "pcb.page.clear"}
+	if !requestMutates(mutating) {
+		t.Error("pcb.page.clear without a payload is a real mutation")
+	}
+	preview := &protocol.Request{Action: "pcb.page.clear", Payload: map[string]any{"dryRun": true}}
+	if requestMutates(preview) {
+		t.Error("pcb.page.clear --dry-run must not count as a mutation")
+	}
+	read := &protocol.Request{Action: "pcb.line.list"}
+	if requestMutates(read) {
+		t.Error("a read is never a mutation")
+	}
+	if requestMutates(nil) {
+		t.Error("nil request must not count as a mutation")
 	}
 }

@@ -84,8 +84,11 @@ func (g *concurrentGuard) observe(req *protocol.Request, resp *protocol.Response
 	if g == nil || req == nil || resp == nil {
 		return
 	}
-	// Reads never conflict and never move the state machine.
-	if !mutatesAction[req.Action] {
+	// Reads never conflict and never move the state machine. requestMutates
+	// (not the raw catalog flag) so a --dry-run PREVIEW is not recorded as the
+	// last writer either — it changed nothing, so it can neither be conflicted
+	// with nor warn about someone else (issue #112 consistency).
+	if !requestMutates(req) {
 		return
 	}
 	g.mu.Lock()

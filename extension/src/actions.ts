@@ -5656,6 +5656,16 @@ export function parsePcbClearScopes(raw: unknown): Array<PcbClearScope> {
 	return PCB_CLEAR_SCOPES.filter(s => wanted.includes(s));
 }
 
+/**
+ * Max enumerate→delete passes per clear (issue #112). One pass is NOT enough on
+ * a real board: a full clear of 153 tracks reported 153 deleted, yet a reload +
+ * `--dry-run` still found 8 — the first enumeration reads a stale engine index,
+ * or part of a batch is invalidated inside the same transaction. Running `pcb
+ * clear` a SECOND time converged to 0, so the fix is to do that re-enumeration
+ * inside the handler instead of making the caller notice.
+ */
+const PCB_CLEAR_MAX_ROUNDS = 5;
+
 export const pcbPageClear: Handler = async (payload) => {
 	const dryRun = optionalBoolean(payload, 'dryRun') === true;
 	const includeLocked = optionalBoolean(payload, 'includeLocked') === true;
@@ -5663,68 +5673,119 @@ export const pcbPageClear: Handler = async (payload) => {
 	const scopes = parsePcbClearScopes(payload.only);
 	const active = new Set<PcbClearScope>(scopes);
 
+	// The kinds this call is allowed to touch, resolved once (scope-gated content
+	// kinds keep the lock guard; outline kinds bypass it — see PCB_OUTLINE_KINDS).
+	const targets: Array<{ kind: PcbClearKind; ignoreLock: boolean }> = [];
+	for (const kind of PCB_CLEAR_KINDS) {
+		if (kind.scope && active.has(kind.scope)) targets.push({ kind, ignoreLock: false });
+	}
+	if (!preserveOutline) {
+		for (const kind of PCB_OUTLINE_KINDS) targets.push({ kind, ignoreLock: true });
+	}
+
+	// Union of every id enumerated across all rounds, per kind. Rounds re-enumerate
+	// (that is the point), so ids are de-duplicated here — a primitive that shows up
+	// again in round 2 must not be counted twice in the report.
 	const idsByKey: Record<string, Array<string>> = {};
+	const seenByKey: Record<string, Set<string>> = {};
 	const skippedLocked: Record<string, number> = {};
 	const warnings: Array<string> = [];
+	// A kind whose delete explicitly FAILED (threw / returned false) is dropped from
+	// later rounds: retrying is what fixes a stale enumeration, not a rejected batch —
+	// hammering it 5× would only repeat the same warning.
+	const failedSet = new Set<string>();
 
-	// Collect content-primitive ids per active scope, skipping locked (unless
-	// includeLocked) and applying each kind's copper-layer / membership filter.
-	// An enumeration failure is a WARNING (never silently swallowed — a class
-	// that fails to enumerate would otherwise be under-reported as "0 to clear").
-	const collect = async (kind: PcbClearKind, ignoreLock: boolean): Promise<void> => {
+	// Collect this round's ids for one kind, skipping locked (unless includeLocked)
+	// and applying each kind's copper-layer / membership filter. An enumeration
+	// failure is a WARNING (never silently swallowed — a class that fails to
+	// enumerate would otherwise be under-reported as "0 to clear"). Locked
+	// primitives are tallied on the FIRST round only; they enumerate every round.
+	const collect = async (kind: PcbClearKind, ignoreLock: boolean, countLocked: boolean): Promise<Array<string>> => {
 		let items: Array<SchPrimitiveLike>;
 		try {
 			items = (await kind.getAll()) ?? [];
 		}
 		catch (err) {
 			warnings.push(warnText(`enumerate ${kind.key}`, err));
-			return;
+			return [];
 		}
+		const ids: Array<string> = [];
 		for (const p of items) {
 			if (kind.filter && !kind.filter(p)) continue;
 			if (!ignoreLock && !includeLocked && pcbPrimLocked(p)) {
-				skippedLocked[kind.key] = (skippedLocked[kind.key] ?? 0) + 1;
+				if (countLocked) skippedLocked[kind.key] = (skippedLocked[kind.key] ?? 0) + 1;
 				continue;
 			}
-			(idsByKey[kind.key] ??= []).push(p.getState_PrimitiveId());
+			ids.push(p.getState_PrimitiveId());
+		}
+		return ids;
+	};
+
+	/** Fold a round's ids into the cumulative report (de-duped). */
+	const record = (key: string, ids: Array<string>): void => {
+		const seen = (seenByKey[key] ??= new Set<string>());
+		for (const id of ids) {
+			if (seen.has(id)) continue;
+			seen.add(id);
+			(idsByKey[key] ??= []).push(id);
 		}
 	};
 
-	for (const kind of PCB_CLEAR_KINDS) {
-		if (kind.scope && active.has(kind.scope)) await collect(kind, false);
-	}
-	if (!preserveOutline) {
-		for (const kind of PCB_OUTLINE_KINDS) await collect(kind, true);
-	}
-
-	// Build the delete-fn index (kind key → its class delete).
+	// Delete-fn index (kind key → its class delete).
 	const delByKey = new Map<string, (ids: Array<string>) => Promise<boolean>>();
 	for (const kind of [...PCB_CLEAR_KINDS, ...PCB_OUTLINE_KINDS]) delByKey.set(kind.key, kind.del);
 
-	// Track which buckets actually deleted OK. delete() returns an OVERALL boolean
-	// (false = batch rejected WITHOUT throwing) — surface that as a warning so a
-	// false-clean report can't hide a leftover class (same guard rip_up applies).
-	const failed: Array<string> = [];
-	if (!dryRun) {
-		for (const [key, ids] of Object.entries(idsByKey)) {
+	// Enumerate → delete → RE-enumerate until a round finds nothing left (or the
+	// round cap trips). dry-run never loops: it reports one enumeration pass.
+	const maxRounds = dryRun ? 1 : PCB_CLEAR_MAX_ROUNDS;
+	let rounds = 0;
+	let leftover = 0;
+	for (let r = 0; r < maxRounds; r++) {
+		rounds++;
+		const round: Record<string, Array<string>> = {};
+		let found = 0;
+		for (const { kind, ignoreLock } of targets) {
+			if (failedSet.has(kind.key)) continue;
+			const ids = await collect(kind, ignoreLock, rounds === 1);
 			if (!ids.length) continue;
+			round[kind.key] = ids;
+			found += ids.length;
+		}
+		if (dryRun) {
+			for (const [key, ids] of Object.entries(round)) record(key, ids);
+			break;
+		}
+		leftover = found;
+		if (!found) break; // converged: nothing enumerates any more
+
+		for (const [key, ids] of Object.entries(round)) {
+			// Report every id this handler ATTEMPTED to delete (delete-failure is
+			// reported separately via `failed`) — same contract as the single-pass
+			// version this replaces.
+			record(key, ids);
 			const del = delByKey.get(key);
 			if (!del) continue;
 			try {
 				const ok = await del(ids);
 				if (ok === false) {
-					failed.push(key);
+					failedSet.add(key);
 					warnings.push(`delete ${key}: batch delete returned false — ${ids.length} primitive(s) may remain`);
 				}
 			}
-			catch (err) { failed.push(key); warnings.push(warnText(`delete ${key}`, err)); }
+			catch (err) { failedSet.add(key); warnings.push(warnText(`delete ${key}`, err)); }
 		}
+	}
+	// The cap tripped while a round was still finding primitives: the last round's
+	// deletes went out unverified, so the board may still not be clean.
+	if (!dryRun && rounds >= maxRounds && leftover > 0) {
+		warnings.push(`clear did not converge after ${rounds} round(s) — ${leftover} primitive(s) still enumerated on the last pass; save + \`easyeda doc reload\`, then re-run clear`);
 	}
 
 	const deleted: Record<string, number> = {};
 	let total = 0;
 	for (const [key, ids] of Object.entries(idsByKey)) { deleted[key] = ids.length; total += ids.length; }
 	const skippedTotal = Object.values(skippedLocked).reduce((a, b) => a + b, 0);
+	const failed = [...failedSet];
 
 	return {
 		result: {
@@ -5732,6 +5793,7 @@ export const pcbPageClear: Handler = async (payload) => {
 			deleted,
 			total,
 			deletedIds: idsByKey,
+			rounds,
 			...(skippedTotal ? { skippedLocked, skippedLockedTotal: skippedTotal } : {}),
 			...(failed.length ? { failed } : {}),
 			preserveOutline,

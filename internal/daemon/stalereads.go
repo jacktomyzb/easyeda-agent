@@ -35,6 +35,10 @@ import (
 //     bypasses /action entirely (dispatchSave), so neither path false-flags.
 //   - pcb.pour.rebuild: it is the FIX for stale pour connectivity, not a new
 //     hazard — it clears instead.
+//   - any request carrying `dryRun:true`: the catalog's Mutates flag is
+//     action-name granular and cannot see that a preview enumerates without
+//     touching the board. `pcb clear --dry-run` used to arm the flag and make
+//     every later read cry stale on an untouched board (issue #112).
 //
 // windowIds churn on reconnect; a reconnected window starts clean (a window
 // reload re-reads the saved document, which is exactly the stale-fix), so
@@ -47,17 +51,22 @@ var staleExemptActions = map[string]bool{
 	"pcb.pour.rebuild": true,
 }
 
-// pcbStaleMarks reports whether a successful `action` should mark the window's
-// PCB engine state as possibly stale: any PCB-domain mutating action (catalog
-// Mutates, same map autosave uses) minus the exempt set.
-func pcbStaleMarks(action string) bool {
-	return docTypeForAction(action) == "pcb" && mutatesAction[action] && !staleExemptActions[action]
+// pcbStaleMarks reports whether a successful request should mark the window's
+// PCB engine state as possibly stale: any PCB-domain mutating request
+// (requestMutates = catalog Mutates minus dry-run previews, the same predicate
+// autosave uses) minus the exempt set.
+func pcbStaleMarks(req *protocol.Request) bool {
+	return docTypeForAction(req.Action) == "pcb" && requestMutates(req) && !staleExemptActions[req.Action]
 }
 
-// pcbStaleRead reports whether `action` is a PCB-domain read that can return
-// stale data (any non-mutating pcb.* action: lists, DRC, report, snapshot …).
-func pcbStaleRead(action string) bool {
-	return docTypeForAction(action) == "pcb" && !mutatesAction[action]
+// pcbStaleRead reports whether a request is a PCB-domain read that can return
+// stale data (any non-mutating pcb.* request: lists, DRC, report, snapshot …).
+// A dry-run preview counts as a read on BOTH sides of the state machine: it
+// changes nothing (so it never marks), and its enumeration is read back off the
+// same engine state (so it earns the advisory) — `pcb clear --dry-run` on an
+// un-reloaded board is exactly the miscount that opened issue #112.
+func pcbStaleRead(req *protocol.Request) bool {
+	return docTypeForAction(req.Action) == "pcb" && !requestMutates(req)
 }
 
 // pcbStaleClears reports whether a successful request resets the stale flag.
@@ -100,7 +109,7 @@ func (g *staleGuard) observe(req *protocol.Request, resp *protocol.Response) {
 	defer g.mu.Unlock()
 
 	// Annotate reads first: the read itself never changes the state.
-	if pcbStaleRead(req.Action) {
+	if pcbStaleRead(req) {
 		if mutation := g.last[req.WindowID]; mutation != "" {
 			resp.StaleRisk = staleRiskMessage(mutation, req.Action)
 		}
@@ -115,7 +124,7 @@ func (g *staleGuard) observe(req *protocol.Request, resp *protocol.Response) {
 		delete(g.last, req.WindowID)
 		return
 	}
-	if pcbStaleMarks(req.Action) {
+	if pcbStaleMarks(req) {
 		g.last[req.WindowID] = req.Action
 	}
 }

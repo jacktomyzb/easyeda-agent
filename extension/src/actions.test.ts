@@ -162,7 +162,13 @@ function pcbPrim(id: string, layer?: number, locked = false): any {
 	return o;
 }
 
-/** Stub every pcb_Primitive* class pcbPageClear touches; record deleted ids per class. */
+/**
+ * Stub every pcb_Primitive* class pcbPageClear touches; record deleted ids per
+ * class. A successful delete REMOVES the primitives from the class's live list —
+ * the handler re-enumerates until a pass comes back empty (#112), so a stub whose
+ * getAll never drained would just spin to the round cap. A rejected batch
+ * (delResult:false) deliberately leaves them, as the real API does.
+ */
 function installPcbClearStub(fx: {
 	components?: any[]; lines?: any[]; arcs?: any[]; vias?: any[];
 	pours?: any[]; fills?: any[]; regions?: any[]; strings?: any[]; polylines?: any[];
@@ -170,10 +176,18 @@ function installPcbClearStub(fx: {
 }): { deleted: Record<string, string[]> } {
 	const deleted: Record<string, string[]> = {};
 	const delResult = fx.delResult ?? true;
-	const mk = (key: string, items: any[] | undefined) => ({
-		getAll: async () => items ?? [],
-		delete: async (ids: string[]) => { (deleted[key] ??= []).push(...ids); return delResult; },
-	});
+	const live: Record<string, any[]> = {};
+	const mk = (key: string, items: any[] | undefined) => {
+		live[key] = [...(items ?? [])];
+		return {
+			getAll: async () => [...live[key]],
+			delete: async (ids: string[]) => {
+				(deleted[key] ??= []).push(...ids);
+				if (delResult) live[key] = live[key].filter(p => !ids.includes(p.getState_PrimitiveId()));
+				return delResult;
+			},
+		};
+	};
 	(globalThis as any).eda = {
 		pcb_PrimitiveComponent: mk('components', fx.components),
 		pcb_PrimitiveLine: mk('lines', fx.lines),
@@ -186,6 +200,18 @@ function installPcbClearStub(fx: {
 		pcb_PrimitivePolyline: mk('polylines', fx.polylines),
 	};
 	return { deleted };
+}
+
+/** An all-empty eda stub with per-class overrides (for the round-loop tests). */
+function pcbClearEdaStub(overrides: Record<string, any>): any {
+	const classes = [
+		'pcb_PrimitiveComponent', 'pcb_PrimitiveLine', 'pcb_PrimitiveArc', 'pcb_PrimitiveVia',
+		'pcb_PrimitivePour', 'pcb_PrimitiveFill', 'pcb_PrimitiveRegion', 'pcb_PrimitiveString',
+		'pcb_PrimitivePolyline',
+	];
+	const stub: any = {};
+	for (const k of classes) stub[k] = { getAll: async () => [], delete: async () => true };
+	return Object.assign(stub, overrides);
 }
 
 test('pcbPageClear: default clears silk (layer 3/4) + copper, keeps copper/doc strings and layer-11 outline', async () => {
@@ -251,5 +277,78 @@ test('pcbPageClear: --no-preserve-outline removes the locked board outline', asy
 	const { deleted } = installPcbClearStub({ lines: [pcbPrim('outL', 11, true)] });
 	await pcbPageClear({ preserveOutline: false });
 	assert.deepEqual(deleted.lines ?? [], ['outL'], 'outline bypasses the lock guard under --no-preserve-outline');
+	delete (globalThis as any).eda;
+});
+
+// ─── pcb.page.clear round loop (issue #112a) ─────────────────────────────
+// One enumerate→delete pass is not enough on a real board: a 153-track clear
+// reported 153 deleted, but a reload + --dry-run still found 8. The handler now
+// re-enumerates until a pass comes back empty.
+
+test('pcbPageClear: re-enumerates until clean — a stale first pass no longer leaves copper behind', async () => {
+	// Round 1 sees 2 tracks; the engine index only reveals the 3rd once the batch
+	// settles (this is the 153→8 leftover from the real board, in miniature).
+	const passes: any[][] = [[pcbPrim('t1', 1), pcbPrim('t2', 1)], [pcbPrim('t3', 1)], []];
+	const gone: string[] = [];
+	let call = 0;
+	(globalThis as any).eda = pcbClearEdaStub({
+		pcb_PrimitiveLine: {
+			getAll: async () => passes[Math.min(call++, passes.length - 1)],
+			delete: async (ids: string[]) => { gone.push(...ids); return true; },
+		},
+	});
+	const res: any = await pcbPageClear({ only: 'routing' });
+	assert.deepEqual(gone, ['t1', 't2', 't3'], 'the leftover the first pass missed is cleared in the SAME call');
+	assert.equal(res.result.deleted.tracks, 3);
+	assert.equal(res.result.total, 3);
+	assert.equal(res.result.rounds, 3, 'two delete rounds + the empty confirming pass');
+	delete (globalThis as any).eda;
+});
+
+test('pcbPageClear: dryRun never loops — one enumeration pass only', async () => {
+	let calls = 0;
+	(globalThis as any).eda = pcbClearEdaStub({
+		pcb_PrimitiveVia: {
+			getAll: async () => { calls++; return [pcbPrim('v1')]; },
+			delete: async () => { throw new Error('dryRun must not delete'); },
+		},
+	});
+	const res: any = await pcbPageClear({ only: 'routing', dryRun: true });
+	assert.equal(res.result.rounds, 1, 'dry-run reports a single enumeration, never retries');
+	assert.equal(calls, 1);
+	assert.equal(res.result.deleted.vias, 1);
+	delete (globalThis as any).eda;
+});
+
+test('pcbPageClear: a class that never drains stops at the round cap and warns', async () => {
+	let attempts = 0;
+	(globalThis as any).eda = pcbClearEdaStub({
+		pcb_PrimitiveVia: {
+			getAll: async () => [pcbPrim('v1')],           // never drains
+			delete: async () => { attempts++; return true; }, // yet claims success
+		},
+	});
+	const res: any = await pcbPageClear({ only: 'routing' });
+	assert.equal(res.result.rounds, 5, 'bounded by PCB_CLEAR_MAX_ROUNDS — no infinite loop');
+	assert.equal(attempts, 5);
+	assert.equal(res.result.deleted.vias, 1, 'a re-enumerated id is not counted once per round');
+	assert.ok((res.result.warnings ?? []).some((w: string) => /did not converge/.test(w)),
+		'non-convergence must be surfaced, not reported as a clean clear');
+	delete (globalThis as any).eda;
+});
+
+test('pcbPageClear: a class whose delete is REJECTED is not hammered every round', async () => {
+	let attempts = 0;
+	(globalThis as any).eda = pcbClearEdaStub({
+		pcb_PrimitiveVia: {
+			getAll: async () => [pcbPrim('v1')],
+			delete: async () => { attempts++; return false; }, // batch rejected
+		},
+	});
+	const res: any = await pcbPageClear({ only: 'routing' });
+	assert.equal(attempts, 1, 'a rejected batch is a reported condition, not a stale-enumeration retry');
+	assert.deepEqual(res.result.failed, ['vias']);
+	assert.equal((res.result.warnings ?? []).filter((w: string) => w.includes('vias')).length, 1,
+		'the failure is reported once, not once per round');
 	delete (globalThis as any).eda;
 });

@@ -28,6 +28,40 @@ var mutatesAction = func() map[string]bool {
 	return m
 }()
 
+// dryRunPayloadField is the payload key every dry-runnable action uses to mark a
+// request as a PREVIEW. It is a project-wide convention, not a per-action one:
+// the actions that forward a preview flag to the connector (pcb.page.clear,
+// schematic.page.clear, pcb.beautify) all send exactly `dryRun`, and every other
+// `--dry-run` CLI flag (mount-holes / power-planes / pour-fit / route-short /
+// autoconnect …) short-circuits inside the CLI and never dispatches a mutating
+// action at all. Keeping one key means the daemon needs no per-action catalog
+// entry to tell a preview from a write (issue #112).
+const dryRunPayloadField = "dryRun"
+
+// isDryRunRequest reports whether a request is a preview that changes nothing.
+// Strictly a JSON `true` — an unparseable/absent flag counts as a real write,
+// which is the safe direction to err (a missed preview only costs a redundant
+// save; a misread write would lose the safety net entirely).
+func isDryRunRequest(req *protocol.Request) bool {
+	if req == nil {
+		return false
+	}
+	v, ok := req.Payload[dryRunPayloadField]
+	if !ok {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
+}
+
+// requestMutates reports whether a request actually changes the document: the
+// catalog's Mutates flag (action-name granularity) MINUS dry-run previews, which
+// the catalog cannot see. `pcb.page.clear --dry-run` only enumerates, so it must
+// neither arm autosave nor the stale-read guard (issue #112).
+func requestMutates(req *protocol.Request) bool {
+	return req != nil && mutatesAction[req.Action] && !isDryRunRequest(req)
+}
+
 // saveActionForDocType returns the typed save action for a documentType, or ""
 // when none exists. Schematic and PCB both have a typed save; a PCB-mutating
 // action therefore arms a debounced pcb.save the same way a schematic edit arms
@@ -100,7 +134,7 @@ func (s *Server) maybeAutosave(req *protocol.Request) {
 	if s.autosave == nil || req == nil {
 		return
 	}
-	if !mutatesAction[req.Action] {
+	if !requestMutates(req) {
 		return
 	}
 	saveAction := saveActionForDocType(docTypeForAction(req.Action))

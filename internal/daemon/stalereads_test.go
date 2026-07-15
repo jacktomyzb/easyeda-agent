@@ -150,7 +150,7 @@ func TestStaleGuard_CatalogClassification(t *testing.T) {
 		"pcb.pour.create", "pcb.pour.delete", "pcb.import_autoroute",
 	}
 	for _, a := range marks {
-		if !pcbStaleMarks(a) {
+		if !pcbStaleMarks(staleReq(a, "w1", nil)) {
 			t.Errorf("pcbStaleMarks(%q) = false, want true", a)
 		}
 	}
@@ -160,17 +160,79 @@ func TestStaleGuard_CatalogClassification(t *testing.T) {
 		"schematic.wire.create", "document.open", // other domains
 	}
 	for _, a := range noMarks {
-		if pcbStaleMarks(a) {
+		if pcbStaleMarks(staleReq(a, "w1", nil)) {
 			t.Errorf("pcbStaleMarks(%q) = true, want false", a)
 		}
 	}
 	reads := []string{"pcb.line.list", "pcb.via.list", "pcb.pour.list", "pcb.components.list", "pcb.drc.check", "pcb.nets.list", "pcb.report", "pcb.board.info"}
 	for _, a := range reads {
-		if !pcbStaleRead(a) {
+		if !pcbStaleRead(staleReq(a, "w1", nil)) {
 			t.Errorf("pcbStaleRead(%q) = false, want true", a)
 		}
 	}
-	if pcbStaleRead("schematic.components.list") {
+	if pcbStaleRead(staleReq("schematic.components.list", "w1", nil)) {
 		t.Error("schematic reads must not be classified as PCB stale reads")
+	}
+}
+
+// TestStaleGuard_DryRunNeverMarks pins issue #112b: `pcb clear --dry-run` only
+// enumerates, so it must not arm the advisory for every later read. The catalog
+// marks pcb.page.clear Mutates=true at action-name granularity; only the payload
+// tells a preview from a real clear.
+func TestStaleGuard_DryRunNeverMarks(t *testing.T) {
+	g := newStaleGuard()
+	runStale(g, "pcb.page.clear", "w1", true, map[string]any{"dryRun": true})
+
+	if resp := runStale(g, "pcb.line.list", "w1", true, nil); resp.StaleRisk != "" {
+		t.Errorf("a dry-run clear changes nothing — later reads must be clean, got %q", resp.StaleRisk)
+	}
+	// The very same action WITHOUT the flag is a real clear and must arm it.
+	runStale(g, "pcb.page.clear", "w1", true, map[string]any{"dryRun": false})
+	resp := runStale(g, "pcb.line.list", "w1", true, nil)
+	if resp.StaleRisk == "" {
+		t.Fatal("a real pcb.page.clear must still arm the stale-read advisory")
+	}
+	if !strings.Contains(resp.StaleRisk, "pcb.page.clear") {
+		t.Errorf("advisory should name the mutation, got %q", resp.StaleRisk)
+	}
+}
+
+// TestStaleGuard_DryRunReadIsAnnotated: a preview reads the same engine state a
+// list does, so when the window IS stale the dry-run's own counts are suspect and
+// must carry the advisory (the 153→8 miscount that opened #112).
+func TestStaleGuard_DryRunReadIsAnnotated(t *testing.T) {
+	g := newStaleGuard()
+	runStale(g, "pcb.route.rip_up", "w1", true, nil)
+
+	resp := runStale(g, "pcb.page.clear", "w1", true, map[string]any{"dryRun": true})
+	if resp.StaleRisk == "" {
+		t.Error("a dry-run preview on a mutated-but-unreloaded window should be flagged stale")
+	}
+}
+
+// TestIsDryRunRequest pins the payload convention: only a JSON `true` counts.
+// Erring toward "this is a real write" keeps the safety nets armed.
+func TestIsDryRunRequest(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload map[string]any
+		want    bool
+	}{
+		{"flag true", map[string]any{"dryRun": true}, true},
+		{"flag false", map[string]any{"dryRun": false}, false},
+		{"absent", map[string]any{"only": "routing"}, false},
+		{"nil payload", nil, false},
+		{"string true is not a bool", map[string]any{"dryRun": "true"}, false},
+		{"snake_case is not the convention", map[string]any{"dry_run": true}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isDryRunRequest(staleReq("pcb.page.clear", "w1", tc.payload)); got != tc.want {
+				t.Errorf("isDryRunRequest(%v) = %v, want %v", tc.payload, got, tc.want)
+			}
+		})
+	}
+	if isDryRunRequest(nil) {
+		t.Error("nil request must not be treated as a dry run")
 	}
 }
