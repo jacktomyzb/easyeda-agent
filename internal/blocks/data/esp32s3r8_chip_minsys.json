@@ -5,7 +5,7 @@
   "author": "@zhoushoujianwork",
   "contributors": [],
   "added": "v0.12.1",
-  "updated": "v0.12.1",
+  "updated": "v0.13.1",
   "source": "official-ref:Espressif《ESP32-S3 Hardware Design Guidelines》(esp32-s3_hardware_design_guidelines) §2.1 电源(逐脚去耦/10uF 体电容)、§2.2 上电时序与复位(CHIP_PU RC: R=10k C=1uF)、§2.3 Flash/PSRAM(VDD_SPI 供外挂 flash + SPICS0 上拉)、§2.4 晶振(40MHz 3225 + 对称负载帽)、§2.7 strapping(GPIO0 上拉默认 flash 启动) + 官方最小系统外围原理图(Schematic Checklist)。脚名 2026-07-15 在 ceshi 临时页 place C2913194/C179171/C47089401 后 sch read 逐脚核实",
   "validated": null,
   "parts": {
@@ -13,7 +13,7 @@
       "part": "mcu.esp32s3r8_chip",
       "alt": ["mcu.esp32s3_chip"],
       "qty": 1,
-      "note": "ESP32-S3R8 QFN-56,内封 8MB Octal PSRAM → N8R8 的 R8 由封装内直接满足,本块**不外挂 PSRAM**。alt=mcu.esp32s3_chip(无内封 PSRAM)时需另加 APS6404L 走 SPI0 独立 CS,本块拓扑不含。内封八线 PSRAM 占用 GPIO35/36/37(SPIIO6/SPIIO7/SPIDQS)与 SPICS1(pin28),外部一律勿用/悬空"
+      "note": "ESP32-S3R8 QFN-56,内封 8MB Octal PSRAM → N8R8 的 R8 由封装内直接满足,本块**不外挂 PSRAM**。alt=mcu.esp32s3_chip(无内封 PSRAM)时需另加 APS6404L 走 SPI0 独立 CS —— 该拓扑现已单独成块:block.esp32s3_chip_minsys。⚠内封八线 PSRAM 占用 **GPIO33~GPIO37**(SPIIO4~SPIIO7 + SPIDQS,即 DQ4~DQ7 + DQS/DM)与 SPICS1(pin28),外部一律勿用/悬空"
     },
     "FLASH": {
       "part": "ic.w25q64_flash",
@@ -155,7 +155,7 @@
     }
   },
   "schematic_notes": [
-    "R8 内封 8MB Octal PSRAM → 不外挂 PSRAM。代价:GPIO35/36/37(SPIIO6/SPIIO7/SPIDQS)与 SPICS1(pin28)被内封 PSRAM 占用,原理图上必须悬空、固件里不可复用。普通 ESP32-S3 裸片(alt)才需要外挂 APS6404L。",
+    "R8 内封 8MB Octal PSRAM → 不外挂 PSRAM。代价:**GPIO33~GPIO37 共 5 个脚**(GPIO33=SPIIO4/DQ4、GPIO34=SPIIO5/DQ5、GPIO35=SPIIO6/DQ6、GPIO36=SPIIO7/DQ7、GPIO37=SPIDQS/DQS/DM)与 SPICS1(pin28)被内封 PSRAM 占用,原理图上必须悬空、固件里不可复用。依据 Espressif HDG 原文:『When 1.8 V or 3.3 V, octal, in-package or off-package SPI flash/PSRAM is used, GPIO33 ~ GPIO37 are occupied and cannot be used for other functions』(v0.13.1 订正:本条此前只列 GPIO35/36/37,漏掉 GPIO33/34 —— 照旧版复用会把 DQ4/DQ5 当普通 GPIO 用,PSRAM 直接坏)。普通 ESP32-S3 裸片要外挂四线 PSRAM 见 block.esp32s3_chip_minsys(只占 SPICS1,GPIO33~37 全保留)。",
     "VDD_SPI(pin29)是 3.3V **输出**域(内部经 ~20Ω 由 VDD3P3_RTC 供出):外挂 flash 的 VCC、内封 PSRAM 都由它供电——flash VCC 接 VDD_SPI 网,**不要**直接接 3V3。N8R8 是 3.3V flash/PSRAM 组合,GPIO45(VDD_SPI 电压 strapping)默认拉低=3.3V,悬空即可,勿上拉(上拉=1.8V 会毁通信)。",
     "SPI0 六线映射(符号名→flash 脚):SPICS0→CS#、SPICLK→CLK、SPID→DI(IO0)、SPIQ→DO(IO1)、SPIWP→WP#(IO2)、SPIHD→HOLD#orRESET#(IO3)。SPICS0 加 10k 上拉到 VDD_SPI(HDG 外围原理图)。",
     "EN 上电复位 RC:R_EN 10k 上拉 + C_EN 1uF 对地(HDG §2.2),保证 3V3 稳定后再释放 CHIP_PU;RESET 按键/自动下载走 EN port,别省 C_EN。",
