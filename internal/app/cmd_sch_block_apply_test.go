@@ -1,0 +1,238 @@
+package app
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+)
+
+// fixtureDevices is a minimal stand-in for standard-parts.json covering the
+// parts led_indicator_gpio uses.
+func fixtureDevices() map[string]bapDevice {
+	return map[string]bapDevice{
+		"led.red_0805": {LibraryUUID: "lib", DeviceUUID: "dev-led", LCSC: "C1"},
+		"res.1k_0402":  {LibraryUUID: "lib", DeviceUUID: "dev-res", LCSC: "C2"},
+		"res.10k_0402": {LibraryUUID: "lib", DeviceUUID: "dev-res10k"},
+	}
+}
+
+func ledBlock(t *testing.T) (blocks.Block, [][]string) {
+	t.Helper()
+	b, ok, err := blocks.Get("led_indicator_gpio")
+	if err != nil || !ok {
+		t.Fatalf("load led_indicator_gpio: ok=%v err=%v", ok, err)
+	}
+	topo, err := blockTopology(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b, topo
+}
+
+// TestPlanBlockApplyLed pins the whole plan for the canonical simple block: the
+// role→designator allocation, the coordinates, and the three resolved nets.
+func TestPlanBlockApplyLed(t *testing.T) {
+	b, topo := ledBlock(t)
+	plan, err := planBlockApply(bapInput{
+		Block: b, Topology: topo, Devices: fixtureDevices(),
+		Existing: map[string]bool{}, OriginX: 400, OriginY: 300, Spacing: 100, PerRow: 4,
+		Bind: map[string]string{"CTRL": "IO2", "GND": "GND"},
+	})
+	if err != nil {
+		t.Fatalf("planBlockApply: %v", err)
+	}
+
+	if plan.Instance != "LED1" {
+		t.Errorf("instance = %q, want LED1 (first allocated designator)", plan.Instance)
+	}
+	if len(plan.Placements) != 2 {
+		t.Fatalf("placements = %d, want 2", len(plan.Placements))
+	}
+	// Roles are planned in sorted order: LED then R.
+	if got := plan.Placements[0]; got.Role != "LED" || got.Designator != "LED1" || got.DeviceUUID != "dev-led" {
+		t.Errorf("placement[0] = %+v, want role LED / LED1 / dev-led", got)
+	}
+	if got := plan.Placements[1]; got.Role != "R" || got.Designator != "R1" || got.X != 500 {
+		t.Errorf("placement[1] = %+v, want role R / R1 / x=500", got)
+	}
+
+	want := map[string]string{
+		"IO2":     "R1:1",       // port CTRL, bound to the host net
+		"LED1_N2": "R1:2 LED1:+", // purely internal
+		"GND":     "LED1:-",     // port GND
+	}
+	if len(plan.Nets) != 3 {
+		t.Fatalf("nets = %d, want 3", len(plan.Nets))
+	}
+	for _, n := range plan.Nets {
+		w, ok := want[n.Net]
+		if !ok {
+			t.Errorf("unexpected net %q", n.Net)
+			continue
+		}
+		if got := strings.Join(n.Members, " "); got != w {
+			t.Errorf("net %s members = %q, want %q", n.Net, got, w)
+		}
+	}
+	// GND must get a ground flag, not a bare net port.
+	for _, n := range plan.Nets {
+		if n.Net == "GND" && n.Kind != "gnd" {
+			t.Errorf("GND kind = %q, want gnd", n.Kind)
+		}
+	}
+	// The block carries constraint maps this command does not execute; the plan
+	// must say so rather than let a green run imply full compliance.
+	if len(plan.Unconsumed) == 0 {
+		t.Error("unconsumed constraints not reported — a caller would read the apply as complete")
+	}
+}
+
+// TestPlanBlockApplySecondInstanceDoesNotMerge is the regression that matters:
+// same-name nets MERGE in EasyEDA, so if two instances of one block derived their
+// internal net names from the BLOCK id, instance 2's internal node would silently
+// short to instance 1's. Deriving the instance from the allocated designator keeps
+// them apart.
+func TestPlanBlockApplySecondInstanceDoesNotMerge(t *testing.T) {
+	b, topo := ledBlock(t)
+	base := bapInput{
+		Block: b, Topology: topo, Devices: fixtureDevices(),
+		OriginX: 400, OriginY: 300, Spacing: 100, PerRow: 4,
+	}
+
+	first := base
+	first.Existing = map[string]bool{}
+	p1, err := planBlockApply(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second instance onto a page that already holds the first.
+	second := base
+	second.Existing = map[string]bool{}
+	for _, p := range p1.Placements {
+		second.Existing[strings.ToUpper(p.Designator)] = true
+	}
+	p2, err := planBlockApply(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if p2.Instance == p1.Instance {
+		t.Fatalf("both instances got id %q — internal nets would collide", p1.Instance)
+	}
+	internal := func(p bapPlan) string {
+		for _, n := range p.Nets {
+			if n.Port == "" {
+				return n.Net
+			}
+		}
+		return ""
+	}
+	n1, n2 := internal(p1), internal(p2)
+	if n1 == "" || n2 == "" {
+		t.Fatalf("no internal net found: %q / %q", n1, n2)
+	}
+	if n1 == n2 {
+		t.Errorf("internal nets collide: both %q — the two instances would be shorted together", n1)
+	}
+	// And the designators must not collide either.
+	for _, a := range p1.Placements {
+		for _, b := range p2.Placements {
+			if a.Designator == b.Designator {
+				t.Errorf("designator %s reused across instances", a.Designator)
+			}
+		}
+	}
+}
+
+// TestPlanBlockApplyRejectsUnknownBind: a typo'd port must fail before anything
+// is placed, not leave a half-built block on the page.
+func TestPlanBlockApplyRejectsUnknownBind(t *testing.T) {
+	b, topo := ledBlock(t)
+	_, err := planBlockApply(bapInput{
+		Block: b, Topology: topo, Devices: fixtureDevices(), Existing: map[string]bool{},
+		Bind: map[string]string{"CTRLL": "IO2"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "no port") {
+		t.Errorf("err = %v, want a no-such-port error", err)
+	}
+}
+
+// TestPlanBlockApplyMissingPart: a part absent from standard-parts.json must be a
+// hard error — placing a block with a hole in it is worse than not placing it.
+func TestPlanBlockApplyMissingPart(t *testing.T) {
+	b, topo := ledBlock(t)
+	devices := fixtureDevices()
+	delete(devices, "led.red_0805")
+	_, err := planBlockApply(bapInput{
+		Block: b, Topology: topo, Devices: devices, Existing: map[string]bool{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "not found in standard-parts.json") {
+		t.Errorf("err = %v, want a missing-part error", err)
+	}
+}
+
+func TestBapPrefixFor(t *testing.T) {
+	for _, tc := range []struct{ key, want string }{
+		{"res.1k_0402", "R"},
+		{"cap.100nf_0402", "C"},
+		{"led.red_0805", "LED"},
+		{"mcu.esp32s3_chip", "U"},
+		{"conn.usb_c_16p", "J"},
+		{"sw.tact_smd", "SW"},
+		{"xtal.40mhz_3225_12pf", "X"},
+	} {
+		got, err := bapPrefixFor(tc.key)
+		if err != nil || got != tc.want {
+			t.Errorf("bapPrefixFor(%q) = %q,%v; want %q", tc.key, got, err, tc.want)
+		}
+	}
+	// An unmapped namespace must fail loudly rather than invent a prefix.
+	if _, err := bapPrefixFor("widget.thing"); err == nil {
+		t.Error("unknown namespace silently accepted — it would misfile the part")
+	}
+	if _, err := bapPrefixFor("nodot"); err == nil {
+		t.Error("namespace-less key silently accepted")
+	}
+}
+
+func TestBapFlagKind(t *testing.T) {
+	for _, tc := range []struct{ net, want string }{
+		{"GND", "gnd"},
+		{"AGND", "agnd"},
+		{"DGND", "gnd"},
+		{"CHASSIS_GND", "gnd"},
+		{"+3V3", "power"},
+		{"3V3", "power"},
+		{"5V", "power"},
+		{"1V8", "power"},
+		{"VCC", "power"},
+		{"VBUS", "power"},
+		{"VSYS", "power"},
+		{"IO2", "netport"},
+		{"MCU_TX", "netport"},
+		{"LED1_N2", "netport"},
+		// A signal that merely starts with a digit is not a rail.
+		{"2WIRE_SDA", "netport"},
+	} {
+		if got := bapFlagKind(tc.net); got != tc.want {
+			t.Errorf("bapFlagKind(%q) = %q, want %q", tc.net, got, tc.want)
+		}
+	}
+}
+
+func TestParseKV(t *testing.T) {
+	got, err := parseKV([]string{"CTRL=IO2", "GND=GND"}, "--bind")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["CTRL"] != "IO2" || got["GND"] != "GND" {
+		t.Errorf("parseKV = %v", got)
+	}
+	for _, bad := range []string{"noequals", "=novalue", "nokey="} {
+		if _, err := parseKV([]string{bad}, "--bind"); err == nil {
+			t.Errorf("parseKV(%q) accepted a malformed pair", bad)
+		}
+	}
+}
