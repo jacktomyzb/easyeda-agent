@@ -110,3 +110,42 @@ internal/blocks/data/
 照 skill 的 **oshwhub 抄图训练闭环**抄一块官方开源板:抄的过程本身就产出一个**已验证**
 的块 —— 网表机械对照通过 + DRC=0,顺手加一个 `internal/blocks/data/<id>.json`,一次训练
 同时是一次贡献。这是本库最推荐的贡献来源。
+
+---
+
+## 七、GitHub Issue 反馈闭环(查 → 报 → 登记)
+
+块库的反馈**不走任何自动上传** —— 一切经用户确认、以公开 issue 的形式进入仓库。
+没有遥测:**无人反馈的块默认就处于「正常参考」阶段**,沉默不是异常。
+
+### Agent 的三条纪律
+
+1. **必查**:手工连任何已知外围前先 `easyeda blocks search/show`(SKILL 铁律 8,原有)。
+2. **报缺陷**:块用出了问题(引脚名与 `sch read` 实测不符 / 拓扑错 / 器件停产 / 约束错),
+   **起草**一份 `block-bug` issue(带证据:sch read 摘录、manifest、DRC 条目),
+   **征得用户同意后**再 `gh issue create` 提交。上报是外发动作,永远先给用户看草稿。
+3. **登记缺口**:`blocks search` 查不到需要的块时,把「需要什么、查过什么、期望边界」
+   起草成 `block-gap` issue,同样经用户确认后提交。设计工作照常继续(手工连线不被阻塞),
+   缺口登记是给库的需求地图,不是给用户设的门。
+
+用户自己做出一块好电路想投稿、又不方便提 PR 时,agent 可代为起草 `block-contribution`
+issue(块 JSON 草稿 + 一手来源 + 验证状态 + @handle 署名),经确认后提交,维护者代落库。
+
+三类模板在 `.github/ISSUE_TEMPLATE/`:`block-gap` / `block-bug` / `block-contribution`。
+
+### 维护者侧(仓库的策展权就是资产)
+
+- 分诊三类 label;能机械修的挂 `ready-for-agent` 交自动化(操作端边界见
+  operator 运行时验收约定:需要真机 DRC 验收的不挂,人工在实时会话处理)。
+- `block-bug` 确认后:修块、bump `updated`、上报人进 `contributors` 署名。
+- `block-gap` 聚成需求地图,决定下一批块的优先级。
+- `block-contribution` 按第三节硬标准审:一手来源必查,验证状态如实标(draft 也收)。
+
+### 块的生命周期(由 issue 驱动,不由遥测驱动)
+
+```
+draft(拓扑有一手源,脚名未核实)
+  → ready(整板验证 + netlist 核实 —— 自己验的或 issue 带证据反馈的)
+  → 正常参考(默认态:无人反馈 = 没出问题)
+  → block-bug issue → 修订 → bump updated → 回到正常参考
+```
