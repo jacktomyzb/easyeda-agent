@@ -1134,6 +1134,40 @@ pours reflow under the new clearance.`,
 		pcb.AddCommand(c)
 	}
 
+	// ── via-bond (bond netless embedded vias to their pad's net) ───────────
+	// #118 follow-up: EPAD thermal vias land netless and CANNOT be deleted
+	// (#120) — bonding them to the pad's net is the only repair, and it must be
+	// re-run after every doc reload (the platform re-materializes them netless;
+	// live-verified). exec_js-backed → works on every deployed connector.
+	{
+		var only string
+		var dryRun bool
+		c := &cobra.Command{
+			Use:   "via-bond",
+			Short: "Assign netless footprint-embedded vias (EPAD thermal vias) the net of the pad they sit in",
+			Long: `Scan every NETLESS via whose center sits inside a net-carrying pad's copper
+rect and assign it that pad's net (raw eda.pcb_PrimitiveVia.modify — no
+connector re-import needed). The canonical case: QFN EPAD thermal vias, which
+land net:"" however the part was placed, giving one same-footprint "SMD Pad to
+Via" DRC error each and never bonding the EPAD to the GND plane.
+
+⚠️ PLATFORM LIMIT (live-verified, #118): the assignment does NOT survive a doc
+reload — embedded vias re-materialize netless every time. Re-run via-bond after
+any reload, before DRC / power-planes. 'pcb check' flags the condition as
+netless-via-in-pad so you know when it is needed.`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda pcb via-bond --dry-run          # show which vias would get which net
+  easyeda pcb via-bond                    # bond them (idempotent — safe to re-run)
+  easyeda pcb via-bond --component U1     # only U1's pads`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runPcbViaBond(cfg, window, only, dryRun, stdout, stderr)
+			},
+		}
+		c.Flags().StringVar(&only, "component", "", "limit to one component's pads (designator)")
+		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the plan without modifying anything")
+		pcb.AddCommand(c)
+	}
+
 	// ── track-lock (lock/unlock routed copper) ─────────────────────────────
 	// The foundation of the P7.0 critical-net-first flow: route power + diff/
 	// length nets ourselves, LOCK them, THEN hand the rest to the human's native

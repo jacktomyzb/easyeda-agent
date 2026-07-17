@@ -7,16 +7,20 @@ follow [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
-- **`pcb.route.delete` 假报成功修复(#120)**:SDK 的 `delete()` 对**封装内嵌 via**
-  (QFN EPAD 热过孔是 component 的一部分,非顶层图元)返回 `true` 但分毫未删。
-  handler 现在删除后**逐 id readback 验证**:`removed`/`count` 只统计真正消失的图元,
-  幸存者进 `notDeleted`(附原因说明)且 `ok:false`——agent 不再带着"以为删掉了"
-  的假象继续往下走。
+- **`pcb.route.delete` 假报成功修复(#120,真机订正)**:SDK 的 `delete()` 对**封装内嵌
+  via**(QFN EPAD 热过孔是 component 的一部分)返回 `true` 且**立即 getAll 也显示已删**,
+  但 save/reload 后从封装定义原 id 复活(ceshi 真机实证)——纯 readback 会被骗。handler
+  现在**前置结构判定**:via id 以某器件 primitiveId 为前缀 = 内嵌,直接拒删进
+  `notDeletable[]`(附父器件 + 指引 `pcb via-bond`),`ok:false`;其余照常删除并
+  readback 兜底(`removed`/`count` 只统计真正消失的,不可归因的幸存者进 `notDeleted`)。
 - **`pcb.add_component` 内嵌 via 赋网(#118)**:封装内嵌的 EPAD 热过孔 `net=""`,
   EPAD 永远焊不上 GND 平面且每颗报一条 same-footprint SMD Pad to Via。现在赋完
   pad 网后,枚举落在本器件已赋网 pad 铜皮矩形内的无网 via,用
   `pcb_PrimitiveVia.modify`(@beta)赋成该 pad 的网,并 readback 验证(#120 教训:
   SDK 布尔不可信);结果新增 `embeddedVias {assigned, verified, failed}`。
+  ⚠️ 真机实证:该赋网**不能活过 doc reload**(平台每次都把内嵌 via 重物化为无网)——
+  CLI 侧配套 `pcb via-bond`(exec_js 路线,旧连接器即可用)负责 reload 后重键合,
+  `pcb check` 新规则 netless-via-in-pad 是触发器。
 
 ## [0.13.0] - 2026-07-16
 

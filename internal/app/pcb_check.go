@@ -204,6 +204,7 @@ type pcbCheckSummary struct {
 	ViaCrossesPlane   int `json:"viaCrossesPlane"`
 	FloatingIslands   int `json:"floatingIslands"`
 	PowerNotPoured    int `json:"powerNotPoured"`
+	NetlessViaInPad   int `json:"netlessViaInPad"`
 	WidthUnderSpec    int `json:"widthUnderSpec"`
 	SilkOverPad       int `json:"silkOverPad"`
 	DecapTooFar       int `json:"decapTooFar"`
@@ -1257,6 +1258,27 @@ func findPowerNotPoured(pads []pcbPadP, pouredNets map[string]bool, blindPlanes 
 	return out
 }
 
+// ── R15: netless via inside a net-carrying pad (#118 / #120) ────────────────
+// A footprint-embedded via (QFN EPAD thermal via) always re-materializes with
+// net:"" after a doc reload — it then never bonds to the plane and native DRC
+// fires one same-footprint "SMD Pad to Via" per via. It cannot be deleted
+// either (#120). The repair is `pcb via-bond`, and this rule is the tripwire
+// that says when to (re-)run it. Detection reuses the via-bond planner so the
+// check and the fix agree exactly on what qualifies.
+func findNetlessViaInPad(pads []pcbPadP, vias []pcbViaP) []pcbCheckFinding {
+	var out []pcbCheckFinding
+	for _, a := range planViaBond(pads, vias, "") {
+		out = append(out, pcbCheckFinding{
+			Type: "netless-via-in-pad", Level: "WARN", Net: a.Net,
+			Designator: a.Designator, Primitives: []string{a.ViaID},
+			At: &pcbXY{round2(a.X), round2(a.Y)},
+			Message: fmt.Sprintf("netless via inside pad %s.%s (net %s) — an embedded (EPAD thermal) via that never bonds to its plane and trips native DRC; fix `easyeda pcb via-bond` (re-run after every doc reload — the platform re-materializes these netless, live-verified #118)",
+				a.Designator, a.PadNumber, a.Net),
+		})
+	}
+	return out
+}
+
 // pouredNetSet returns the set of nets whose current is delivered by copper area:
 // any net bound to a same-net pour or to an inner PLANE. Pass planes already run
 // through bindPlaneNets so their Nets are populated.
@@ -1653,6 +1675,14 @@ func gatherPcbCheckReport(cfg *appConfig, window string, couplingW float64, stde
 		rep.Findings = append(rep.Findings, f)
 		rep.Summary.Clearance++
 		rep.Summary.Errors++
+		rep.Summary.Total++
+	}
+	// R15 (#118): netless embedded vias re-materialize on every reload, so this
+	// tripwire fires whenever a re-bond is due (fix: `pcb via-bond`).
+	for _, f := range findNetlessViaInPad(pads, vias) {
+		rep.Findings = append(rep.Findings, f)
+		rep.Summary.NetlessViaInPad++
+		rep.Summary.Warnings++
 		rep.Summary.Total++
 	}
 	rep.Passed = rep.Summary.Total == 0
@@ -2056,9 +2086,9 @@ func renderPcbCheckReport(rep pcbCheckReport, w io.Writer) {
 		fmt.Fprintln(w, "  ✓ no DFM issues found")
 		return
 	}
-	fmt.Fprintf(w, "  ERROR=%d WARN=%d  |  dangling=%d acute=%d nonOrtho=%d overPad=%d clearance=%d silkFlipped=%d overlapVia=%d singleLayerVia=%d widthMismatch=%d dupSegment=%d coupling=%d antennaKeepout=%d netlessPour=%d viaCrossesPlane=%d floatingIsland=%d powerNotPoured=%d widthUnderSpec=%d silkOverPad=%d decapTooFar=%d viaInPad=%d copperNearEdge=%d fiducialMissing=%d\n",
+	fmt.Fprintf(w, "  ERROR=%d WARN=%d  |  dangling=%d acute=%d nonOrtho=%d overPad=%d clearance=%d silkFlipped=%d overlapVia=%d singleLayerVia=%d widthMismatch=%d dupSegment=%d coupling=%d antennaKeepout=%d netlessPour=%d viaCrossesPlane=%d floatingIsland=%d powerNotPoured=%d netlessViaInPad=%d widthUnderSpec=%d silkOverPad=%d decapTooFar=%d viaInPad=%d copperNearEdge=%d fiducialMissing=%d\n",
 		s.Errors, s.Warnings-s.Errors,
-		s.DanglingEnds, s.AcuteAngles, s.NonOrthogonal, s.TrackOverPad, s.Clearance, s.SilkscreenFlipped, s.OverlappingVias, s.SingleLayerVias, s.WidthMismatches, s.DuplicateSegments, s.ParallelCoupling, s.AntennaKeepout, s.NetlessPours, s.ViaCrossesPlane, s.FloatingIslands, s.PowerNotPoured, s.WidthUnderSpec, s.SilkOverPad, s.DecapTooFar, s.ViaInPad, s.CopperNearEdge, s.FiducialMissing)
+		s.DanglingEnds, s.AcuteAngles, s.NonOrthogonal, s.TrackOverPad, s.Clearance, s.SilkscreenFlipped, s.OverlappingVias, s.SingleLayerVias, s.WidthMismatches, s.DuplicateSegments, s.ParallelCoupling, s.AntennaKeepout, s.NetlessPours, s.ViaCrossesPlane, s.FloatingIslands, s.PowerNotPoured, s.NetlessViaInPad, s.WidthUnderSpec, s.SilkOverPad, s.DecapTooFar, s.ViaInPad, s.CopperNearEdge, s.FiducialMissing)
 	for _, f := range rep.Findings {
 		loc := ""
 		if f.At != nil {

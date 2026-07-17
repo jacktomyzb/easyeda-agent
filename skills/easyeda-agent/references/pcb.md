@@ -144,15 +144,27 @@ segment-by-segment, or use the file-exchange autoroute flow. **布线档如何�
   --json` `objs` arrays paste straight in. Each subcommand guards its
   kind (pasting track ids into `via-delete` errors out); locked primitives are skipped,
   stale ids reported as `notFound`. The result's `removed[]` echoes each primitive's full
-  before-state (net/layer/geometry) so the audit log can recreate it. **Readback-verified
-  (#120)**: the SDK's delete() returns true even when it removed nothing, so the handler
-  re-reads after deleting — `removed`/`count` reflect only what actually vanished, and
-  survivors land in `notDeleted` with `ok:false` (typical cause: **footprint-embedded
-  vias** — QFN EPAD thermal vias are part of the component and cannot be deleted as
-  standalone primitives; edit the footprint or delete the whole component). ⚠️ **After surgical
+  before-state (net/layer/geometry) so the audit log can recreate it. **Embedded-primitive
+  pre-check + readback (#120, live-verified)**: a footprint-embedded via's id is its
+  parent component's primitiveId + a suffix (`ba45…f3` + `e184`); deleting one lies
+  TWICE — the SDK returns true AND an immediate getAll shows it gone, but the next
+  save/reload re-materializes it from the footprint. The handler refuses these UPFRONT
+  (`notDeletable[]` with the parent component + `ok:false`; use `pcb via-bond` to net
+  them, or delete the whole component) and additionally readback-verifies the rest
+  (`removed`/`count` only count what actually vanished; unattributable survivors land
+  in `notDeleted`). ⚠️ **After surgical
   edits (delete/via-hop/fill changes), a burst of same-net (usually GND) Connection
   Errors in DRC is pour-mediated connectivity gone stale, not real breaks — run
   `pcb pour-rebuild` first, then re-judge** (verified live: 11→1 baseline).
+- `easyeda pcb via-bond [--component U1] [--dry-run]` — **bond netless footprint-embedded
+  vias (EPAD thermal vias) to the net of the pad they sit in** (#118). Scans every net:""
+  via whose center sits inside a net-carrying pad's copper rect and assigns that pad's
+  net via raw `eda.pcb_PrimitiveVia.modify` (debug-exec backed — works on every deployed
+  connector, no re-import). Idempotent, readback-verified (`{planned, assigned, verified}`).
+  ⚠️ **Platform limit (live-verified)**: the assignment does NOT survive a doc reload —
+  embedded vias re-materialize netless every time; re-run after any reload, before
+  DRC / power-planes. `pcb check`'s **netless-via-in-pad** WARN fires whenever a re-bond
+  is due, with this command as the fix.
 - `easyeda pcb via-hop --net N --from-x … --from-y … --to-x … --to-y …`
   (`pcb.route.via_hop`) — **composite layer hop**: entry stub → via → hop-layer track →
   via → exit stub. **track↔via registers as connected on its own** — no bond fill needed
@@ -339,7 +351,7 @@ subset; `--dry-run` prints the per-corner plan. Save after placing; delete via
 
 - `pcb.import_changes` — **sync components/netlist from the schematic** (从原理图导入变更). How parts first arrive on the board: ensures a Board links SCH+PCB, then `importChanges`, then recomputes ratlines. **Mutates the board; confirm first.** Returns `imported:false` (with a reason) for a floating/unlinked PCB.
   > **⚠️ Limitation (verified #20):** `importChanges` does **NOT** add a component placed via the API to an **existing** PCB — it returns `imported:true` but the PCB count is unchanged (the new part IS in the netlist, but the API `importChanges` is a no-op for incremental adds; no annotate/refresh/update-PCB API exists). It only populates the board the first time. **To add ONE part to an existing PCB, use `pcb add-component`** (below) — it places + connects the part directly.
-- `pcb add-component` (`pcb.add_component`) — **the working way to add a part to an existing board.** Places the footprint (`--library` + `--uuid`, a device) at `--x/--y` on `--layer`, links it to its schematic twin (`--designator` + `--unique-id`), assigns each pad's net from `--nets` (a JSON `padNumber→net` map), and recomputes ratlines — directly wiring net→pad, which is what `importChanges` would normally do. **Get `--nets` and `--unique-id` from `sch read`** (the netlist is only readable while the schematic is the active doc, so you pass them in). Workflow: ① place + wire the part in the schematic → ② `sch read` (note its pin nets + `uniqueId`) → ③ `pcb add-component … --designator U2 --unique-id gge9 --nets '{"5":"3V3","3":"GND"}'`. Verify with `pcb list --include-pads` + `pcb drc`. **Embedded-via bonding (#118)**: footprints that EMBED vias (QFN EPAD thermal vias) used to land with `net:""` — the EPAD never bonded to the GND plane and DRC fired one "SMD Pad to Via" per via, with no repair path (embedded vias can't be deleted, #120). The handler now assigns every netless via inside a just-assigned pad's copper rect that pad's net via `pcb_PrimitiveVia.modify` (@beta) and readback-verifies it — the result's `embeddedVias {assigned, verified, failed}` reports the outcome.
+- `pcb add-component` (`pcb.add_component`) — **the working way to add a part to an existing board.** Places the footprint (`--library` + `--uuid`, a device) at `--x/--y` on `--layer`, links it to its schematic twin (`--designator` + `--unique-id`), assigns each pad's net from `--nets` (a JSON `padNumber→net` map), and recomputes ratlines — directly wiring net→pad, which is what `importChanges` would normally do. **Get `--nets` and `--unique-id` from `sch read`** (the netlist is only readable while the schematic is the active doc, so you pass them in). Workflow: ① place + wire the part in the schematic → ② `sch read` (note its pin nets + `uniqueId`) → ③ `pcb add-component … --designator U2 --unique-id gge9 --nets '{"5":"3V3","3":"GND"}'`. Verify with `pcb list --include-pads` + `pcb drc`. **Embedded-via bonding (#118)**: footprints that EMBED vias (QFN EPAD thermal vias) used to land with `net:""` — the EPAD never bonded to the GND plane and DRC fired one "SMD Pad to Via" per via, with no repair path (embedded vias can't be deleted, #120). The handler now assigns every netless via inside a just-assigned pad's copper rect that pad's net via `pcb_PrimitiveVia.modify` (@beta) and readback-verifies it — the result's `embeddedVias {assigned, verified, failed}` reports the outcome. ⚠️ **The assignment does NOT survive a doc reload** (live-verified: the platform re-materializes embedded vias netless every time) — re-run `pcb via-bond` after any reload, before DRC/power-planes; `pcb check`'s **netless-via-in-pad** WARN is the tripwire.
 - `pcb.component.modify` (`pcb modify`) — move (x/y), rotate, flip layer (top/bottom), lock, designator/BOM flags. Patch x/y = **anchor**; `pcb modify --center --x <cx> --y <cy>` writes by **bbox center** instead (CLI converts via the live bbox; mutually exclusive with a rotation change in the same call — rotate first, then center).
 - `pcb.component.delete` (`pcb delete --ids`) — delete component primitives **by id** (`--ids` CSV or JSON array). **Confirm first** (no undo). ⚠️ **只删器件**,布线/铺铜/区域/丝印会残留 —— 要整版清板重来用 **`easyeda pcb clear`**(`pcb.page.clear`,见上「一键整版复位」)。
 

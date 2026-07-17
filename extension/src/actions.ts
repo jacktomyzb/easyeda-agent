@@ -6910,16 +6910,37 @@ const pcbRouteDelete: Handler = async (payload) => {
 		});
 	}
 
+	// #120 pre-check: a FOOTPRINT-EMBEDDED primitive's id is its parent
+	// component's primitiveId plus a suffix (QFN EPAD thermal via ba45…f3e184
+	// under component ba45…f3 — verified live). Deleting one is a lie twice
+	// over: the SDK returns true, an immediate getAll even shows it gone, and
+	// the next save/reload re-materializes it from the footprint definition.
+	// So refuse UPFRONT — post-delete readback provably cannot catch this.
+	let componentIds: Array<string> = [];
+	try {
+		const comps = await eda.pcb_PrimitiveComponent.getAll();
+		componentIds = (comps ?? []).map(c => c.getState_PrimitiveId()).filter(Boolean);
+	}
+	catch { /* best-effort: without component ids the readback below still reports honestly */ }
+	const embeddedParent = (id: string): string | undefined =>
+		componentIds.find(cid => id !== cid && id.startsWith(cid));
+
 	const toDelete: Record<'track' | 'arc' | 'via', Array<string>> = { track: [], arc: [], via: [] };
 	const removed: Array<Record<string, unknown>> = [];
 	const skippedLocked: Array<string> = [];
 	const notFound: Array<string> = [];
 	const wrongKind: Array<string> = [];
+	const notDeletable: Array<Record<string, string>> = [];
 	for (const id of ids) {
 		const entry = byId.get(id);
 		if (!entry) { notFound.push(id); continue; }
 		if (kindGuard && entry.kind !== kindGuard) { wrongKind.push(`${id} is a ${entry.kind}`); continue; }
 		if (entry.locked) { skippedLocked.push(id); continue; }
+		const parent = embeddedParent(id);
+		if (parent) {
+			notDeletable.push({ primitiveId: id, parentComponent: parent, reason: 'footprint-embedded — the primitive API cannot delete it (delete claims success, the next reload re-materializes it); edit the footprint in EasyEDA or delete the whole component' });
+			continue;
+		}
 		toDelete[entry.kind].push(id);
 		removed.push({ primitiveId: id, kind: entry.kind, ...entry.before });
 	}
@@ -6927,6 +6948,9 @@ const pcbRouteDelete: Handler = async (payload) => {
 		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, `kind=${kindGuard} refused mismatched ids: ${wrongKind.join('; ')}. Drop the kind guard or fix the id list.`);
 	}
 	if (!removed.length) {
+		if (notDeletable.length) {
+			throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Nothing deletable: ${notDeletable.length} id(s) are FOOTPRINT-EMBEDDED (e.g. EPAD thermal vias — part of ${notDeletable[0].parentComponent}); the primitive API cannot delete them. To bond them to a net use \`easyeda pcb via-bond\`; to remove them edit the footprint or delete the component.`);
+		}
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Nothing to delete: ${notFound.length} id(s) not found among routing primitives${skippedLocked.length ? `, ${skippedLocked.length} locked` : ''}. Pull fresh ids from pcb.line.list / pcb.via.list.`);
 	}
 
@@ -6968,10 +6992,14 @@ const pcbRouteDelete: Handler = async (payload) => {
 
 	const actuallyRemoved = removed.filter(r => !notDeleted.includes(r.primitiveId as string));
 	const out: Record<string, unknown> = { deleted: results, removed: actuallyRemoved, count: actuallyRemoved.length, skippedLocked, notFound };
+	if (notDeletable.length) {
+		out.ok = false;
+		out.notDeletable = notDeletable;
+	}
 	if (notDeleted.length) {
 		out.ok = false;
 		out.notDeleted = notDeleted;
-		out.notDeletedReason = 'these primitives survived the delete (verified by readback) — they are most likely FOOTPRINT-EMBEDDED (part of a component, e.g. EPAD thermal vias), which the primitive API cannot delete; edit the footprint in EasyEDA or delete the whole component instead';
+		out.notDeletedReason = 'these primitives survived the delete (verified by readback) — most likely FOOTPRINT-EMBEDDED under a component the pre-check could not attribute; edit the footprint in EasyEDA or delete the whole component instead';
 	}
 	return { result: out };
 };
