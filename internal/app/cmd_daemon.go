@@ -130,6 +130,15 @@ func runStartupSkillSync(parent context.Context, log io.Writer) {
 
 // ── daemon health ─────────────────────────────────────────────────────────
 
+// newHealthAliasCmd exposes `easyeda health` at the root as an alias of
+// `easyeda daemon health` — the skill docs mandate it as the preflight check
+// before any window operation, and the bare form is what they spell (#130).
+func newHealthAliasCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
+	h := newDaemonHealthCmd(cfg, stdout, stderr)
+	h.Short += " (alias of `daemon health`)"
+	return h
+}
+
 func newDaemonHealthCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "health",
