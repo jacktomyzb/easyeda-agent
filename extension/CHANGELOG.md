@@ -6,6 +6,18 @@ follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`pcb.route.delete` 假报成功修复(#120)**:SDK 的 `delete()` 对**封装内嵌 via**
+  (QFN EPAD 热过孔是 component 的一部分,非顶层图元)返回 `true` 但分毫未删。
+  handler 现在删除后**逐 id readback 验证**:`removed`/`count` 只统计真正消失的图元,
+  幸存者进 `notDeleted`(附原因说明)且 `ok:false`——agent 不再带着"以为删掉了"
+  的假象继续往下走。
+- **`pcb.add_component` 内嵌 via 赋网(#118)**:封装内嵌的 EPAD 热过孔 `net=""`,
+  EPAD 永远焊不上 GND 平面且每颗报一条 same-footprint SMD Pad to Via。现在赋完
+  pad 网后,枚举落在本器件已赋网 pad 铜皮矩形内的无网 via,用
+  `pcb_PrimitiveVia.modify`(@beta)赋成该 pad 的网,并 readback 验证(#120 教训:
+  SDK 布尔不可信);结果新增 `embeddedVias {assigned, verified, failed}`。
+
 ## [0.13.0] - 2026-07-16
 
 **「规范进代码」版**:PCB 设计规范从「文档等 AI 自觉去读」变成**机器强制**——26 条

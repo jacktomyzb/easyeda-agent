@@ -5218,6 +5218,58 @@ const pcbAddComponent: Handler = async (payload) => {
 		}
 	}
 
+	// 3b. Embedded-via net assignment (#118): a footprint can EMBED vias — QFN
+	// EPAD thermal vias are the canonical case. create() leaves them net:"", so
+	// the EPAD never bonds to the GND plane (heat + ground both dead) and DRC
+	// reports "Clearance Error in the same footprint (SMD Pad to Via)" per via.
+	// The primitive API cannot DELETE them (#120: footprint-embedded vias
+	// survive delete with ok:true) but CAN modify them (@beta) — so give every
+	// netless via sitting inside one of this component's just-assigned pad
+	// rects that pad's net. Verified by readback (the #120 lesson: SDK booleans
+	// lie); best-effort throughout — a failure never fails the place.
+	let embeddedVias: { assigned: number; verified: number; failed: Array<string> } | undefined;
+	try {
+		type PadRect = { net: string; minX: number; minY: number; maxX: number; maxY: number };
+		const rects: Array<PadRect> = [];
+		for (const p of pads) {
+			const num = String(p.getState_PadNumber?.() ?? '');
+			const net = num ? nets[num] : undefined;
+			if (!net) continue;
+			const ext = padExtent(p);
+			if (!ext) continue;
+			const px = p.getState_X(), py = p.getState_Y();
+			rects.push({ net, minX: px - ext.width / 2, minY: py - ext.height / 2, maxX: px + ext.width / 2, maxY: py + ext.height / 2 });
+		}
+		if (rects.length) {
+			const allVias = (await eda.pcb_PrimitiveVia.getAll()) ?? [];
+			const wanted = new Map<string, string>(); // viaId → net
+			for (const v of allVias) {
+				if (String(v.getState_Net?.() ?? '').trim() !== '') continue;
+				const vx = v.getState_X(), vy = v.getState_Y();
+				const hit = rects.find(r => vx >= r.minX && vx <= r.maxX && vy >= r.minY && vy <= r.maxY);
+				if (hit) wanted.set(v.getState_PrimitiveId(), hit.net);
+			}
+			if (wanted.size) {
+				const failed: Array<string> = [];
+				for (const [vid, net] of wanted) {
+					try { await eda.pcb_PrimitiveVia.modify(vid, { net }); }
+					catch { failed.push(vid); }
+				}
+				let verified = 0;
+				try {
+					const after = (await eda.pcb_PrimitiveVia.getAll()) ?? [];
+					for (const v of after) {
+						const want = wanted.get(v.getState_PrimitiveId());
+						if (want && String(v.getState_Net?.() ?? '') === want) verified++;
+					}
+				}
+				catch { verified = -1; } // readback unavailable — assigned count stands, unverified
+				embeddedVias = { assigned: wanted.size - failed.length, verified, failed };
+			}
+		}
+	}
+	catch { /* best-effort — embedded-via bonding must never fail the place itself */ }
+
 	// 4. Recompute ratlines so the connections show.
 	try { await eda.pcb_Document.startCalculatingRatline(); }
 	catch { /* best-effort */ }
@@ -5250,6 +5302,7 @@ const pcbAddComponent: Handler = async (payload) => {
 			padCount: (pads ?? []).length,
 			assignedNets,
 			unmatchedPads: unmatched,
+			...(embeddedVias ? { embeddedVias } : {}),
 		},
 		...(warnings.length ? { warnings } : {}),
 	};
@@ -6889,7 +6942,38 @@ const pcbRouteDelete: Handler = async (payload) => {
 		try { results[`${kind}s`] = { requested: batch.length, ok: await deleters[kind](batch) }; }
 		catch (err) { throw edaError(err, `Failed to delete ${kind}s.`); }
 	}
-	return { result: { deleted: results, removed, count: removed.length, skippedLocked, notFound } };
+
+	// #120: the SDK's delete() returns TRUE even when it removed nothing — a
+	// FOOTPRINT-EMBEDDED via (a QFN EPAD thermal via is part of the component,
+	// not a top-level primitive) survives with ok:true, and the agent walks on
+	// believing the board changed. Read back every requested id and report the
+	// truth: `deleted`/`count` reflect only what actually vanished; survivors
+	// land in `notDeleted` with the reason. Readback is best-effort — if getAll
+	// itself fails we keep the SDK verdicts rather than failing a delete that
+	// may well have worked.
+	const notDeleted: Array<string> = [];
+	try {
+		const [l2, a2, v2] = await Promise.all([
+			toDelete.track.length ? eda.pcb_PrimitiveLine.getAll() : Promise.resolve([]),
+			toDelete.arc.length ? eda.pcb_PrimitiveArc.getAll() : Promise.resolve([]),
+			toDelete.via.length ? eda.pcb_PrimitiveVia.getAll() : Promise.resolve([]),
+		]);
+		const survivors = new Set<string>();
+		for (const p of [...(l2 ?? []), ...(a2 ?? []), ...(v2 ?? [])]) survivors.add(p.getState_PrimitiveId());
+		for (const kind of ['track', 'arc', 'via'] as const) {
+			for (const id of toDelete[kind]) if (survivors.has(id)) notDeleted.push(id);
+		}
+	}
+	catch { /* readback unavailable — SDK verdicts stand */ }
+
+	const actuallyRemoved = removed.filter(r => !notDeleted.includes(r.primitiveId as string));
+	const out: Record<string, unknown> = { deleted: results, removed: actuallyRemoved, count: actuallyRemoved.length, skippedLocked, notFound };
+	if (notDeleted.length) {
+		out.ok = false;
+		out.notDeleted = notDeleted;
+		out.notDeletedReason = 'these primitives survived the delete (verified by readback) — they are most likely FOOTPRINT-EMBEDDED (part of a component, e.g. EPAD thermal vias), which the primitive API cannot delete; edit the footprint in EasyEDA or delete the whole component instead';
+	}
+	return { result: out };
 };
 
 // ─── PCB routing: via-hop (layer hop) ────────────────────────────────
