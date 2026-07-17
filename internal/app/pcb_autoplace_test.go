@@ -1,7 +1,9 @@
 package app
 
 import (
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -331,5 +333,75 @@ func TestIsEdgeConnector(t *testing.T) {
 	})
 	if isEdgeConnector(bigChip, 8) {
 		t.Error("8-pin J3 (chip-like) should NOT be classed as an edge connector")
+	}
+}
+
+// #131: a HIGH-pin connector (USB-C 16P out-pins a small IC) must not compete
+// for main — it neither moves nor owns satellites; the decoupling cap goes to
+// the IC it serves. Explicit --anchor / --exclude-main beat every heuristic.
+func TestPlanAutoPlace_HighPinConnectorIsNotMain(t *testing.T) {
+	// U9: an 8-pin regulator (a legit main). J3: a 16-pad USB-C right next to
+	// the cap — pin count would win main under the old rule and steal C9.
+	pads := []apPad{}
+	for i := 1; i <= 16; i++ {
+		pads = append(pads, p(fmt.Sprintf("%d", i), fmt.Sprintf("S%d", i), 0, 0))
+	}
+	j3 := mkComp("j3", "J3", 900, 0, 350, 300, pads)
+	u9 := mkComp("u9", "U9", 0, 0, 200, 200, []apPad{
+		p("1", "VIN", -100, 0), p("2", "GND", -100, -50), p("3", "3V3", 100, 0),
+		p("4", "EN", 100, 50), p("5", "PG", 100, -50), p("6", "NC1", 0, 100),
+		p("7", "NC2", 0, -100), p("8", "GND", -100, 50),
+	})
+	c9 := mkComp("c9", "C9", 850, 200, 60, 30, []apPad{p("1", "3V3", 0, 0), p("2", "GND", 30, 0)})
+
+	moves, diags := planAutoPlace([]apComp{j3, u9, c9}, defaultApOptions())
+	for _, m := range moves {
+		if m.Designator == "J3" {
+			t.Errorf("high-pin connector J3 must not move, got %+v", m)
+		}
+		if m.Designator == "C9" && m.Main != "U9" {
+			t.Errorf("C9 must belong to U9, not %q", m.Main)
+		}
+	}
+	foundC9 := false
+	for _, m := range moves {
+		if m.Designator == "C9" {
+			foundC9 = true
+		}
+	}
+	if !foundC9 {
+		t.Errorf("C9 should be placed against U9, moves: %+v diags: %+v", moves, diags)
+	}
+	connDiag := false
+	for _, d := range diags {
+		if d.Designator == "J3" && strings.Contains(d.Reason, "connector") {
+			connDiag = true
+		}
+	}
+	if !connDiag {
+		t.Errorf("expected a high-pin-connector diag for J3, got %+v", diags)
+	}
+
+	// --anchor J3 forces it back into main; --exclude-main U9 demotes U9 (stays put).
+	opt := defaultApOptions()
+	opt.anchors = designatorSet("J3")
+	opt.excludeMain = designatorSet("u9") // case-insensitive
+	moves, diags = planAutoPlace([]apComp{j3, u9, c9}, opt)
+	for _, m := range moves {
+		if m.Designator == "C9" && m.Main != "J3" {
+			t.Errorf("with --anchor J3 --exclude-main U9, C9's main = %q, want J3", m.Main)
+		}
+		if m.Designator == "U9" {
+			t.Errorf("excluded U9 must stay put, got %+v", m)
+		}
+	}
+	excluded := false
+	for _, d := range diags {
+		if d.Designator == "U9" && strings.Contains(d.Reason, "exclude-main") {
+			excluded = true
+		}
+	}
+	if !excluded {
+		t.Errorf("expected an exclude-main diag for U9, got %+v", diags)
 	}
 }

@@ -219,10 +219,50 @@ type apOptions struct {
 	pitch    float64 // spacing between two satellites packed on the same edge
 	rotate   bool    // re-orient 2-pin satellites so their connecting pad faces the chip
 	multiGap float64 // min bbox gap between adjacent main chips (0 = don't space them)
+	// #131 explicit overrides (designators, upper-cased): anchors force a part
+	// into the main set regardless of pin count / connector heuristics;
+	// excludeMain bars one from it. Explicit beats every heuristic.
+	anchors     map[string]bool
+	excludeMain map[string]bool
 }
 
 func defaultApOptions() apOptions {
 	return apOptions{mainPins: 8, gap: 40, pitch: 30, rotate: true, multiGap: 150}
+}
+
+// designatorSet parses a CSV of designators into an upper-cased membership set
+// (nil for an empty flag, so map lookups stay cheap no-ops).
+func designatorSet(csv string) map[string]bool {
+	var set map[string]bool
+	for _, d := range strings.Split(csv, ",") {
+		d = strings.ToUpper(strings.TrimSpace(d))
+		if d == "" {
+			continue
+		}
+		if set == nil {
+			set = map[string]bool{}
+		}
+		set[d] = true
+	}
+	return set
+}
+
+// isMainComp is THE main/anchor test (#131). Pin count alone is not enough: a
+// 16-pad USB-C or a boxed pin header out-pins many a small IC, and calling it
+// "main" makes it STEAL the satellites (decoupling caps grouped against a
+// connector instead of the regulator they serve). So a connector-designated
+// part (J*/CN*/USB*/… — connectorDesRe) NEVER competes for main, whatever its
+// pin count: connectors are mechanical anchors for place-constrained, not
+// electrical owners. Explicit --anchor / --exclude-main win over everything.
+func isMainComp(c apComp, opt apOptions) bool {
+	des := strings.ToUpper(strings.TrimSpace(c.designator))
+	if opt.excludeMain[des] {
+		return false
+	}
+	if opt.anchors[des] {
+		return true
+	}
+	return c.distinctPins() >= opt.mainPins && !connectorDesRe.MatchString(des)
 }
 
 // assignment is the planner's per-satellite decision before packing: which chip,
@@ -247,15 +287,26 @@ func planAutoPlace(comps []apComp, opt apOptions) ([]apMove, []apDiag) {
 		if !c.hasBBox {
 			continue
 		}
-		if c.distinctPins() >= opt.mainPins {
+		highPin := c.distinctPins() >= opt.mainPins
+		switch {
+		case isMainComp(c, opt):
 			mains = append(mains, i)
-		} else if c.locked {
+		case c.locked:
 			continue
-		} else if isEdgeConnector(c, opt.mainPins) {
+		case highPin && connectorDesRe.MatchString(strings.TrimSpace(c.designator)):
+			// #131: a high-pin connector (USB-C, boxed header…) is a MECHANICAL
+			// anchor, not an electrical main — it must neither move nor own
+			// satellites. Leave it for place-constrained, like its low-pin kin.
+			diags = append(diags, apDiag{c.designator, "high-pin connector — mechanical anchor, not a main (#131); `place-constrained` seats it, satellites go to the ICs they serve"})
+		case highPin:
+			// Only reachable via --exclude-main: a demoted big part stays put —
+			// dragging an IC around as a "satellite" would be worse than the bug.
+			diags = append(diags, apDiag{c.designator, "excluded from main by --exclude-main — left in place"})
+		case isEdgeConnector(c, opt.mainPins):
 			// Board-edge connector (J*/CN*/…): leave it where the user (or
 			// place-constrained) put it — don't drag it toward a chip by its GND pad.
 			diags = append(diags, apDiag{c.designator, "board-edge connector — skipped, use `place-constrained` to seat it on the edge"})
-		} else {
+		default:
 			sats = append(sats, i)
 		}
 	}

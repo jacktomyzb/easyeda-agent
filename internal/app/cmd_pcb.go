@@ -2000,6 +2000,7 @@ exported DSN contains keepout entries before trusting the result.`,
 		var mainPins int
 		var gap, pitch, assemblyGap float64
 		var dryRun bool
+		var anchorCSV, excludeMainCSV string
 		c := &cobra.Command{
 			Use:   "auto-place",
 			Short: "Module-aware auto placement: pull each satellite (cap/R/LED) to the chip pin it connects to",
@@ -2066,6 +2067,8 @@ This is a SEED, not a final layout — verify with 'pcb drc'.
 				if cmd.Flags().Changed("multi-gap") {
 					opt.multiGap = multiGap
 				}
+				opt.anchors = designatorSet(anchorCSV)
+				opt.excludeMain = designatorSet(excludeMainCSV)
 				moves, diags := planAutoPlace(comps, opt)
 
 				// 3. Apply (unless --dry-run), one modify per satellite. Re-oriented
@@ -2104,6 +2107,8 @@ This is a SEED, not a final layout — verify with 'pcb drc'.
 			},
 		}
 		c.Flags().IntVar(&mainPins, "main-pins", 0, "distinct-pin threshold to treat a component as a main chip (default 8)")
+		c.Flags().StringVar(&anchorCSV, "anchor", "", "designator(s) to FORCE into the main/anchor set (CSV, e.g. U1,U5) — beats every heuristic (#131)")
+		c.Flags().StringVar(&excludeMainCSV, "exclude-main", "", "designator(s) barred from the main set (CSV) — a high-pin part demoted this way stays put (#131)")
 		c.Flags().Float64Var(&gap, "gap", 0, "override: fixed clearance from chip edge to satellite (mil); 0 = derive")
 		c.Flags().Float64Var(&pitch, "pitch", 0, "override: fixed spacing between satellites on the same edge (mil); 0 = derive")
 		c.Flags().Float64Var(&assemblyGap, "assembly-gap", 40, "min hand-SOLDER clearance around each part (mil floor for gap/pitch)")
@@ -3564,7 +3569,7 @@ func parseApComps(result map[string]any) []apComp {
 func apMainDesignators(comps []apComp, opt apOptions) []string {
 	var out []string
 	for _, c := range comps {
-		if c.hasBBox && c.distinctPins() >= opt.mainPins {
+		if c.hasBBox && isMainComp(c, opt) { // the SAME judge planAutoPlace uses (#131)
 			out = append(out, c.designator)
 		}
 	}
