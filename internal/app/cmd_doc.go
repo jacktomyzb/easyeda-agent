@@ -205,48 +205,9 @@ document afterward and reports it as "activeRestored", so the ★ does not drift
 			if target == "" {
 				return fmt.Errorf("no active document to reload (run `easyeda doc ls`)")
 			}
-			// Bring the target to the front so the typed save + close hit it.
-			if target != activeUUID {
-				if _, err := requestAction(cfg, "document.open", win,
-					map[string]any{"uuid": target}); err != nil {
-					return err
-				}
-			}
-			cur, err := requestAction(cfg, "document.current", win, nil)
+			docType, err := reloadDocumentByUUID(cfg, win, target)
 			if err != nil {
 				return err
-			}
-			if cur.Context == nil || cur.Context.DocumentUUID != target || cur.Context.TabID == "" {
-				return fmt.Errorf("could not activate document %s before reload (active=%v)", target, cur.Context)
-			}
-			docType := cur.Context.DocumentType
-			saveAction := "schematic.save"
-			if docType == "pcb" {
-				saveAction = "pcb.save"
-			}
-			if _, err := requestAction(cfg, saveAction, win, nil); err != nil {
-				return fmt.Errorf("save before reload failed: %w", err)
-			}
-			closeJS := fmt.Sprintf("return await eda.dmt_EditorControl.closeDocument(%q)", cur.Context.TabID)
-			if _, err := requestAction(cfg, "debug.exec_js", win, map[string]any{"code": closeJS}); err != nil {
-				return fmt.Errorf("close document failed: %w", err)
-			}
-			time.Sleep(1 * time.Second)
-			if _, err := requestAction(cfg, "document.open", win,
-				map[string]any{"uuid": target}); err != nil {
-				return fmt.Errorf("reopen after close failed: %w", err)
-			}
-			// Poll until the reopened document is the live active one.
-			deadline := time.Now().Add(10 * time.Second)
-			for {
-				cur, err = requestAction(cfg, "document.current", win, nil)
-				if err == nil && cur.Context != nil && cur.Context.DocumentUUID == target {
-					break
-				}
-				if time.Now().After(deadline) {
-					return fmt.Errorf("document %s did not become active within 10s after reopen", target)
-				}
-				time.Sleep(500 * time.Millisecond)
 			}
 			// Restore the pre-reload active document. reopen leaves the target
 			// foreground even when the caller reloaded a NON-active page, so
@@ -421,4 +382,58 @@ func strField(m map[string]any, key string) string {
 		return s
 	}
 	return ""
+}
+
+// reloadDocumentByUUID saves + closes + reopens document `target` in window
+// `win` and waits for it to become the active document again — the extracted
+// core of `doc reload`, shared with `pcb clear`'s verify pass (#121: some
+// primitives are only enumerable after a real close/reopen, so a clear must
+// reload before it can trust "the board is empty"). Brings the target to the
+// foreground first when it isn't already. Returns the document's type
+// ("pcb"/"schematic") so callers can branch.
+func reloadDocumentByUUID(cfg *appConfig, win, target string) (string, error) {
+	cur, err := requestAction(cfg, "document.current", win, nil)
+	if err != nil {
+		return "", err
+	}
+	if cur.Context == nil || cur.Context.DocumentUUID != target || cur.Context.TabID == "" {
+		if _, err := requestAction(cfg, "document.open", win, map[string]any{"uuid": target}); err != nil {
+			return "", err
+		}
+		cur, err = requestAction(cfg, "document.current", win, nil)
+		if err != nil {
+			return "", err
+		}
+		if cur.Context == nil || cur.Context.DocumentUUID != target || cur.Context.TabID == "" {
+			return "", fmt.Errorf("could not activate document %s before reload (active=%v)", target, cur.Context)
+		}
+	}
+	docType := cur.Context.DocumentType
+	saveAction := "schematic.save"
+	if docType == "pcb" {
+		saveAction = "pcb.save"
+	}
+	if _, err := requestAction(cfg, saveAction, win, nil); err != nil {
+		return docType, fmt.Errorf("save before reload failed: %w", err)
+	}
+	closeJS := fmt.Sprintf("return await eda.dmt_EditorControl.closeDocument(%q)", cur.Context.TabID)
+	if _, err := requestAction(cfg, "debug.exec_js", win, map[string]any{"code": closeJS}); err != nil {
+		return docType, fmt.Errorf("close document failed: %w", err)
+	}
+	time.Sleep(1 * time.Second)
+	if _, err := requestAction(cfg, "document.open", win, map[string]any{"uuid": target}); err != nil {
+		return docType, fmt.Errorf("reopen after close failed: %w", err)
+	}
+	// Poll until the reopened document is the live active one.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		cur, err = requestAction(cfg, "document.current", win, nil)
+		if err == nil && cur.Context != nil && cur.Context.DocumentUUID == target {
+			return docType, nil
+		}
+		if time.Now().After(deadline) {
+			return docType, fmt.Errorf("document %s did not become active within 10s after reopen", target)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }

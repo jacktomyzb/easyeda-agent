@@ -566,12 +566,21 @@ rotate first ('--patch {"rotation":…}'), then --center in a second call.`,
 	// silk so the board is truly reset. Keeps locked primitives + the board outline.
 	{
 		var only string
-		var dryRun, noPreserveOutline, includeLocked bool
+		var dryRun, noPreserveOutline, includeLocked, noVerify bool
 		c := &cobra.Command{
 			Use:   "clear",
 			Short: "One-shot PCB reset: components + routing + copper + regions + silk (keeps locked primitives & the board outline)",
-			Args:  cobra.NoArgs,
-			Example: `  easyeda pcb clear                        # reset board content, keep locked primitives + outline
+			Long: `Reset the active PCB's content in one shot. By default the clear runs a
+VERIFY pass (#121): clear → save → doc reload → clear again → final dry-run
+count. Some primitives are only materialized by the engine on save/reload, so
+no enumeration inside a single handler call can see them — the in-call loop
+(#112) fixed enumeration staleness, but real boards still surfaced 3 leftover
+tracks AFTER a reload. The verify pass is exactly the "run it again after a
+reload" the manual workaround was; --no-verify restores the single-pass
+behavior (faster, but re-check with '--dry-run' after a reload yourself).`,
+			Args: cobra.NoArgs,
+			Example: `  easyeda pcb clear                        # reset + reload + verify (usually 2 passes to a provable 0)
+  easyeda pcb clear --no-verify            # single pass, no save/reload (legacy behavior)
   easyeda pcb clear --dry-run              # report what would be deleted, delete nothing
   easyeda pcb clear --only components      # delete only components
   easyeda pcb clear --only routing,copper  # delete only routing + pours/fills
@@ -582,13 +591,17 @@ rotate first ('--patch {"rotation":…}'), then --center in a second call.`,
 				if err != nil {
 					return err
 				}
-				return dispatch(cfg, "pcb.page.clear", window, payload, stdout, stderr)
+				if dryRun || noVerify {
+					return dispatch(cfg, "pcb.page.clear", window, payload, stdout, stderr)
+				}
+				return runPcbClearVerified(cfg, window, payload, only, noPreserveOutline, includeLocked, stdout, stderr)
 			},
 		}
 		c.Flags().StringVar(&only, "only", "", "comma-separated subset to clear: components,routing,copper,regions,silk (omit = all)")
 		c.Flags().BoolVar(&dryRun, "dry-run", false, "report counts without deleting anything")
 		c.Flags().BoolVar(&noPreserveOutline, "no-preserve-outline", false, "also delete the board outline (layer 11); by default it is kept")
 		c.Flags().BoolVar(&includeLocked, "include-locked", false, "also delete locked primitives; by default they are kept")
+		c.Flags().BoolVar(&noVerify, "no-verify", false, "skip the save→reload→re-clear verify pass (#121) — faster, but reload-materialized primitives may survive")
 		pcb.AddCommand(c)
 	}
 
@@ -3689,4 +3702,54 @@ const configName = await eda.pcb_Drc.getCurrentRuleConfigurationName();
 return { targetMil: %.4g, targetMm: MIN_MM, changed, writeOk, verified, configName, before, after,
          hint: changed ? 'run "easyeda pcb pour-rebuild" so existing pours reflow under the new clearance; on a freshly CREATED PCB also run "easyeda doc reload" first — its reflow keeps the creation-time rules snapshot until the document is reopened' : 'already at or above target — nothing written' };
 `, mm, mil)
+}
+
+// runPcbClearVerified is `pcb clear`'s default compound flow (#121):
+//
+//	clear (pass 1) → pcb.save → doc reload → clear (pass 2) → dry-run count
+//
+// The in-call enumeration loop (#112) cured handler-side staleness, but some
+// primitives are only MATERIALIZED by the engine on save/reload — no
+// enumeration inside the first handler call can ever see them (R2: 3 tracks
+// surfaced only after reload). Pass 2 after a real reload is exactly the
+// manual workaround, mechanized; the final dry-run proves (or honestly
+// disproves) that the board is now empty.
+func runPcbClearVerified(cfg *appConfig, window string, payload map[string]any,
+	only string, noPreserveOutline, includeLocked bool, stdout, stderr io.Writer) error {
+	// Pass 1.
+	r1, err := requestAction(cfg, "pcb.page.clear", window, payload)
+	if err != nil {
+		return err
+	}
+	out := map[string]any{"ok": true, "verified": false, "pass1": r1.Result}
+
+	// Save + reload the active document (must be the PCB the clear just ran on).
+	cur, err := requestAction(cfg, "document.current", window, nil)
+	if err != nil || cur.Context == nil || cur.Context.DocumentUUID == "" {
+		fmt.Fprintf(stderr, "warning: could not resolve the active document for the verify pass (%v) — cleared once, NOT verified; run `easyeda doc reload` then `pcb clear --dry-run` to check for reload-materialized leftovers (#121)\n", err)
+		return writeJSON(stdout, out)
+	}
+	if _, err := reloadDocumentByUUID(cfg, window, cur.Context.DocumentUUID); err != nil {
+		fmt.Fprintf(stderr, "warning: reload for the verify pass failed (%v) — cleared once, NOT verified (#121)\n", err)
+		return writeJSON(stdout, out)
+	}
+
+	// Pass 2: whatever the reload materialized.
+	r2, err := requestAction(cfg, "pcb.page.clear", window, payload)
+	if err != nil {
+		fmt.Fprintf(stderr, "warning: verify-pass clear failed (%v) — pass 1 applied, leftovers unknown (#121)\n", err)
+		return writeJSON(stdout, out)
+	}
+	out["pass2"] = r2.Result
+
+	// Final proof: a dry-run count of what would STILL be deleted (usually 0).
+	dryPayload, err := buildPcbClearPayload(only, true, noPreserveOutline, includeLocked)
+	if err == nil {
+		if r3, derr := requestAction(cfg, "pcb.page.clear", window, dryPayload); derr == nil {
+			out["remainingAfterVerify"] = r3.Result
+		}
+	}
+	out["verified"] = true
+	out["note"] = "verify pass ran: pass1 = in-call clear, pass2 = reload-materialized leftovers (#121); remainingAfterVerify is the post-verify dry-run count — non-zero means locked/preserved primitives or a deeper engine issue"
+	return writeJSON(stdout, out)
 }
