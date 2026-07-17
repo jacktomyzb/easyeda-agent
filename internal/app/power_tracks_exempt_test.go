@@ -71,6 +71,35 @@ func TestSplitPowerNotPoured(t *testing.T) {
 	}
 }
 
+// TestSplitPowerNotPouredPlaneAndInfo is #117: a net recorded as poured-into-
+// PLANE by power-planes must not block (pour.list cannot see it after reload,
+// #110), and an INFO-level finding (the check's own blind-plane downgrade) never
+// blocks even with no state at all.
+func TestSplitPowerNotPouredPlaneAndInfo(t *testing.T) {
+	findings := []pcbCheckFinding{
+		{Type: "power-not-poured", Level: "WARN", Net: "GND", Message: "no visible pour"},
+		{Type: "power-not-poured", Level: "WARN", Net: "5V", Message: "no copper pour"},
+	}
+	st := &workflow.State{Project: "ceshi"}
+	st.SetPlanePouredNets([]string{"GND"})
+	isExempt := func(net string) bool { return st.IsPowerTracksNet(net) || st.IsPlanePouredNet(net) }
+	blocking, exempt := splitPowerNotPoured(findings, isExempt)
+	if got := nets(blocking); !equal(got, []string{"5V"}) {
+		t.Errorf("blocking = %v, want [5V]", got)
+	}
+	if got := nets(exempt); !equal(got, []string{"GND"}) {
+		t.Errorf("exempt = %v, want [GND]", got)
+	}
+
+	// INFO level is exempt even with a nil membership test.
+	blocking, exempt = splitPowerNotPoured([]pcbCheckFinding{
+		{Type: "power-not-poured", Level: "INFO", Net: "GND"},
+	}, nil)
+	if len(blocking) != 0 || len(exempt) != 1 {
+		t.Fatalf("INFO finding: blocking=%d exempt=%d, want 0/1", len(blocking), len(exempt))
+	}
+}
+
 // TestSplitPowerNotPouredNilTest: a nil membership test (no state at all) must
 // keep the gate exactly as strict as before.
 func TestSplitPowerNotPouredNilTest(t *testing.T) {

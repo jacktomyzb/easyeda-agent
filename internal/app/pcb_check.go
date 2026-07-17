@@ -1212,7 +1212,17 @@ func fetchPcbPours(cfg *appConfig, window string) ([]pcbPourP, error) {
 // thin 3V3 tracks). Flags every power net (isGlobalNet, incl. GND) with ≥2 pads
 // that has NO same-net pour and is bound to NO PLANE — its current is carried by
 // tracks alone (or is unrouted). Single-pad nets (test points) are skipped.
-func findPowerNotPoured(pads []pcbPadP, pouredNets map[string]bool) []pcbCheckFinding {
+//
+// blindPlanes is the count of inner PLANE layers whose net binding is UNKNOWN —
+// after a doc reload the platform stores PLANE-layer pours in negative-image
+// form with no extension-API read path (#110), so such a layer very likely
+// carries the missing pour (the power-planes recipe puts GND there). When
+// blindPlanes > 0 a GND-class net is downgraded to INFO with a message that
+// points at `pcb drc` as the arbiter instead of suggesting `pcb power-planes` —
+// the command that poured the invisible plane in the first place (#117's
+// deadlock). Non-GND power nets keep WARN: the recipe leaves them on SIGNAL
+// layers where their pours stay visible.
+func findPowerNotPoured(pads []pcbPadP, pouredNets map[string]bool, blindPlanes int) []pcbCheckFinding {
 	padCount := map[string]int{}
 	for _, p := range pads {
 		n := strings.TrimSpace(p.Net)
@@ -1229,6 +1239,13 @@ func findPowerNotPoured(pads []pcbPadP, pouredNets map[string]bool) []pcbCheckFi
 	var out []pcbCheckFinding
 	for _, n := range nets {
 		if padCount[n] < 2 || pouredNets[n] {
+			continue
+		}
+		if blindPlanes > 0 && isGndNetName(n) {
+			out = append(out, pcbCheckFinding{
+				Type: "power-not-poured", Level: "INFO", Net: n,
+				Message: fmt.Sprintf("power net %s (%d pads) has no VISIBLE pour — but the board carries %d inner PLANE layer(s) with unknown net: PLANE-layer pours are invisible to pcb.pour.list after a doc reload (#110), so this is most likely that pour; treat `pcb drc` Connection=0 as the arbiter — do NOT re-run `pcb power-planes` just to clear this finding (#117)", n, padCount[n], blindPlanes),
+			})
 			continue
 		}
 		fix := fmt.Sprintf("`pcb pour-fit --net %s` (2-layer) or `pcb power-planes` (4-layer)", n)
@@ -1724,11 +1741,21 @@ func gatherPcbCheckReport(cfg *appConfig, window string, couplingW float64, stde
 		}
 		// power-not-poured (能力 B) + width-under-spec (能力 A) — both WARN, both
 		// gate under --strict. Share pouredNets so a thin stitch stub on a poured
-		// net is exempt.
-		for _, f := range findPowerNotPoured(pads, pouredNets) {
+		// net is exempt. blindPlanes = PLANE layers whose pour is platform-invisible
+		// after reload (#110) — GND findings degrade to INFO then (#117), and like
+		// the via-crosses-plane INFO they stay out of Summary.Warnings (--strict).
+		blindPlanes := 0
+		for _, pl := range planes {
+			if len(pl.Nets) == 0 {
+				blindPlanes++
+			}
+		}
+		for _, f := range findPowerNotPoured(pads, pouredNets, blindPlanes) {
 			rep.Findings = append(rep.Findings, f)
 			rep.Summary.PowerNotPoured++
-			rep.Summary.Warnings++
+			if f.Level != "INFO" {
+				rep.Summary.Warnings++
+			}
 			rep.Summary.Total++
 		}
 		for _, f := range findWidthUnderSpec(tracks, pads, vias, netClassWidthTable(rules)) {

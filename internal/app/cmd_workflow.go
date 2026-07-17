@@ -139,27 +139,46 @@ func workflowNext(st *pcbStageState, f workflowFacts) (next, why string) {
 // findings (with their 规范 § references) are printed and the stage stays
 // unconfirmed.
 //
-// One documented exemption (issue #114): a power net that `pcb power-planes`
-// itself decided to route as tracks (no inner plane left for it — recorded in
-// State.PowerTracksNets) is NOT counted as blocking. Its power-not-poured
-// finding is still printed, flagged as exempt. Without this the two tools
-// contradict each other and the flow deadlocks.
+// Documented exemptions — without them the tools contradict each other and the
+// flow deadlocks; exempt findings are still printed, flagged with their reason:
+//   - issue #114: a power net that `pcb power-planes` itself decided to route
+//     as tracks (no inner plane left for it — State.PowerTracksNets);
+//   - issue #117: a power net power-planes poured onto a layer it then flipped
+//     to 内电层/PLANE (State.PlanePouredNets) — pour.list cannot see PLANE-layer
+//     pours after a reload (#110), so re-flagging it would demand re-running
+//     the very command that poured it;
+//   - INFO-level power-not-poured (the check's own #110 plane-invisibility
+//     downgrade) never blocks.
 func runPostRouteCheckGate(cfg *appConfig, window, project string, st *pcbStageState, f workflowFacts, stdout, stderr io.Writer) error {
 	rep, err := gatherPcbCheckReport(cfg, window, 0, stderr)
 	if err != nil {
 		return fmt.Errorf("post-route check gate: %w", err)
 	}
-	pnpBlocking, pnpExempt := splitPowerNotPoured(rep.Findings, st.IsPowerTracksNet)
+	exemptReason := func(fd pcbCheckFinding) string {
+		switch {
+		case st.IsPowerTracksNet(fd.Net):
+			return "exempt: power-planes routed it as tracks (#114)"
+		case st.IsPlanePouredNet(fd.Net):
+			return "exempt: power-planes poured it into an inner PLANE — invisible to pour.list after reload (#110/#117); verify with `pcb drc` Connection=0"
+		case fd.Level == "INFO":
+			return "non-blocking INFO (#110 plane-invisibility downgrade)"
+		default:
+			return ""
+		}
+	}
+	pnpBlocking, pnpExempt := splitPowerNotPoured(rep.Findings, func(net string) bool {
+		return st.IsPowerTracksNet(net) || st.IsPlanePouredNet(net)
+	})
 	for _, fd := range pnpExempt {
-		fmt.Fprintf(stderr, "   %-5s %-17s %s  (exempt: power-planes routed it as tracks)\n",
-			"INFO", fd.Type, fd.Message)
+		fmt.Fprintf(stderr, "   %-5s %-17s %s  (%s)\n",
+			"INFO", fd.Type, fd.Message, exemptReason(fd))
 	}
 	blocking := rep.Summary.Errors + len(pnpBlocking) + rep.Summary.WidthUnderSpec
 	if blocking > 0 {
 		fmt.Fprintf(stderr, "❌ post-route check gate FAILED — %d blocking finding(s) (ERROR=%d powerNotPoured=%d widthUnderSpec=%d):\n",
 			blocking, rep.Summary.Errors, len(pnpBlocking), rep.Summary.WidthUnderSpec)
 		for _, fd := range rep.Findings {
-			if fd.Type == "power-not-poured" && st.IsPowerTracksNet(fd.Net) {
+			if fd.Type == "power-not-poured" && exemptReason(fd) != "" {
 				continue // already printed above as exempt
 			}
 			if fd.Level == "ERROR" || fd.Type == "power-not-poured" || fd.Type == "width-under-spec" {
@@ -177,7 +196,7 @@ func runPostRouteCheckGate(cfg *appConfig, window, project string, st *pcbStageS
 	}
 	note := fmt.Sprintf("pcb check: 0 blocking (warnings=%d, tracks=%d)", rep.Summary.Warnings, f.RoutedLines)
 	if len(pnpExempt) > 0 {
-		note += fmt.Sprintf(", %d power-not-poured exempt (power-planes routed as tracks)", len(pnpExempt))
+		note += fmt.Sprintf(", %d power-not-poured exempt (power-planes verdicts / plane invisibility)", len(pnpExempt))
 	}
 	st.Confirm(stagePostRouteChecked, "gate-pass", note)
 	if err := savePcbStageState(st); err != nil {

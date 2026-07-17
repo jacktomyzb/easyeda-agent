@@ -152,6 +152,15 @@ type State struct {
 	// the plane, not pouring it fails the gate (issue #114). Exempt findings are
 	// still PRINTED, just not blocking.
 	PowerTracksNets []string `json:"powerTracksNets,omitempty"`
+	// PlanePouredNets are the power nets `pcb power-planes` poured onto an inner
+	// layer it then flipped to 内电层/PLANE. The platform stores PLANE-layer pours
+	// in negative-image form with ZERO extension-API read path after a doc reload
+	// (issue #110) — pcb.pour.list simply cannot see them — so the
+	// power-not-poured rule would flag the very net the tool just poured, and its
+	// suggested fix would be to re-run the command that poured it (issue #117:
+	// the gate deadlocks). The post_route_checked gate reads this list and does
+	// NOT count those findings as blocking; they are still printed as exempt.
+	PlanePouredNets []string `json:"planePouredNets,omitempty"`
 	History         []Event  `json:"history,omitempty"`
 	UpdatedAt       string   `json:"updatedAt"`
 }
@@ -161,6 +170,37 @@ type State struct {
 // list CLEARS the record — a power-planes run that poured everything must not
 // leave a stale exemption standing.
 func (s *State) SetPowerTracksNets(nets []string) {
+	s.PowerTracksNets = normalizeNetList(nets)
+}
+
+// IsPowerTracksNet reports whether a net was recorded as "routed as tracks by
+// power-planes" (case-insensitive: net names round-trip through several readers).
+func (s *State) IsPowerTracksNet(net string) bool {
+	if s == nil {
+		return false
+	}
+	return netListContains(s.PowerTracksNets, net)
+}
+
+// SetPlanePouredNets records the nets power-planes poured onto a layer it then
+// flipped to 内电层/PLANE — invisible to pour.list after reload (#110), so the
+// gate must trust this record instead (#117). Same clear-on-empty semantics as
+// SetPowerTracksNets: a run that flipped nothing wipes any stale exemption.
+func (s *State) SetPlanePouredNets(nets []string) {
+	s.PlanePouredNets = normalizeNetList(nets)
+}
+
+// IsPlanePouredNet reports whether a net was recorded as poured into an inner
+// PLANE by power-planes (case-insensitive, like IsPowerTracksNet).
+func (s *State) IsPlanePouredNet(net string) bool {
+	if s == nil {
+		return false
+	}
+	return netListContains(s.PlanePouredNets, net)
+}
+
+// normalizeNetList trims, de-duplicates and sorts a net list; empty in, nil out.
+func normalizeNetList(nets []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(nets))
 	for _, n := range nets {
@@ -173,23 +213,17 @@ func (s *State) SetPowerTracksNets(nets []string) {
 	}
 	sort.Strings(out)
 	if len(out) == 0 {
-		s.PowerTracksNets = nil
-		return
+		return nil
 	}
-	s.PowerTracksNets = out
+	return out
 }
 
-// IsPowerTracksNet reports whether a net was recorded as "routed as tracks by
-// power-planes" (case-insensitive: net names round-trip through several readers).
-func (s *State) IsPowerTracksNet(net string) bool {
-	if s == nil {
-		return false
-	}
+func netListContains(list []string, net string) bool {
 	net = strings.TrimSpace(net)
 	if net == "" {
 		return false
 	}
-	for _, n := range s.PowerTracksNets {
+	for _, n := range list {
 		if strings.EqualFold(strings.TrimSpace(n), net) {
 			return true
 		}
@@ -253,6 +287,11 @@ func (s *State) InvalidateFrom(from Stage, cause string) []Stage {
 		//     genuinely un-poured power net. The next power-planes run re-derives
 		//     and re-records it.
 		s.PowerTracksNets = nil
+		// PlanePouredNets follows the same lifecycle (#117): the PLANE pour is a
+		// stackup/net-set fact, untouched by routing edits, but a placement-class
+		// rebuild may change which net owns the plane — drop it and let the next
+		// power-planes run re-record.
+		s.PlanePouredNets = nil
 	}
 	if Rank(StageOutlineConfirmed) >= fromRank {
 		s.OutlineFP = nil

@@ -325,3 +325,61 @@ func TestPowerTracksNetsInvalidationSemantics(t *testing.T) {
 		})
 	}
 }
+
+// TestPlanePouredNetsRoundTrip is #117's state half: power-planes' "poured into
+// an inner PLANE" record must survive save/load (the gate reads it in a later
+// process) and follow the same placement-lifetime as PowerTracksNets — a
+// routing edit keeps it, a placement-class invalidation drops it.
+func TestPlanePouredNetsRoundTrip(t *testing.T) {
+	t.Setenv(EnvDir, t.TempDir())
+
+	st, err := Load("proj-pp")
+	if err != nil {
+		t.Fatalf("fresh load: %v", err)
+	}
+	st.SetPlanePouredNets([]string{" GND ", "GND", ""})
+	if got := st.PlanePouredNets; len(got) != 1 || got[0] != "GND" {
+		t.Fatalf("SetPlanePouredNets must trim/dedup: got %v", got)
+	}
+	if err := Save(st); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := Load("proj-pp")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !got.IsPlanePouredNet("GND") || !got.IsPlanePouredNet("gnd") {
+		t.Fatalf("recorded plane net must survive the reload: %v", got.PlanePouredNets)
+	}
+	if got.IsPlanePouredNet("3V3") {
+		t.Fatal("unrecorded net must not be exempt")
+	}
+	got.SetPlanePouredNets(nil)
+	if got.PlanePouredNets != nil {
+		t.Fatalf("empty verdict must clear the record, got %v", got.PlanePouredNets)
+	}
+}
+
+func TestPlanePouredNetsInvalidationSemantics(t *testing.T) {
+	cases := []struct {
+		name string
+		from Stage
+		want bool
+	}{
+		{"routing-class invalidation keeps it", StagePostRouteChecked, true},
+		{"placement_confirmed drops it", StagePlacementConfirmed, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &State{Project: "p", Confirmed: map[Stage]bool{}}
+			for _, s := range Order {
+				st.Confirm(s, "confirm", "")
+			}
+			st.SetPlanePouredNets([]string{"GND"})
+			st.InvalidateFrom(tc.from, "test")
+			if got := st.IsPlanePouredNet("GND"); got != tc.want {
+				t.Fatalf("InvalidateFrom(%s): recorded=%v, want %v", tc.from, got, tc.want)
+			}
+		})
+	}
+}

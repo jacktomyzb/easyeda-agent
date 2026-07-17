@@ -248,13 +248,25 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 		fmt.Fprintf(stderr, "power-planes: pour rebuild failed: %v\n", err)
 	}
 
-	// 6. Publish the "these nets are tracks, not planes" verdict to the project's
-	//    workflow state so the post_route_checked gate stops treating our own
-	//    deliberate decision as a blocking defect (issue #114). Written LAST: the
-	//    mutating actions above make the daemon invalidate downstream stages
-	//    (which reloads + rewrites this same file), so an earlier write could be
-	//    clobbered.
-	recordPowerTracksNets(cfg, window, routeAsTracks, stderr)
+	// 6. Publish two verdicts to the project's workflow state so the
+	//    post_route_checked gate stops treating our own deliberate decisions as
+	//    blocking defects. Written LAST: the mutating actions above make the
+	//    daemon invalidate downstream stages (which reloads + rewrites this same
+	//    file), so an earlier write could be clobbered.
+	//      • routeAsTracks — "these nets are tracks, not planes" (issue #114);
+	//      • planePoured   — "these nets ARE poured, on a layer now flipped to
+	//        内电层/PLANE" — pour.list cannot see PLANE-layer pours after a doc
+	//        reload (#110), so without this record power-not-poured re-flags the
+	//        net this very command just poured and the gate deadlocks (#117).
+	var planePoured []string
+	if planeFlipped {
+		for _, p := range plan {
+			if p.Layer == gndLayer && p.Poured {
+				planePoured = append(planePoured, p.Net)
+			}
+		}
+	}
+	recordPowerPlanesVerdicts(cfg, window, routeAsTracks, planePoured, stderr)
 
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
@@ -266,37 +278,48 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 	})
 }
 
-// recordPowerTracksNets persists power-planes' routeAsTracks verdict into the
-// project's workflow state (State.PowerTracksNets) — the state-interop half of
-// issue #114: the post_route_checked gate reads it to exempt these nets from
-// power-not-poured. An EMPTY list is written too (clears a stale exemption from
-// an earlier run that had to punt a net to tracks).
+// recordPowerPlanesVerdicts persists power-planes' two per-run verdicts into the
+// project's workflow state in ONE load/save:
+//   - tracksNets → State.PowerTracksNets (issue #114): nets deliberately routed
+//     as tracks; the post_route_checked gate exempts their power-not-poured.
+//   - planeNets → State.PlanePouredNets (issue #117): nets poured on a layer
+//     then flipped to 内电层/PLANE — invisible to pour.list after reload (#110),
+//     so the gate must trust this record or it deadlocks on its own output.
+//
+// EMPTY lists are written too (clears stale exemptions from an earlier run).
 //
 // Best-effort by design: power-planes is a copper tool, and the copper is
 // already on the board by the time this runs — a state file that cannot be
 // resolved/read/written is a warning, never a failure of the pour itself.
-func recordPowerTracksNets(cfg *appConfig, window string, nets []string, stderr io.Writer) {
+func recordPowerPlanesVerdicts(cfg *appConfig, window string, tracksNets, planeNets []string, stderr io.Writer) {
 	project, err := resolveStageProject(cfg, window)
 	if err != nil {
 		fmt.Fprintf(stderr, "power-planes: could not resolve the project for the workflow state (%v) — "+
-			"the post-route check gate may flag %d track-routed power net(s) as power-not-poured (issue #114); "+
-			"re-run with --project to record them\n", err, len(nets))
+			"the post-route check gate may flag %d track-routed (#114) / %d plane-poured (#117) power net(s) as power-not-poured; "+
+			"re-run with --project to record them\n", err, len(tracksNets), len(planeNets))
 		return
 	}
 	st, err := loadPcbStageState(project)
 	if err != nil {
-		fmt.Fprintf(stderr, "power-planes: workflow state for %q unreadable (%v) — track-routed power nets not recorded\n", project, err)
+		fmt.Fprintf(stderr, "power-planes: workflow state for %q unreadable (%v) — power-planes verdicts not recorded\n", project, err)
 		return
 	}
-	st.SetPowerTracksNets(nets)
+	st.SetPowerTracksNets(tracksNets)
+	st.SetPlanePouredNets(planeNets)
 	if err := savePcbStageState(st); err != nil {
-		fmt.Fprintf(stderr, "power-planes: could not persist the track-routed power nets (%v)\n", err)
+		fmt.Fprintf(stderr, "power-planes: could not persist the power-planes verdicts (%v)\n", err)
 		return
 	}
-	if len(nets) > 0 {
+	if len(tracksNets) > 0 {
 		fmt.Fprintf(stderr, "power-planes: recorded %s as routed-as-tracks in the workflow state — "+
 			"the post-route check gate will not block on their power-not-poured findings (issue #114)\n",
-			strings.Join(nets, ", "))
+			strings.Join(tracksNets, ", "))
+	}
+	if len(planeNets) > 0 {
+		fmt.Fprintf(stderr, "power-planes: recorded %s as poured-into-PLANE in the workflow state — "+
+			"pour.list cannot see PLANE-layer pours after a reload (#110), so the post-route check gate "+
+			"trusts this record instead of re-flagging them (issue #117)\n",
+			strings.Join(planeNets, ", "))
 	}
 }
 

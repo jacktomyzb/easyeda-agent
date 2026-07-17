@@ -17,17 +17,23 @@ package app
 
 // splitPowerNotPoured partitions the `power-not-poured` findings into the ones
 // that BLOCK the post-route gate and the ones a prior `pcb power-planes` run
-// already excused (its net was routed as tracks on purpose). Findings of any
+// already excused (its net was routed as tracks on purpose — #114 — or poured
+// into an inner PLANE that pour.list can no longer see — #117). Findings of any
 // other type are ignored — callers keep counting those themselves.
 //
-// isExempt is the membership test (State.IsPowerTracksNet); a nil test exempts
+// An INFO-level finding never blocks either: the check itself downgrades a
+// power-not-poured to INFO when the board carries a PLANE layer whose pour is
+// platform-invisible (#110/#117) — gating on it would deadlock a project with
+// no workflow state (standalone `pcb check` boards, stale state).
+//
+// isExempt is the membership test (state-recorded verdicts); a nil test exempts
 // nothing, so a project with no recorded verdict gates exactly as before.
 func splitPowerNotPoured(findings []pcbCheckFinding, isExempt func(net string) bool) (blocking, exempt []pcbCheckFinding) {
 	for _, fd := range findings {
 		if fd.Type != "power-not-poured" {
 			continue
 		}
-		if isExempt != nil && isExempt(fd.Net) {
+		if fd.Level == "INFO" || (isExempt != nil && isExempt(fd.Net)) {
 			exempt = append(exempt, fd)
 			continue
 		}

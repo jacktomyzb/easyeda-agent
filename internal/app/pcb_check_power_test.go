@@ -2,6 +2,7 @@ package app
 
 import (
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ func TestFindPowerNotPoured(t *testing.T) {
 	}
 	poured := map[string]bool{"GND": true} // GND is poured, others are not
 
-	out := findPowerNotPoured(pads, poured)
+	out := findPowerNotPoured(pads, poured, 0)
 	got := map[string]bool{}
 	for _, f := range out {
 		if f.Type != "power-not-poured" || f.Level != "WARN" {
@@ -40,6 +41,38 @@ func TestFindPowerNotPoured(t *testing.T) {
 	}
 	if got["VREF"] {
 		t.Error("VREF has a single pad — must not be flagged")
+	}
+}
+
+// TestFindPowerNotPouredBlindPlane is #117: a board carrying a PLANE layer whose
+// pour is platform-invisible after reload (#110) must not flag GND as a blocking
+// WARN — that finding's own fix would be to re-run the command that poured the
+// invisible plane. GND degrades to INFO; non-GND power nets keep WARN (the
+// power-planes recipe leaves their pours on visible SIGNAL layers).
+func TestFindPowerNotPouredBlindPlane(t *testing.T) {
+	pads := []pcbPadP{
+		{Designator: "U1", Number: "1", Net: "GND"}, {Designator: "C1", Number: "1", Net: "GND"},
+		{Designator: "U1", Number: "2", Net: "+5V"}, {Designator: "C1", Number: "2", Net: "+5V"},
+	}
+	out := findPowerNotPoured(pads, map[string]bool{}, 1)
+	byNet := map[string]pcbCheckFinding{}
+	for _, f := range out {
+		byNet[f.Net] = f
+	}
+	if f, ok := byNet["GND"]; !ok || f.Level != "INFO" {
+		t.Errorf("GND with a blind PLANE present: want INFO finding, got %+v", f)
+	} else if !strings.Contains(f.Message, "pcb drc") || strings.Contains(f.Message, "`pcb power-planes` (4-layer)") {
+		t.Errorf("GND INFO message must point at pcb drc, not suggest power-planes: %s", f.Message)
+	}
+	if f, ok := byNet["+5V"]; !ok || f.Level != "WARN" {
+		t.Errorf("+5V must stay WARN even with a blind PLANE present, got %+v", f)
+	}
+	// Without a blind plane GND blocks as before.
+	out = findPowerNotPoured(pads, map[string]bool{}, 0)
+	for _, f := range out {
+		if f.Net == "GND" && f.Level != "WARN" {
+			t.Errorf("no blind plane: GND must be WARN, got %+v", f)
+		}
 	}
 }
 
