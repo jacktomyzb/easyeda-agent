@@ -6318,6 +6318,585 @@ const pcbDrcRules: Handler = async () => {
 	return { result: { rules: rules ?? null } };
 };
 
+// ─── Per-net DRC sub-rules (网络规则 / 网络间规则 / 区域规则) ──────────
+// EasyEDA Pro exposes a parallel set of @beta rule scopes on eda.pcb_Drc:
+//   • getNetRules        / overwriteNetRules        — per-net overrides
+//   • getNetByNetRules   / overwriteNetByNetRules   — per-net-pair overrides
+//   • getRegionRules     / overwriteRegionRules     — per-region overrides
+//
+// The SDK element shapes (IPCB_NetRuleItem / IPCB_NetByNetRuleItem /
+// IPCB_RegionRuleItem) are @beta and not type-pinned in this repo, so the read
+// actions return them VERBATIM and the write actions use a recursive deep-merge
+// keyed by the entry's net (or net-pair / region-id), tolerating SDK shape
+// variance. The CLI exposes both JSON pass-through (--file/--rules) and
+// structured flags (--track-width, --clearance, ...) → patch map.
+
+/** Coerce a payload field to an array (or undefined). */
+function optionalArray<T = unknown>(payload: Payload, field: string): Array<T> | undefined {
+	const v = payload[field];
+	return Array.isArray(v) ? v as Array<T> : undefined;
+}
+
+/** Find a net-rule entry's net name — tolerates SDK field-name variance. */
+function netOfRule(entry: unknown): string | undefined {
+	if (!entry || typeof entry !== 'object') return undefined;
+	const e = entry as Record<string, unknown>;
+	for (const k of ['net', 'netName', 'name', 'netNameStr']) {
+		if (typeof e[k] === 'string') return e[k] as string;
+	}
+	return undefined;
+}
+
+/** Find a net-by-net-rule entry's net pair — order-normalized for matching. */
+function netPairOfRule(entry: unknown): [string, string] | undefined {
+	if (!entry || typeof entry !== 'object') return undefined;
+	const e = entry as Record<string, unknown>;
+	const a = e.netA ?? e.firstNet ?? e.positiveNet ?? e.net1 ?? e.net_a;
+	const b = e.netB ?? e.secondNet ?? e.negativeNet ?? e.net2 ?? e.net_b;
+	if (typeof a === 'string' && typeof b === 'string') {
+		return a < b ? [a, b] : [b, a]; // canonical order for order-insensitive match
+	}
+	return undefined;
+}
+
+/** Find a region-rule entry's identifier — tolerates SDK field-name variance. */
+function regionIdOfRule(entry: unknown): string | undefined {
+	if (!entry || typeof entry !== 'object') return undefined;
+	const e = entry as Record<string, unknown>;
+	for (const k of ['regionId', 'id', 'name', 'ruleName']) {
+		if (typeof e[k] === 'string') return e[k] as string;
+	}
+	return undefined;
+}
+
+/** Recursively deep-merge `patch` into `target` (mutates target). Arrays and
+ *  primitives are replaced, not concatenated. */
+function deepMergeInto(target: unknown, patch: unknown): void {
+	if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return;
+	if (!target || typeof target !== 'object' || Array.isArray(target)) return;
+	const t = target as Record<string, unknown>;
+	const p = patch as Record<string, unknown>;
+	for (const k of Object.keys(p)) {
+		const pv = p[k];
+		if (pv && typeof pv === 'object' && !Array.isArray(pv) && t[k] && typeof t[k] === 'object' && !Array.isArray(t[k])) {
+			deepMergeInto(t[k], pv);
+		}
+		else {
+			t[k] = pv;
+		}
+	}
+}
+
+/** Read the active PCB's per-net DRC rule overrides (网络规则). Verbatim from
+ *  `eda.pcb_Drc.getNetRules()`; @beta SDK shape. */
+const pcbDrcNetRules: Handler = async () => {
+	let netRules: unknown;
+	try {
+		netRules = await eda.pcb_Drc.getNetRules();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read PCB net rules (eda.pcb_Drc.getNetRules — ensure the PCB is the active/foreground tab).');
+	}
+	const arr = Array.isArray(netRules) ? netRules : (netRules ? [netRules] : []);
+	return { result: { netRules: arr, count: arr.length } };
+};
+
+/** Write PER-NET DRC rule overrides. Supports three input shapes via `mode`:
+ *  replace (default — full overwrite), merge (deep-merge by net), or patches
+ *  (structured-flag form {net, patch:{...}}). */
+const pcbDrcNetRulesSet: Handler = async (payload) => {
+	const mode = optionalString(payload, 'mode') ?? 'replace';
+	if (mode !== 'replace' && mode !== 'merge') {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, `mode must be 'replace' or 'merge', got ${JSON.stringify(mode)}.`);
+	}
+
+	let current: Array<Record<string, unknown>> = [];
+	try {
+		const r = await eda.pcb_Drc.getNetRules();
+		if (Array.isArray(r)) current = r as Array<Record<string, unknown>>;
+		else if (r) current = [r as Record<string, unknown>];
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read current net rules before write.');
+	}
+	const beforeCount = current.length;
+	const applied: Array<Record<string, unknown>> = [];
+
+	// Remove by net name (merge mode only — replace mode replaces everything).
+	if (mode === 'merge') {
+		const removeNets = optionalArray<string>(payload, 'removeNets');
+		if (removeNets && removeNets.length) {
+			const remove = new Set(removeNets.map(String));
+			current = current.filter(e => {
+				const n = netOfRule(e);
+				return !n || !remove.has(n);
+			});
+		}
+	}
+
+	let next: Array<Record<string, unknown>>;
+	if (mode === 'replace') {
+		const netRules = optionalArray<Record<string, unknown>>(payload, 'netRules');
+		if (!netRules) {
+			throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'mode=replace requires a `netRules` array.');
+		}
+		next = netRules;
+		applied.push(...netRules.map(e => ({ mode: 'replaced', entry: e })));
+	}
+	else {
+		// merge mode — start from current (after removals), apply upserts then patches.
+		next = current;
+		const upserts = optionalArray<Record<string, unknown>>(payload, 'upserts');
+		if (upserts) {
+			for (const upsert of upserts) {
+				const net = netOfRule(upsert);
+				if (!net) {
+					throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'upsert entry missing a recognizable `net` field (tried net/netName/name).');
+				}
+				const idx = current.findIndex(e => netOfRule(e) === net);
+				if (idx >= 0) {
+					deepMergeInto(current[idx], upsert);
+					applied.push({ net, mode: 'merged', entry: current[idx] });
+				}
+				else {
+					current.push(upsert);
+					applied.push({ net, mode: 'appended', entry: upsert });
+				}
+			}
+		}
+		const patches = optionalArray<Record<string, unknown>>(payload, 'patches');
+		if (patches) {
+			for (const p of patches) {
+				const net = typeof p?.net === 'string' ? p.net : undefined;
+				const patch = p?.patch;
+				if (!net || !patch || typeof patch !== 'object') {
+					throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'patch entry must be {net, patch:{...}}.');
+				}
+				const idx = current.findIndex(e => netOfRule(e) === net);
+				if (idx >= 0) {
+					deepMergeInto(current[idx], patch);
+					applied.push({ net, mode: 'patched', entry: current[idx] });
+				}
+				else {
+					const newEntry: Record<string, unknown> = { net, ...(patch as Record<string, unknown>) };
+					current.push(newEntry);
+					applied.push({ net, mode: 'patched-appended', entry: newEntry });
+				}
+			}
+		}
+	}
+
+	let writeOk: boolean | unknown = false;
+	try {
+		writeOk = await eda.pcb_Drc.overwriteNetRules(next);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to overwrite PCB net rules (eda.pcb_Drc.overwriteNetRules — @beta; system preset → 自定义配置 trap applies).');
+	}
+
+	// Re-read to verify and report the live after-state.
+	let after: Array<Record<string, unknown>> = [];
+	try {
+		const r = await eda.pcb_Drc.getNetRules();
+		if (Array.isArray(r)) after = r as Array<Record<string, unknown>>;
+		else if (r) after = [r as Record<string, unknown>];
+	}
+	catch { /* best-effort */ }
+
+	return {
+		result: {
+			mode,
+			beforeCount,
+			afterCount: after.length,
+			applied,
+			writeOk: writeOk === true,
+			rules: after,
+			hint: 'overwriteNetRules is @beta — a successful write turns an immutable system preset into a per-board 自定义配置 copy. Run `pcb drc` to verify the new rules are enforced.',
+		},
+	};
+};
+
+/** Read the active PCB's per-net-PAIR DRC clearance overrides (网络间规则). */
+const pcbDrcNetByNetRules: Handler = async () => {
+	let netByNetRules: unknown;
+	try {
+		netByNetRules = await eda.pcb_Drc.getNetByNetRules();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read PCB net-by-net rules (eda.pcb_Drc.getNetByNetRules).');
+	}
+	// Per the SDK signature this returns an object map, not an array — normalize
+	// to an array of entries for consistent CLI/agent consumption.
+	let arr: Array<Record<string, unknown>> = [];
+	if (Array.isArray(netByNetRules)) {
+		arr = netByNetRules as Array<Record<string, unknown>>;
+	}
+	else if (netByNetRules && typeof netByNetRules === 'object') {
+		arr = Object.values(netByNetRules).filter(v => v && typeof v === 'object') as Array<Record<string, unknown>>;
+	}
+	return { result: { netByNetRules: arr, count: arr.length } };
+};
+
+/** Write PER-NET-PAIR DRC clearance overrides (网络间规则). Same three input
+ *  shapes as pcbDrcNetRulesSet; entries matched by {netA, netB} pair
+ *  (order-insensitive). */
+const pcbDrcNetByNetRulesSet: Handler = async (payload) => {
+	const mode = optionalString(payload, 'mode') ?? 'replace';
+	if (mode !== 'replace' && mode !== 'merge') {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, `mode must be 'replace' or 'merge', got ${JSON.stringify(mode)}.`);
+	}
+
+	let current: Array<Record<string, unknown>> = [];
+	try {
+		const r = await eda.pcb_Drc.getNetByNetRules();
+		if (Array.isArray(r)) current = r as Array<Record<string, unknown>>;
+		else if (r && typeof r === 'object') current = Object.values(r).filter(v => v && typeof v === 'object') as Array<Record<string, unknown>>;
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read current net-by-net rules before write.');
+	}
+	const beforeCount = current.length;
+	const applied: Array<Record<string, unknown>> = [];
+
+	if (mode === 'merge') {
+		const removePairs = optionalArray<Record<string, unknown>>(payload, 'removePairs');
+		if (removePairs && removePairs.length) {
+			const remKeys = new Set(removePairs.map(p => {
+				const pr = netPairOfRule(p);
+				return pr ? pr.join('|') : '';
+			}).filter(Boolean));
+			current = current.filter(e => {
+				const pr = netPairOfRule(e);
+				return !pr || !remKeys.has(pr.join('|'));
+			});
+		}
+	}
+
+	let next: Array<Record<string, unknown>>;
+	if (mode === 'replace') {
+		const netByNetRules = optionalArray<Record<string, unknown>>(payload, 'netByNetRules');
+		if (!netByNetRules) {
+			throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'mode=replace requires a `netByNetRules` array.');
+		}
+		next = netByNetRules;
+		applied.push(...netByNetRules.map(e => ({ mode: 'replaced', entry: e })));
+	}
+	else {
+		next = current;
+		const upserts = optionalArray<Record<string, unknown>>(payload, 'upserts');
+		if (upserts) {
+			for (const upsert of upserts) {
+				const pr = netPairOfRule(upsert);
+				if (!pr) {
+					throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'upsert entry missing recognizable {netA, netB} fields.');
+				}
+				const key = pr.join('|');
+				const idx = current.findIndex(e => {
+					const ep = netPairOfRule(e);
+					return ep && ep.join('|') === key;
+				});
+				if (idx >= 0) {
+					deepMergeInto(current[idx], upsert);
+					applied.push({ netA: pr[0], netB: pr[1], mode: 'merged', entry: current[idx] });
+				}
+				else {
+					current.push(upsert);
+					applied.push({ netA: pr[0], netB: pr[1], mode: 'appended', entry: upsert });
+				}
+			}
+		}
+		const patches = optionalArray<Record<string, unknown>>(payload, 'patches');
+		if (patches) {
+			for (const p of patches) {
+				const pr = netPairOfRule(p);
+				const patch = p?.patch;
+				if (!pr || !patch || typeof patch !== 'object') {
+					throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'patch entry must be {netA, netB, patch:{...}}.');
+				}
+				const key = pr.join('|');
+				const idx = current.findIndex(e => {
+					const ep = netPairOfRule(e);
+					return ep && ep.join('|') === key;
+				});
+				if (idx >= 0) {
+					deepMergeInto(current[idx], patch);
+					applied.push({ netA: pr[0], netB: pr[1], mode: 'patched', entry: current[idx] });
+				}
+				else {
+					const newEntry: Record<string, unknown> = { netA: pr[0], netB: pr[1], ...(patch as Record<string, unknown>) };
+					current.push(newEntry);
+					applied.push({ netA: pr[0], netB: pr[1], mode: 'patched-appended', entry: newEntry });
+				}
+			}
+		}
+	}
+
+	let writeOk: boolean | unknown = false;
+	try {
+		writeOk = await eda.pcb_Drc.overwriteNetByNetRules(next);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to overwrite PCB net-by-net rules (eda.pcb_Drc.overwriteNetByNetRules — @beta).');
+	}
+
+	let after: Array<Record<string, unknown>> = [];
+	try {
+		const r = await eda.pcb_Drc.getNetByNetRules();
+		if (Array.isArray(r)) after = r as Array<Record<string, unknown>>;
+		else if (r && typeof r === 'object') after = Object.values(r).filter(v => v && typeof v === 'object') as Array<Record<string, unknown>>;
+	}
+	catch { /* best-effort */ }
+
+	return {
+		result: {
+			mode,
+			beforeCount,
+			afterCount: after.length,
+			applied,
+			writeOk: writeOk === true,
+			netByNetRules: after,
+		},
+	};
+};
+
+/** Read the active PCB's per-REGION DRC rule overrides (区域规则). */
+const pcbDrcRegionRules: Handler = async () => {
+	let regionRules: unknown;
+	try {
+		regionRules = await eda.pcb_Drc.getRegionRules();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read PCB region rules (eda.pcb_Drc.getRegionRules).');
+	}
+	const arr = Array.isArray(regionRules) ? regionRules : (regionRules ? [regionRules] : []);
+	return { result: { regionRules: arr, count: arr.length } };
+};
+
+/** Write PER-REGION DRC rule overrides (区域规则). Same three input shapes;
+ *  entries matched by `regionId` (or `name`). */
+const pcbDrcRegionRulesSet: Handler = async (payload) => {
+	const mode = optionalString(payload, 'mode') ?? 'replace';
+	if (mode !== 'replace' && mode !== 'merge') {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, `mode must be 'replace' or 'merge', got ${JSON.stringify(mode)}.`);
+	}
+
+	let current: Array<Record<string, unknown>> = [];
+	try {
+		const r = await eda.pcb_Drc.getRegionRules();
+		if (Array.isArray(r)) current = r as Array<Record<string, unknown>>;
+		else if (r) current = [r as Record<string, unknown>];
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read current region rules before write.');
+	}
+	const beforeCount = current.length;
+	const applied: Array<Record<string, unknown>> = [];
+
+	if (mode === 'merge') {
+		const removeIds = optionalArray<string>(payload, 'removeIds');
+		if (removeIds && removeIds.length) {
+			const remove = new Set(removeIds.map(String));
+			current = current.filter(e => {
+				const id = regionIdOfRule(e);
+				return !id || !remove.has(id);
+			});
+		}
+	}
+
+	let next: Array<Record<string, unknown>>;
+	if (mode === 'replace') {
+		const regionRules = optionalArray<Record<string, unknown>>(payload, 'regionRules');
+		if (!regionRules) {
+			throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'mode=replace requires a `regionRules` array.');
+		}
+		next = regionRules;
+		applied.push(...regionRules.map(e => ({ mode: 'replaced', entry: e })));
+	}
+	else {
+		next = current;
+		const upserts = optionalArray<Record<string, unknown>>(payload, 'upserts');
+		if (upserts) {
+			for (const upsert of upserts) {
+				const id = regionIdOfRule(upsert);
+				if (!id) {
+					throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'upsert entry missing a recognizable `regionId` (tried regionId/id/name/ruleName).');
+				}
+				const idx = current.findIndex(e => regionIdOfRule(e) === id);
+				if (idx >= 0) {
+					deepMergeInto(current[idx], upsert);
+					applied.push({ regionId: id, mode: 'merged', entry: current[idx] });
+				}
+				else {
+					current.push(upsert);
+					applied.push({ regionId: id, mode: 'appended', entry: upsert });
+				}
+			}
+		}
+		const patches = optionalArray<Record<string, unknown>>(payload, 'patches');
+		if (patches) {
+			for (const p of patches) {
+				const id = typeof p?.regionId === 'string' ? p.regionId : undefined;
+				const patch = p?.patch;
+				if (!id || !patch || typeof patch !== 'object') {
+					throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'patch entry must be {regionId, patch:{...}}.');
+				}
+				const idx = current.findIndex(e => regionIdOfRule(e) === id);
+				if (idx >= 0) {
+					deepMergeInto(current[idx], patch);
+					applied.push({ regionId: id, mode: 'patched', entry: current[idx] });
+				}
+				else {
+					const newEntry: Record<string, unknown> = { regionId: id, ...(patch as Record<string, unknown>) };
+					current.push(newEntry);
+					applied.push({ regionId: id, mode: 'patched-appended', entry: newEntry });
+				}
+			}
+		}
+	}
+
+	let writeOk: boolean | unknown = false;
+	try {
+		writeOk = await eda.pcb_Drc.overwriteRegionRules(next);
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to overwrite PCB region rules (eda.pcb_Drc.overwriteRegionRules — @beta).');
+	}
+
+	let after: Array<Record<string, unknown>> = [];
+	try {
+		const r = await eda.pcb_Drc.getRegionRules();
+		if (Array.isArray(r)) after = r as Array<Record<string, unknown>>;
+		else if (r) after = [r as Record<string, unknown>];
+	}
+	catch { /* best-effort */ }
+
+	return {
+		result: {
+			mode,
+			beforeCount,
+			afterCount: after.length,
+			applied,
+			writeOk: writeOk === true,
+			regionRules: after,
+		},
+	};
+};
+
+// ─── Net class (网络类) CRUD ─────────────────────────────────────────
+// `eda.pcb_Drc.getAllNetClasses()` is already consumed by `pcb.report` for the
+// aggregate-length view — these focused actions expose the full create/modify/
+// delete surface so a flow can declare a net class, assign nets to it, then
+// drive `pcb.drc.net_rules.set` to give that class a width. All @beta.
+
+/** Read every net class (网络类) with its member nets + color. */
+const pcbNetclassList: Handler = async () => {
+	let classes: unknown;
+	try {
+		classes = await eda.pcb_Drc.getAllNetClasses();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to read PCB net classes (eda.pcb_Drc.getAllNetClasses).');
+	}
+	const arr = Array.isArray(classes) ? classes : (classes ? [classes] : []);
+	return { result: { netClasses: arr, count: arr.length } };
+};
+
+/** Create a net class (网络类). `color` may be a {r,g,b} object, a #rrggbb
+ *  string, or null/empty for the platform default. */
+const pcbNetclassCreate: Handler = async (payload) => {
+	const name = requireString(payload, 'name');
+	const netsRaw = payload.nets;
+	const nets: Array<string> = Array.isArray(netsRaw)
+		? netsRaw.map(String)
+		: (typeof netsRaw === 'string' ? [netsRaw] : []);
+	const color = payload.color ?? ''; // SDK accepts a color object; '' triggers platform default.
+
+	let created: boolean | unknown = false;
+	try {
+		created = await eda.pcb_Drc.createNetClass(name, nets, color as never);
+	}
+	catch (err) {
+		throw edaError(err, `Failed to create net class "${name}" (eda.pcb_Drc.createNetClass — @beta).`);
+	}
+	return {
+		result: {
+			created: created === true,
+			name,
+			nets,
+			color,
+			hint: created === true ? '' : 'createNetClass returned false — a class of the same name may already exist.',
+		},
+	};
+};
+
+/** Delete a net class (网络类) by name. Member nets' per-net DRC rules, if any,
+ *  are NOT removed — use `pcb.drc.net_rules.set` with `removeNets` for that. */
+const pcbNetclassDelete: Handler = async (payload) => {
+	const name = requireString(payload, 'name');
+	let deleted: boolean | unknown = false;
+	try {
+		deleted = await eda.pcb_Drc.deleteNetClass(name);
+	}
+	catch (err) {
+		throw edaError(err, `Failed to delete net class "${name}" (eda.pcb_Drc.deleteNetClass — @beta).`);
+	}
+	return { result: { deleted: deleted === true, name } };
+};
+
+/** Rename a net class (网络类). */
+const pcbNetclassRename: Handler = async (payload) => {
+	const name = requireString(payload, 'name');
+	const newName = requireString(payload, 'newName');
+	let renamed: boolean | unknown = false;
+	try {
+		renamed = await eda.pcb_Drc.modifyNetClassName(name, newName);
+	}
+	catch (err) {
+		throw edaError(err, `Failed to rename net class "${name}" → "${newName}" (eda.pcb_Drc.modifyNetClassName — @beta).`);
+	}
+	return { result: { renamed: renamed === true, name, newName } };
+};
+
+/** Add one or more nets to a net class. Accepts `net` (string) or `nets` ([]string). */
+const pcbNetclassAddNet: Handler = async (payload) => {
+	const name = requireString(payload, 'name');
+	const netsRaw = payload.nets ?? payload.net;
+	const nets: Array<string> = Array.isArray(netsRaw)
+		? netsRaw.map(String)
+		: (typeof netsRaw === 'string' ? [netsRaw] : []);
+	if (nets.length === 0) {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'pcb.netclass.add_net requires `net` (string) or `nets` ([]string).');
+	}
+	let added: boolean | unknown = false;
+	try {
+		added = await eda.pcb_Drc.addNetToNetClass(name, nets.length === 1 ? nets[0] : nets);
+	}
+	catch (err) {
+		throw edaError(err, `Failed to add nets to class "${name}" (eda.pcb_Drc.addNetToNetClass — @beta).`);
+	}
+	return { result: { added: added === true, name, nets } };
+};
+
+/** Remove one or more nets from a net class. Accepts `net` (string) or `nets` ([]string). */
+const pcbNetclassRemoveNet: Handler = async (payload) => {
+	const name = requireString(payload, 'name');
+	const netsRaw = payload.nets ?? payload.net;
+	const nets: Array<string> = Array.isArray(netsRaw)
+		? netsRaw.map(String)
+		: (typeof netsRaw === 'string' ? [netsRaw] : []);
+	if (nets.length === 0) {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'pcb.netclass.remove_net requires `net` (string) or `nets` ([]string).');
+	}
+	let removed: boolean | unknown = false;
+	try {
+		removed = await eda.pcb_Drc.removeNetFromNetClass(name, nets.length === 1 ? nets[0] : nets);
+	}
+	catch (err) {
+		throw edaError(err, `Failed to remove nets from class "${name}" (eda.pcb_Drc.removeNetFromNetClass — @beta).`);
+	}
+	return { result: { removed: removed === true, name, nets } };
+};
+
 // ─── PCB routing (copper tracks + vias) ──────────────────────────────
 // Real routing primitives: a track is a line on a copper layer; a via is a
 // plated hole. Both bind to a net by NAME (pull names from pcb.nets.list). Layer
@@ -7563,6 +8142,18 @@ const HANDLERS: Record<string, Handler> = {
 	'pcb.components.arrange': pcbComponentsArrange,
 	'pcb.drc.check': pcbDrcCheck,
 	'pcb.drc.rules': pcbDrcRules,
+	'pcb.drc.net_rules': pcbDrcNetRules,
+	'pcb.drc.net_rules.set': pcbDrcNetRulesSet,
+	'pcb.drc.net_by_net_rules': pcbDrcNetByNetRules,
+	'pcb.drc.net_by_net_rules.set': pcbDrcNetByNetRulesSet,
+	'pcb.drc.region_rules': pcbDrcRegionRules,
+	'pcb.drc.region_rules.set': pcbDrcRegionRulesSet,
+	'pcb.netclass.list': pcbNetclassList,
+	'pcb.netclass.create': pcbNetclassCreate,
+	'pcb.netclass.delete': pcbNetclassDelete,
+	'pcb.netclass.rename': pcbNetclassRename,
+	'pcb.netclass.add_net': pcbNetclassAddNet,
+	'pcb.netclass.remove_net': pcbNetclassRemoveNet,
 	'pcb.line.create': pcbLineCreate,
 	'pcb.via.create': pcbViaCreate,
 	'pcb.line.list': pcbLineList,

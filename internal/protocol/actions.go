@@ -837,6 +837,157 @@ func AllActions() []ActionSpec {
 			Description: "Read the active PCB's DRC rule configuration (clearances, track widths, via sizes, …) WITHOUT running a check — inspect what pcb.drc.check enforces, or feed real rule values into layout-lint / design-flow gates. Requires the PCB to be the active/foreground document.",
 			Outputs:     []string{"rules"},
 		},
+		// ─── Per-net DRC sub-rules (网络规则 / 网络间规则 / 区域规则) ───────
+		// EasyEDA Pro exposes a parallel set of @beta rule scopes on eda.pcb_Drc:
+		//   • Net rules        — per-net width/clearance/via overrides (one entry per net)
+		//   • Net-by-net rules — per-net-PAIR clearance overrides
+		//   • Region rules     — per-region rule overrides (geometric zones)
+		// Each family has a get*/overwrite* pair. The shape of an entry is the SDK's
+		// IPCB_NetRuleItem / IPCB_NetByNetRuleItem / IPCB_RegionRuleItem — returned
+		// VERBATIM by the read actions so the caller can inspect real field names
+		// before patching. Write actions accept either:
+		//   • mode=replace (default): a full `rules` array that OVERWRITES all
+		//     entries — caller is expected to read first, mutate, then write back.
+		//   • mode=merge: an `upserts` array — each entry is matched by its net
+		//     (or netA/netB / region id) and PATCHED in place; missing entries are
+		//     APPENDED. Connector walks the entry's fields recursively so unknown
+		//     SDK shape doesn't break the merge.
+		//   • `patches`: structured-flag form — `[{net, patch:{trackWidth,…}}]`
+		//     for the CLI's convenience flags (e.g. `pcb net-rule --track-width`).
+		{
+			Name:        "pcb.drc.net_rules",
+			Domain:      DomainPcb,
+			Phase:       2,
+			NeedsWindow: true,
+			Description: "Read the active PCB's PER-NET DRC rule overrides (网络规则 — track width / clearance / via size scoped to a single net, e.g. a wider clearance for a high-speed USB_DP pair). Returned VERBATIM from `eda.pcb_Drc.getNetRules()` — the SDK shape (IPCB_NetRuleItem) is @beta and varies between builds, so the caller is expected to read first and inspect real field names before writing. Requires the PCB to be the active/foreground document.",
+			Outputs:     []string{"netRules", "count"},
+		},
+		{
+			Name:             "pcb.drc.net_rules.set",
+			Domain:           DomainPcb,
+			Phase:            2,
+			Mutates:          true,
+			NeedsWindow:      true,
+			NeedsConfirm:     true,
+			Description:      "Write PER-NET DRC rule overrides (网络规则). Accepts three input shapes: (1) `mode=replace` (default) + `netRules` array → OVERWRITE all entries (read first, mutate, write back); (2) `mode=merge` + `upserts` array → match each entry by `net` and PATCH it in place (recursive deep-merge — handles SDK shape variance), appending new ones; (3) `patches` array `[{net, patch:{trackWidth, clearance, viaDrill, viaDiameter, ...}}]` — convenience form for the CLI's `pcb net-rule --track-width` flags; the patch is recursively deep-merged into the matching entry. The result echoes before/after counts and the resolved entries. Verify with `pcb.drc.net_rules`. NOTE: EasyEDA's `overwriteNetRules` is @beta — a successful write turns an immutable system preset into a per-board 自定义配置 copy (same trap as `overwriteCurrentRuleConfiguration`).",
+			Inputs:           []string{"mode optional (replace|merge, default replace)", "netRules optional ([]entry — replace mode)", "upserts optional ([]entry — merge mode)", "patches optional ([{net, patch}] — structured mode)", "removeNets optional ([]string — drop entries by net name)"},
+			Outputs:          []string{"mode", "beforeCount", "afterCount", "applied", "removed", "rules"},
+			VerifyWith:       []string{"pcb.drc.net_rules"},
+			InvalidatesStage: "post_route_checked",
+		},
+		{
+			Name:        "pcb.drc.net_by_net_rules",
+			Domain:      DomainPcb,
+			Phase:       2,
+			NeedsWindow: true,
+			Description: "Read the active PCB's PER-NET-PAIR DRC clearance overrides (网络间规则 — a custom clearance between two specific nets, e.g. a wider gap between a noisy SMPS switch net and an analog reference). Returned VERBATIM from `eda.pcb_Drc.getNetByNetRules()` — the SDK shape is @beta. Requires the PCB to be the active/foreground document.",
+			Outputs:     []string{"netByNetRules", "count"},
+		},
+		{
+			Name:             "pcb.drc.net_by_net_rules.set",
+			Domain:           DomainPcb,
+			Phase:            2,
+			Mutates:          true,
+			NeedsWindow:      true,
+			NeedsConfirm:     true,
+			Description:      "Write PER-NET-PAIR DRC clearance overrides (网络间规则). Same three input shapes as `pcb.drc.net_rules.set`, but entries are matched by the `{netA, netB}` pair (order-insensitive) instead of a single `net`. Patches may carry `clearance` (mil) and any other SDK field. NOTE: `overwriteNetByNetRules` is @beta — same preset→自定义 configuration trap as the other overwrite* APIs.",
+			Inputs:           []string{"mode optional (replace|merge, default replace)", "netByNetRules optional ([]entry — replace mode)", "upserts optional ([]entry — merge mode)", "patches optional ([{netA, netB, patch}] — structured mode)", "removePairs optional ([{netA, netB}] — drop entries by pair)"},
+			Outputs:          []string{"mode", "beforeCount", "afterCount", "applied", "removed", "netByNetRules"},
+			VerifyWith:       []string{"pcb.drc.net_by_net_rules"},
+			InvalidatesStage: "post_route_checked",
+		},
+		{
+			Name:        "pcb.drc.region_rules",
+			Domain:      DomainPcb,
+			Phase:       2,
+			NeedsWindow: true,
+			Description: "Read the active PCB's PER-REGION DRC rule overrides (区域规则 — a rule scope attached to a geometric region, distinct from the keep-out `pcb.region.create` which is a primitive). Returned VERBATIM from `eda.pcb_Drc.getRegionRules()` — the SDK shape (IPCB_RegionRuleItem) is @beta. Requires the PCB to be the active/foreground document.",
+			Outputs:     []string{"regionRules", "count"},
+		},
+		{
+			Name:             "pcb.drc.region_rules.set",
+			Domain:           DomainPcb,
+			Phase:            2,
+			Mutates:          true,
+			NeedsWindow:      true,
+			NeedsConfirm:     true,
+			Description:      "Write PER-REGION DRC rule overrides (区域规则). Same three input shapes as `pcb.drc.net_rules.set`, but entries are matched by `regionId` (or `name` when no id is present). Patches may carry `clearance`, `trackWidth`, `viaDrill`, `viaDiameter`, and any other SDK field. NOTE: `overwriteRegionRules` is @beta — same preset→自定义 configuration trap as the other overwrite* APIs. To create a board-level keep-out region primitive (a polygon on the canvas) use `pcb.region.create` instead — that's a different primitive entirely.",
+			Inputs:           []string{"mode optional (replace|merge, default replace)", "regionRules optional ([]entry — replace mode)", "upserts optional ([]entry — merge mode)", "patches optional ([{regionId, patch}] — structured mode)", "removeIds optional ([]string — drop entries by region id)"},
+			Outputs:          []string{"mode", "beforeCount", "afterCount", "applied", "removed", "regionRules"},
+			VerifyWith:       []string{"pcb.drc.region_rules"},
+			InvalidatesStage: "post_route_checked",
+		},
+		// ─── Net class (网络类) CRUD ───────────────────────────────────────
+		// `eda.pcb_Drc.getAllNetClasses()` is already consumed by `pcb.report`
+		// (aggregate length view) — these focused actions expose the full
+		// create/modify/delete surface so a flow can declare a net class, assign
+		// nets to it, then drive `overwriteNetRules` to give that class a width.
+		// All @beta.
+		{
+			Name:        "pcb.netclass.list",
+			Domain:      DomainPcb,
+			Phase:       2,
+			NeedsWindow: true,
+			Description: "List every net class (网络类) on the active PCB with its member nets and color — the focused read counterpart to `pcb.report`'s aggregate-length view. Wraps `eda.pcb_Drc.getAllNetClasses()`; each entry's shape (IPCB_NetClassItem) is @beta.",
+			Outputs:     []string{"netClasses[].name", "netClasses[].nets", "netClasses[].color", "count"},
+		},
+		{
+			Name:             "pcb.netclass.create",
+			Domain:           DomainPcb,
+			Phase:            2,
+			Mutates:          true,
+			NeedsWindow:      true,
+			Description:      "Create a net class (网络类) — a named group of nets that can share a width/clearance rule (paired with `pcb.drc.net_rules.set` to actually assign the rule). Wraps `eda.pcb_Drc.createNetClass(name, nets, color)`. `color` is a `{r,g,b}` object or `#rrggbb` string; pass an empty string/null for the platform default. No-op (returns false) if a class of the same name already exists.",
+			Inputs:           []string{"name (required)", "nets optional ([]string — initial members)", "color optional"},
+			Outputs:          []string{"created", "name", "nets", "color"},
+			VerifyWith:       []string{"pcb.netclass.list"},
+			InvalidatesStage: "post_route_checked",
+		},
+		{
+			Name:             "pcb.netclass.delete",
+			Domain:           DomainPcb,
+			Phase:            2,
+			Mutates:          true,
+			NeedsWindow:      true,
+			NeedsConfirm:     true,
+			Description:      "Delete a net class (网络类) by name. Member nets are ungrouped (their per-net DRC rules, if any, are NOT removed — use `pcb.drc.net_rules.set --remove-nets` for that). Wraps `eda.pcb_Drc.deleteNetClass(name)`.",
+			Inputs:           []string{"name (required)"},
+			Outputs:          []string{"deleted", "name"},
+			VerifyWith:       []string{"pcb.netclass.list"},
+		},
+		{
+			Name:             "pcb.netclass.rename",
+			Domain:           DomainPcb,
+			Phase:            2,
+			Mutates:          true,
+			NeedsWindow:      true,
+			Description:      "Rename a net class (网络类). Wraps `eda.pcb_Drc.modifyNetClassName(originalName, newName)`. Fails if the original doesn't exist or the new name collides with an existing class.",
+			Inputs:           []string{"name (required — current name)", "newName (required)"},
+			Outputs:          []string{"renamed", "name", "newName"},
+			VerifyWith:       []string{"pcb.netclass.list"},
+		},
+		{
+			Name:             "pcb.netclass.add_net",
+			Domain:           DomainPcb,
+			Phase:            2,
+			Mutates:          true,
+			NeedsWindow:      true,
+			Description:      "Add one or more nets to an existing net class (网络类). Wraps `eda.pcb_Drc.addNetToNetClass(name, net | nets)`. Pass either `net` (string) or `nets` ([]string); idempotent — adding an already-member net is a no-op.",
+			Inputs:           []string{"name (required)", "net optional (string)", "nets optional ([]string)"},
+			Outputs:          []string{"added", "name", "nets"},
+			VerifyWith:       []string{"pcb.netclass.list"},
+		},
+		{
+			Name:             "pcb.netclass.remove_net",
+			Domain:           DomainPcb,
+			Phase:            2,
+			Mutates:          true,
+			NeedsWindow:      true,
+			Description:      "Remove one or more nets from a net class (网络类). Wraps `eda.pcb_Drc.removeNetFromNetClass(name, net | nets)`. Pass either `net` (string) or `nets` ([]string). Removing the last member does NOT delete the class — pair with `pcb.netclass.delete` to remove an empty class.",
+			Inputs:           []string{"name (required)", "net optional (string)", "nets optional ([]string)"},
+			Outputs:          []string{"removed", "name", "nets"},
+			VerifyWith:       []string{"pcb.netclass.list"},
+		},
 		// ─── PCB routing (copper tracks + vias) ──────────────────────────
 		// Real routing primitives — additive creates (no confirm), like the
 		// schematic wire/netflag creates. Bind to a net by NAME; pull layer ids

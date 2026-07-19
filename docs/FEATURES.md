@@ -9,11 +9,34 @@ planned. Ground truth for the action catalog is `make actions`
 > [`ecosystem-survey.md`](ecosystem-survey.md) 系统对比了官方开源扩展用到的 API、我们的盲区,
 > 以及一份带优先级的可吸收功能清单(A1–A9),是下一阶段 roadmap 的主要输入。
 
-**93 typed actions** total — 48 `pcb`, 26 `schematic`, 7 `board`, 6 `document`,
+**105 typed actions** total — 60 `pcb`, 26 `schematic`, 7 `board`, 6 `document`,
 2 `system`, 2 `artifact`, and one each in `project`, `debug`.
 All but `system.health` are dispatched to the connector; `system.health` is
 answered by the daemon itself (daemon/connector liveness, no window required).
 (Run `make actions` for the authoritative list — this prose count can lag.)
+
+> **2026-07-19 — DRC 子规则 + 网络类 CRUD (@beta surface).** 12 new typed PCB actions
+> exposing EasyEDA's per-net / per-net-pair / per-region DRC override APIs + the net-class
+> grouping CRUD — all `eda.pcb_Drc.*`, all `@beta` (SDK shape `IPCB_NetRuleItem` /
+> `IPCB_NetByNetRuleItem` / `IPCB_RegionRuleItem` varies between builds; handlers tolerate
+> the shape variance via `netOfRule`/`netPairOfRule`/`regionIdOfRule` field-name trials +
+> recursive `deepMergeInto`). Three input shapes per write action: `replace` (full
+> overwrite), `merge` (upserts + removeNets/removePairs/removeIds), and structured
+> `patches` for the single-value convenience commands.
+>
+> | Action | CLI | What |
+> |---|---|---|
+> | `pcb.drc.net_rules` / `pcb.drc.net_rules.set` | `pcb net-rules` / `pcb net-rules-set` / `pcb net-rule` | per-net DRC override (网络规则) — trackWidth / clearance / via size scoped to a single net |
+> | `pcb.drc.net_by_net_rules` / `pcb.drc.net_by_net_rules.set` | `pcb net-by-net-rules` / `-set` / `pcb net-by-net-rule` | per-net-pair clearance override (网络间规则) |
+> | `pcb.drc.region_rules` / `pcb.drc.region_rules.set` | `pcb region-rules` / `-set` / `pcb region-rule` | per-region DRC override (区域规则) — distinct from the `pcb.region.create` keep-out primitive |
+> | `pcb.netclass.list/create/delete/rename/add_net/remove_net` | `pcb net-class` / `net-class-create` / ... / `net-class-remove-net` | net class (网络类) CRUD — group nets so a width/clearance rule can be applied to the whole class |
+>
+> **Platform trap preserved**: a successful write turns an immutable system preset into a
+> per-board 自定义配置 copy (same as `overwriteCurrentRuleConfiguration`). Write actions
+> mark `InvalidatesStage: post_route_checked` (the new rule may invalidate existing
+> routing). Closes the long-pending "write those roles into EasyEDA's NATIVE net-class
+> rules" roadmap item (was read-only via `pcb.report` / `pcb.drc.rules`); diff-pair /
+> equal-length **definitions** are still read-only — no `eda.*` write API yet.
 
 > **2026-07-06 — `pcb check` via-crosses-plane 守护 + PLANE 工作流文档统一 (issue #30).**
 > New `pcb check` rule **via-crosses-plane**: reads the stackup (`pcb.layers.list`,

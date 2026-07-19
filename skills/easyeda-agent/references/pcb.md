@@ -92,6 +92,36 @@ Act on the focused canvas; the editor view shortcuts. CLI: `easyeda view …`.
   > **Raw-API trap** (if scripting rules via `debug exec` instead): `eda.pcb_Drc.overwriteCurrentRuleConfiguration()` takes the **BARE config content** — `getCurrentRuleConfiguration()` returns `{name, config}`, and passing that whole wrapper **silently no-ops** (resolves `undefined`, readback unchanged). Pass `cfg.config` → returns `true`.
   > **Fab-rule baseline: [`fab-rules-jlcpcb.json`](fab-rules-jlcpcb.json)** — the canonical JLCPCB fabrication capabilities (min trace/space, via drill+pad, annular ring, copper-to-edge, silk, by layer count + copper weight), captured from JLCPCB's published capabilities. JLCPCB is the fab behind EasyEDA Pro, so a live board's `pcb.drc.rules` converges with this file's **recommended** column (verified on ceshi: clear 6mil / width 10mil / via 0.3–0.6mm). **Always prefer the live rule; use this JSON as the fallback seed + as clamp floors** (never emit a track/via/gap below the `manufacturingMin`). The **`boardTypeRulesLive`** section holds the AUTHORITATIVE real per-board-type rules exported from JLCEDA (single / double / multi-layer / metal-core), fingerprint-classified + confirmed against named exports — `defaultPcbRules` uses the **doubleLayer** row (clear 6 / width 10 / min 5 / via 0.3–0.6mm / copper-to-edge 10). Controlled impedance is intentionally omitted (not derivable from platform data — see task #27).
 
+#### DRC 子规则 (per-net / per-net-pair / per-region + 网络类 CRUD) — @beta
+
+EasyEDA Pro 的 `eda.pcb_Drc.*` 暴露了一组 **DRC 子规则** 接口,可以把规则的 scope 缩小到 **单个网络 / 网络对 / 区域**(而非全局 `drc-rules`),还能把网络归到「网络类」分组管理。这些接口在 SDK 里都标 `@beta` —— 返回的字段名 (`IPCB_NetRuleItem` / `IPCB_NetByNetRuleItem` / `IPCB_RegionRuleItem`) 在不同 build 间会有 shape variance,所以**总是先读回再写**,connector 侧的 handler 用 `netOfRule()`/`netPairOfRule()`/`regionIdOfRule()` helpers 兼容多套字段名(`net`/`netName`/`name` 等),`deepMergeInto` 做 recursive deep-merge 不会因未知字段失败。
+
+**写动作都触发 platform trap** —— 一次成功写入会把「系统预设」(JLCPCB Capability…) 变成「板级自定义配置」副本(同 `overwriteCurrentRuleConfiguration`),这是预期且必须的(系统预设本不可改);写完跑 `pcb drc` 验证规则已生效。
+
+| 命令 | Action | 作用 |
+|---|---|---|
+| `easyeda pcb net-rules` | `pcb.drc.net_rules` | 读 **per-net 规则覆盖**(网络规则)—— 单个网络上的 trackWidth / clearance / via 大小覆盖 |
+| `easyeda pcb net-rules-set --mode={replace\|merge} --rules '\[...\]' \| --file rules.json \| --remove-nets A,B` | `pcb.drc.net_rules.set` | 写 per-net 覆盖:`replace` 全覆盖、`merge` 按 `net` upsert + 可选 `removeNets` 删除 |
+| `easyeda pcb net-rule --net USB_DP --track-width 12 \| --clearance 8 \| --via-drill .4 \| --via-diameter 24` | `pcb.drc.net_rules.set` (patches) | **结构化 flag**:单条 `{net, patch:{...}}`,merge 模式,只改指定字段 |
+| `easyeda pcb net-by-net-rules` | `pcb.drc.net_by_net_rules` | 读 **per-net-pair clearance 覆盖**(网络间规则)—— 两特定网络间的自定义 gap |
+| `easyeda pcb net-by-net-rules-set --mode=... --rules/--file/--remove-pairs-a/--remove-pairs-b` | `pcb.drc.net_by_net_rules.set` | 写网络间规则;条目按 `{netA, netB}` pair 匹配(顺序无关,canonical-ordered) |
+| `easyeda pcb net-by-net-rule --net-a SW --net-b VREF --clearance 16` | `pcb.drc.net_by_net_rules.set` (patches) | 单对网络的结构化 flag 修改 |
+| `easyeda pcb region-rules` | `pcb.drc.region_rules` | 读 **per-region 规则覆盖**(区域规则)—— 附加到几何区域的规则 scope(**不是** `pcb region create` 那种 board-level keep-out primitive) |
+| `easyeda pcb region-rules-set --mode=... --rules/--file/--remove-ids r1,r2` | `pcb.drc.region_rules.set` | 写区域规则;按 `regionId`/`name` 匹配 |
+| `easyeda pcb region-rule --region-id r1 --clearance 20 \| --track-width 8 \| ...` | `pcb.drc.region_rules.set` (patches) | 单 region 的结构化 flag 修改 |
+| `easyeda pcb net-class` (=`net-class-list`) | `pcb.netclass.list` | 列所有 **网络类**(网络类 = 网络分组,可共享一条 width/clearance 规则) |
+| `easyeda pcb net-class-create --name USB --nets USB_DP,USB_DM [--color #rrggbb]` | `pcb.netclass.create` | 新建一个网络类 + 初始成员 |
+| `easyeda pcb net-class-delete --name USB` | `pcb.netclass.delete` | 删网络类(成员网络解组,**不删其 per-net 规则** —— 用 `net-rules-set --remove-nets`) |
+| `easyeda pcb net-class-rename --name USB --new-name USB_PAIR` | `pcb.netclass.rename` | 重命名 |
+| `easyeda pcb net-class-add-net --name USB --nets USB_DP,USB_DM` | `pcb.netclass.add_net` | 加成员(幂等) |
+| `easyeda pcb net-class-remove-net --name USB --nets USB_DP` | `pcb.netclass.remove_net` | 移成员(最后一名被移走不会自动删类 —— 用 `net-class-delete`) |
+
+> **网络类 vs 规则**:网络类只是「分组」 —— 给一组网络起名,本身并不带规则。要实际约束规则,先把网络加进类(`net-class-create`/`add-net`),再用 `net-rules-set` / `net-rule` 给类里的每个网络赋同样的 width/clearance 覆盖。典型流程:`net-class-create --name Power --nets +3V3,+5V` → `net-rule --net +3V3 --track-width 16` → `net-rule --net +5V --track-width 20`。
+>
+> **字段名不确定**(@beta shape variance):SDK 的 `IPCB_NetRuleItem` 字段名在不同 build 间会变(`net` / `netName` / `name` / `netNameStr` 都见过),`IPCB_RegionRuleItem` 类似(`regionId` / `id` / `name` / `ruleName`)。**写之前先 `pcb net-rules` 读一次,看清当前 build 的实际字段名**,再以同样字段名构造写 payload。Connector 侧 `netOfRule()`/`regionIdOfRule()` 顺序尝试上述字段名;你写入用的字段名会被原样保留,所以一致性是关键。
+>
+> **InvalidatesStage: post_route_checked**:网络/网络间/区域规则写入后,可能让现有走线变成 sub-clearance —— workflow state 里的 `post_route_checked` 标记会被失效,后续 `pcb drc` 重新仲裁。
+
 ### Routing (copper tracks + vias)
 
 Real routing primitives — **additive creates** (no confirm), like the schematic
@@ -342,10 +372,14 @@ subset; `--dry-run` prints the per-corner plan. Save after placing; delete via
 > are shipped daemon-side** (R3-width): `pcb net-classes` prints the role→spec-width
 > ladder, `route-short` sizes each net by role (signal / power-branch / power-trunk /
 > high-current — `pcb_netclass.go`), and `pcb check` **width-under-spec** gates
-> under-sized power tracks. Still pending: writing those roles into EasyEDA's NATIVE
-> net-class rules (`createNetClass`/`overwriteNetRules`, @beta — so the native DRC
-> enforces per-class width) + diff-pair/equal-length **definitions** (read side is
-> in `pcb.report`).
+> under-sized power tracks. **Shipped (R3-native-class)**: EasyEDA's NATIVE net-class
+> rules surface is now exposed end-to-end — `pcb net-class create/add-net/remove-net/
+> delete/rename` (CRUD on `eda.pcb_Drc.createNetClass` etc., @beta) groups nets, and
+> `pcb net-rules/net-rules-set/net-rule` (`overwriteNetRules`, @beta) writes per-net
+> width/clearance/via overrides so the native DRC actually enforces per-class width.
+> Companion per-net-pair (`pcb net-by-net-rule*`) and per-region (`pcb region-rule*`)
+> rule overrides ship the same shape. Diff-pair/equal-length **definitions** are still
+> read-only (`pcb.report`) — no `eda.*` write API yet.
 
 ### Schematic → PCB sync + component CRUD
 

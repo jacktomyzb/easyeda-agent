@@ -920,6 +920,469 @@ pours reflow under the new clearance.`,
 		pcb.AddCommand(c)
 	}
 
+	// ── per-net / per-net-pair / per-region DRC sub-rules (网络规则 / 网络间规则 / 区域规则) ──
+	// All wrap @beta `eda.pcb_Drc.*` APIs: getNetRules/overwriteNetRules,
+	// getNetByNetRules/overwriteNetByNetRules, getRegionRules/overwriteRegionRules.
+	// SDK shape (IPCB_NetRuleItem / IPCB_NetByNetRuleItem / IPCB_RegionRuleItem)
+	// varies between builds — read first, inspect real field names, then write.
+	{
+		// pcb net-rules — read per-net DRC overrides (网络规则).
+		pcb.AddCommand(&cobra.Command{
+			Use:   "net-rules",
+			Short: "Read the active PCB's PER-NET DRC rule overrides (网络规则 — track width / clearance / via size scoped to a single net)",
+			Args:  cobra.NoArgs,
+			Long: `Read the active PCB's per-net DRC rule overrides (网络规则) verbatim from
+eda.pcb_Drc.getNetRules(). The SDK shape (IPCB_NetRuleItem) is @beta and varies
+between builds — read first and inspect real field names before writing.
+
+Pair with:
+  • 'pcb net-rules-set --mode=merge --rules ...'  to upsert/replace entries
+  • 'pcb net-rule --net USB_DP --track-width 12'  to patch a single net
+  • 'pcb net-class ...'                            to group nets into a class`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return dispatch(cfg, "pcb.drc.net_rules", window, nil, stdout, stderr)
+			},
+		})
+
+		// pcb net-rules-set — full-JSON write form.
+		{
+			var mode string
+			var rulesJSON, file string
+			var removeNets []string
+			c := &cobra.Command{
+				Use:   "net-rules-set",
+				Short: "Write PER-NET DRC rule overrides (网络规则) — replace, merge, or remove",
+				Args:  cobra.NoArgs,
+				Long: `Write PER-NET DRC rule overrides (网络规则). Three input shapes:
+
+  --mode=replace (default) + --rules/--file   overwrite every entry (read first)
+  --mode=merge     + --rules/--file           upsert each entry (matched by ` + "`net`" + `)
+  --mode=merge     + --remove-nets NET1,NET2  drop entries by net name
+  --mode=merge     + --net + --track-width... (use 'pcb net-rule' instead)
+
+--rules takes an inline JSON array (or a {netRules:[...]} object);
+--file reads the same shape from disk. The two are mutually exclusive.
+
+NOTE: 'overwriteNetRules' is @beta — a successful write turns an immutable
+system preset into a per-board 自定义配置 copy. Run 'pcb drc' afterwards to
+verify the new rules are enforced.`,
+				Example: `  # full overwrite from a saved JSON
+  easyeda pcb net-rules-set --mode=replace --file net-rules.json
+
+  # merge an upsert (matched by 'net')
+  easyeda pcb net-rules-set --mode=merge --rules '[{"net":"USB_DP","trackWidth":12}]'
+
+  # remove two nets' overrides
+  easyeda pcb net-rules-set --mode=merge --remove-nets USB_DP,USB_DM`,
+				RunE: func(cmd *cobra.Command, args []string) error {
+					payload, err := buildNetRulesSetPayload(mode, rulesJSON, file, nil, removeNets)
+					if err != nil {
+						return err
+					}
+					return dispatchTimed(cfg, "pcb.drc.net_rules.set", window, payload, 30*time.Second, stdout, stderr)
+				},
+			}
+			c.Flags().StringVar(&mode, "mode", "replace", "replace = full overwrite; merge = upsert + patch (required for --remove-nets)")
+			c.Flags().StringVar(&rulesJSON, "rules", "", "inline JSON array (or {netRules:[...]} object)")
+			c.Flags().StringVar(&file, "file", "", "path to a JSON document (alternative to --rules)")
+			c.Flags().StringSliceVar(&removeNets, "remove-nets", nil, "net names whose override entries to drop (merge mode only)")
+			pcb.AddCommand(c)
+		}
+
+		// pcb net-rule — single-net structured-flag patch (convenience over net-rules-set).
+		{
+			var net string
+			var trackWidth, clearance, viaDrill, viaDiameter float64
+			c := &cobra.Command{
+				Use:   "net-rule",
+				Short: "Patch a SINGLE net's DRC rule override (网络规则 — structured-flag convenience form)",
+				Args:  cobra.NoArgs,
+				Long: `Patch a single net's per-net DRC rule override. Builds a {net, patch:{...}}
+entry and dispatches it via pcb.drc.net_rules.set in merge mode — only the
+fields you set are changed, everything else on that net's entry (and every
+other net's entry) is left untouched. If the net has no entry yet, a new one
+is appended.
+
+Required: --net (the net name) + at least one of --track-width / --clearance
+/ --via-drill / --via-diameter (all in mil).`,
+				Example: `  easyeda pcb net-rule --net USB_DP --track-width 12
+  easyeda pcb net-rule --net +3V3 --clearance 10 --via-diameter 24`,
+				RunE: func(cmd *cobra.Command, args []string) error {
+					patch, err := buildNetRuleSinglePatch(
+						net,
+						f64Ptr(trackWidth, cmd.Flags().Changed("track-width")),
+						f64Ptr(clearance, cmd.Flags().Changed("clearance")),
+						f64Ptr(viaDrill, cmd.Flags().Changed("via-drill")),
+						f64Ptr(viaDiameter, cmd.Flags().Changed("via-diameter")),
+					)
+					if err != nil {
+						return err
+					}
+					payload := map[string]any{
+						"mode":    "merge",
+						"patches": []map[string]any{patch},
+					}
+					return dispatchTimed(cfg, "pcb.drc.net_rules.set", window, payload, 30*time.Second, stdout, stderr)
+				},
+			}
+			c.Flags().StringVar(&net, "net", "", "net name to patch (required)")
+			c.Flags().Float64Var(&trackWidth, "track-width", 0, "track width override (mil)")
+			c.Flags().Float64Var(&clearance, "clearance", 0, "clearance override (mil)")
+			c.Flags().Float64Var(&viaDrill, "via-drill", 0, "via drill diameter override (mil)")
+			c.Flags().Float64Var(&viaDiameter, "via-diameter", 0, "via outer diameter override (mil)")
+			pcb.AddCommand(c)
+		}
+
+		// pcb net-by-net-rules — read per-net-PAIR clearance overrides (网络间规则).
+		pcb.AddCommand(&cobra.Command{
+			Use:   "net-by-net-rules",
+			Short: "Read the active PCB's PER-NET-PAIR DRC clearance overrides (网络间规则)",
+			Args:  cobra.NoArgs,
+			Long: `Read the active PCB's per-net-PAIR DRC clearance overrides (网络间规则) — a
+custom clearance between two specific nets (e.g. a wider gap between a noisy
+SMPS switch net and an analog reference). Verbatim from
+eda.pcb_Drc.getNetByNetRules(); the SDK shape is @beta.`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return dispatch(cfg, "pcb.drc.net_by_net_rules", window, nil, stdout, stderr)
+			},
+		})
+
+		// pcb net-by-net-rules-set — full-JSON write form.
+		{
+			var mode string
+			var rulesJSON, file string
+			var removeNetA, removeNetB []string
+			c := &cobra.Command{
+				Use:   "net-by-net-rules-set",
+				Short: "Write PER-NET-PAIR DRC clearance overrides (网络间规则)",
+				Args:  cobra.NoArgs,
+				Long: `Write PER-NET-PAIR DRC clearance overrides (网络间规则). Same three input
+shapes as 'pcb net-rules-set', but entries are matched by the {netA, netB}
+pair (order-insensitive). --rules/--file take a JSON array (or
+{netByNetRules:[...]} object); --remove-pairs takes pairs as
+--remove-pairs NET_A:NET_B (repeatable).
+
+NOTE: 'overwriteNetByNetRules' is @beta.`,
+				Example: `  easyeda pcb net-by-net-rules-set --mode=replace --file pairs.json
+  easyeda pcb net-by-net-rules-set --mode=merge --rules '[{"netA":"SW","netB":"VREF","clearance":16}]'
+  easyeda pcb net-by-net-rules-set --mode=merge --remove-pairs SW:VREF`,
+				RunE: func(cmd *cobra.Command, args []string) error {
+					var patches []map[string]any
+					var removePairs []map[string]string
+					if len(removeNetA) > 0 || len(removeNetB) > 0 {
+						if len(removeNetA) != len(removeNetB) {
+							return fmt.Errorf("--remove-pairs-a and --remove-pairs-b must have the same length")
+						}
+						for i := 0; i < len(removeNetA); i++ {
+							removePairs = append(removePairs, map[string]string{"netA": removeNetA[i], "netB": removeNetB[i]})
+						}
+					}
+					payload, err := buildNetByNetRulesSetPayload(mode, rulesJSON, file, patches, removePairs)
+					if err != nil {
+						return err
+					}
+					return dispatchTimed(cfg, "pcb.drc.net_by_net_rules.set", window, payload, 30*time.Second, stdout, stderr)
+				},
+			}
+			c.Flags().StringVar(&mode, "mode", "replace", "replace = full overwrite; merge = upsert + patch")
+			c.Flags().StringVar(&rulesJSON, "rules", "", "inline JSON array (or {netByNetRules:[...]} object)")
+			c.Flags().StringVar(&file, "file", "", "path to a JSON document (alternative to --rules)")
+			c.Flags().StringSliceVar(&removeNetA, "remove-pairs-a", nil, "first net of each pair to drop (paired with --remove-pairs-b)")
+			c.Flags().StringSliceVar(&removeNetB, "remove-pairs-b", nil, "second net of each pair to drop (paired with --remove-pairs-a)")
+			pcb.AddCommand(c)
+		}
+
+		// pcb net-by-net-rule — single-pair structured-flag patch.
+		{
+			var netA, netB string
+			var clearance float64
+			c := &cobra.Command{
+				Use:   "net-by-net-rule",
+				Short: "Patch a SINGLE net pair's DRC clearance override (网络间规则 — structured-flag convenience form)",
+				Args:  cobra.NoArgs,
+				Long: `Patch a single net pair's per-net-pair clearance override. Builds a
+{netA, netB, patch:{clearance}} entry and dispatches it via
+pcb.drc.net_by_net_rules.set in merge mode.
+
+Required: --net-a + --net-b (the two net names; order-insensitive) +
+--clearance (mil).`,
+				Example: `  easyeda pcb net-by-net-rule --net-a SW --net-b VREF --clearance 16`,
+				RunE: func(cmd *cobra.Command, args []string) error {
+					patch, err := buildNetByNetRuleSinglePatch(netA, netB, &clearance)
+					if err != nil {
+						return err
+					}
+					payload := map[string]any{
+						"mode":    "merge",
+						"patches": []map[string]any{patch},
+					}
+					return dispatchTimed(cfg, "pcb.drc.net_by_net_rules.set", window, payload, 30*time.Second, stdout, stderr)
+				},
+			}
+			c.Flags().StringVar(&netA, "net-a", "", "first net of the pair (required)")
+			c.Flags().StringVar(&netB, "net-b", "", "second net of the pair (required)")
+			c.Flags().Float64Var(&clearance, "clearance", 0, "clearance override between the two nets (mil, required)")
+			pcb.AddCommand(c)
+		}
+
+		// pcb region-rules — read per-region DRC overrides (区域规则).
+		pcb.AddCommand(&cobra.Command{
+			Use:   "region-rules",
+			Short: "Read the active PCB's PER-REGION DRC rule overrides (区域规则)",
+			Args:  cobra.NoArgs,
+			Long: `Read the active PCB's per-REGION DRC rule overrides (区域规则) — a rule scope
+attached to a geometric region, distinct from the keep-out 'pcb region'
+primitive (pcb.region.create). Verbatim from eda.pcb_Drc.getRegionRules();
+SDK shape (IPCB_RegionRuleItem) is @beta.`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return dispatch(cfg, "pcb.drc.region_rules", window, nil, stdout, stderr)
+			},
+		})
+
+		// pcb region-rules-set — full-JSON write form.
+		{
+			var mode string
+			var rulesJSON, file string
+			var removeIds []string
+			c := &cobra.Command{
+				Use:   "region-rules-set",
+				Short: "Write PER-REGION DRC rule overrides (区域规则)",
+				Args:  cobra.NoArgs,
+				Long: `Write PER-REGION DRC rule overrides (区域规则). Same three input shapes as
+'pcb net-rules-set', but entries are matched by 'regionId' (or 'name' when no
+id is present). --rules/--file take a JSON array (or {regionRules:[...]}
+object); --remove-ids drops entries by region id.
+
+NOTE: 'overwriteRegionRules' is @beta. To create a board-level keep-out region
+primitive (a polygon on the canvas) use 'pcb region create' — that's a
+different primitive entirely.`,
+				Example: `  easyeda pcb region-rules-set --mode=replace --file regions.json
+  easyeda pcb region-rules-set --mode=merge --rules '[{"regionId":"r1","clearance":20}]'
+  easyeda pcb region-rules-set --mode=merge --remove-ids r1,r2`,
+				RunE: func(cmd *cobra.Command, args []string) error {
+					payload, err := buildRegionRulesSetPayload(mode, rulesJSON, file, nil, removeIds)
+					if err != nil {
+						return err
+					}
+					return dispatchTimed(cfg, "pcb.drc.region_rules.set", window, payload, 30*time.Second, stdout, stderr)
+				},
+			}
+			c.Flags().StringVar(&mode, "mode", "replace", "replace = full overwrite; merge = upsert + patch")
+			c.Flags().StringVar(&rulesJSON, "rules", "", "inline JSON array (or {regionRules:[...]} object)")
+			c.Flags().StringVar(&file, "file", "", "path to a JSON document (alternative to --rules)")
+			c.Flags().StringSliceVar(&removeIds, "remove-ids", nil, "region ids whose override entries to drop (merge mode only)")
+			pcb.AddCommand(c)
+		}
+
+		// pcb region-rule — single-region structured-flag patch.
+		{
+			var regionId string
+			var clearance, trackWidth, viaDrill, viaDiameter float64
+			c := &cobra.Command{
+				Use:   "region-rule",
+				Short: "Patch a SINGLE region's DRC rule override (区域规则 — structured-flag convenience form)",
+				Args:  cobra.NoArgs,
+				Long: `Patch a single region's per-region DRC rule override. Builds a
+{regionId, patch:{...}} entry and dispatches it via
+pcb.drc.region_rules.set in merge mode — only the fields you set are changed.
+
+Required: --region-id + at least one of --clearance / --track-width /
+--via-drill / --via-diameter (all in mil).`,
+				Example: `  easyeda pcb region-rule --region-id r1 --clearance 20
+  easyeda pcb region-rule --region-id rf_zone --track-width 8 --via-diameter 24`,
+				RunE: func(cmd *cobra.Command, args []string) error {
+					patch, err := buildRegionRuleSinglePatch(
+						regionId,
+						f64Ptr(clearance, cmd.Flags().Changed("clearance")),
+						f64Ptr(trackWidth, cmd.Flags().Changed("track-width")),
+						f64Ptr(viaDrill, cmd.Flags().Changed("via-drill")),
+						f64Ptr(viaDiameter, cmd.Flags().Changed("via-diameter")),
+					)
+					if err != nil {
+						return err
+					}
+					payload := map[string]any{
+						"mode":    "merge",
+						"patches": []map[string]any{patch},
+					}
+					return dispatchTimed(cfg, "pcb.drc.region_rules.set", window, payload, 30*time.Second, stdout, stderr)
+				},
+			}
+			c.Flags().StringVar(&regionId, "region-id", "", "region id to patch (required)")
+			c.Flags().Float64Var(&clearance, "clearance", 0, "clearance override (mil)")
+			c.Flags().Float64Var(&trackWidth, "track-width", 0, "track width override (mil)")
+			c.Flags().Float64Var(&viaDrill, "via-drill", 0, "via drill diameter override (mil)")
+			c.Flags().Float64Var(&viaDiameter, "via-diameter", 0, "via outer diameter override (mil)")
+			pcb.AddCommand(c)
+		}
+	}
+
+	// ── net class (网络类) CRUD — `eda.pcb_Drc.createNetClass` etc. (@beta) ──
+	// Groups nets so a width/clearance rule can be applied to the whole class.
+	// Pair 'pcb net-class create' with 'pcb net-rules-set' to actually assign the
+	// rule — net class is just the grouping, the rule still lives in net rules.
+	{
+		// pcb net-class (list) — alias for read.
+		pcb.AddCommand(&cobra.Command{
+			Use:   "net-class",
+			Short: "Net class (网络类) CRUD: list / create / delete / rename / add-net / remove-net",
+			Args:  cobra.NoArgs,
+			Long: `Net class (网络类) management. Subcommands:
+  list        — show every class with member nets + color
+  create      — create a new class (+ initial members + color)
+  delete      — delete a class by name (member nets are ungrouped, NOT removed)
+  rename      — rename a class
+  add-net     — add one or more nets to a class
+  remove-net  — remove one or more nets from a class
+
+All wrap @beta eda.pcb_Drc.* APIs. A net class is just the GROUPING — to
+actually assign a width/clearance rule, pair 'create'/'add-net' with
+'pcb net-rules-set' / 'pcb net-rule'.`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return dispatch(cfg, "pcb.netclass.list", window, nil, stdout, stderr)
+			},
+		})
+		pcb.AddCommand(&cobra.Command{
+			Use:   "net-class-list",
+			Short: "List every net class (网络类) — alias for 'pcb net-class'",
+			Args:  cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return dispatch(cfg, "pcb.netclass.list", window, nil, stdout, stderr)
+			},
+		})
+
+		{
+			var name string
+			var nets []string
+			var color string
+			c := &cobra.Command{
+				Use:   "net-class-create",
+				Short: "Create a net class (网络类) — named group of nets that can share a width/clearance rule",
+				Args:  cobra.NoArgs,
+				Long: `Create a net class (网络类). Pair with 'pcb net-rules-set' / 'pcb net-rule'
+to actually assign a width/clearance rule to the class's nets — creating the
+class just groups them. Wraps eda.pcb_Drc.createNetClass(name, nets, color)
+(@beta). 'color' may be a #rrggbb string; empty = platform default. No-op
+(returns false) if a class of the same name already exists.`,
+				Example: `  easyeda pcb net-class-create --name USB --nets USB_DP,USB_DM
+  easyeda pcb net-class-create --name Power --nets +3V3,+5V --color #ff0000`,
+				RunE: func(cmd *cobra.Command, args []string) error {
+					if name == "" {
+						return fmt.Errorf("--name is required")
+					}
+					payload := map[string]any{"name": name}
+					if len(nets) > 0 {
+						payload["nets"] = nets
+					}
+					if cmd.Flags().Changed("color") {
+						payload["color"] = color
+					}
+					return dispatch(cfg, "pcb.netclass.create", window, payload, stdout, stderr)
+				},
+			}
+			c.Flags().StringVar(&name, "name", "", "net class name (required)")
+			c.Flags().StringSliceVar(&nets, "nets", nil, "initial member net names (repeatable or comma-separate)")
+			c.Flags().StringVar(&color, "color", "", "class color (#rrggbb string; empty = platform default)")
+			pcb.AddCommand(c)
+		}
+
+		{
+			var name string
+			c := &cobra.Command{
+				Use:   "net-class-delete",
+				Short: "Delete a net class (网络类) by name — member nets are ungrouped, their per-net rules are NOT removed",
+				Args:  cobra.NoArgs,
+				Long: `Delete a net class (网络类) by name. Member nets are ungrouped — their
+per-net DRC rules, if any, are NOT removed (use 'pcb net-rules-set
+--remove-nets' for that). Wraps eda.pcb_Drc.deleteNetClass(name) (@beta).`,
+				Example: `  easyeda pcb net-class-delete --name USB`,
+				RunE: func(cmd *cobra.Command, args []string) error {
+					if name == "" {
+						return fmt.Errorf("--name is required")
+					}
+					return dispatch(cfg, "pcb.netclass.delete", window, map[string]any{"name": name}, stdout, stderr)
+				},
+			}
+			c.Flags().StringVar(&name, "name", "", "net class name to delete (required)")
+			pcb.AddCommand(c)
+		}
+
+		{
+			var name, newName string
+			c := &cobra.Command{
+				Use:   "net-class-rename",
+				Short: "Rename a net class (网络类)",
+				Args:  cobra.NoArgs,
+				Long: `Rename a net class (网络类). Wraps
+eda.pcb_Drc.modifyNetClassName(originalName, newName) (@beta). Fails if the
+original doesn't exist or the new name collides with an existing class.`,
+				Example: `  easyeda pcb net-class-rename --name USB --new-name USB_PAIR`,
+				RunE: func(cmd *cobra.Command, args []string) error {
+					if name == "" || newName == "" {
+						return fmt.Errorf("--name and --new-name are both required")
+					}
+					return dispatch(cfg, "pcb.netclass.rename", window, map[string]any{"name": name, "newName": newName}, stdout, stderr)
+				},
+			}
+			c.Flags().StringVar(&name, "name", "", "current net class name (required)")
+			c.Flags().StringVar(&newName, "new-name", "", "new net class name (required)")
+			pcb.AddCommand(c)
+		}
+
+		{
+			var name string
+			var nets []string
+			c := &cobra.Command{
+				Use:   "net-class-add-net",
+				Short: "Add one or more nets to an existing net class (网络类)",
+				Args:  cobra.NoArgs,
+				Long: `Add one or more nets to an existing net class (网络类). Wraps
+eda.pcb_Drc.addNetToNetClass(name, net | nets) (@beta). Idempotent — adding
+an already-member net is a no-op.`,
+				Example: `  easyeda pcb net-class-add-net --name USB --nets USB_DP,USB_DM`,
+				RunE: func(cmd *cobra.Command, args []string) error {
+					if name == "" {
+						return fmt.Errorf("--name is required")
+					}
+					if len(nets) == 0 {
+						return fmt.Errorf("--nets is required")
+					}
+					return dispatch(cfg, "pcb.netclass.add_net", window, map[string]any{"name": name, "nets": nets}, stdout, stderr)
+				},
+			}
+			c.Flags().StringVar(&name, "name", "", "net class name (required)")
+			c.Flags().StringSliceVar(&nets, "nets", nil, "net name(s) to add (required; repeatable or comma-separate)")
+			pcb.AddCommand(c)
+		}
+
+		{
+			var name string
+			var nets []string
+			c := &cobra.Command{
+				Use:   "net-class-remove-net",
+				Short: "Remove one or more nets from a net class (网络类) — removing the last member does NOT delete the class",
+				Args:  cobra.NoArgs,
+				Long: `Remove one or more nets from a net class (网络类). Wraps
+eda.pcb_Drc.removeNetFromNetClass(name, net | nets) (@beta). Removing the
+last member does NOT delete the class — pair with 'pcb net-class-delete' to
+remove an empty class.`,
+				Example: `  easyeda pcb net-class-remove-net --name USB --nets USB_DP,USB_DM`,
+				RunE: func(cmd *cobra.Command, args []string) error {
+					if name == "" {
+						return fmt.Errorf("--name is required")
+					}
+					if len(nets) == 0 {
+						return fmt.Errorf("--nets is required")
+					}
+					return dispatch(cfg, "pcb.netclass.remove_net", window, map[string]any{"name": name, "nets": nets}, stdout, stderr)
+				},
+			}
+			c.Flags().StringVar(&name, "name", "", "net class name (required)")
+			c.Flags().StringSliceVar(&nets, "nets", nil, "net name(s) to remove (required; repeatable or comma-separate)")
+			pcb.AddCommand(c)
+		}
+	}
+
 	// ── track / via (copper routing) ───────────────────────────────────────
 	// pcb.line.create / pcb.via.create — real routing primitives. Bind to a net
 	// by NAME (pull from `pcb nets`); layer ids from `pcb layers`. No PCB autosave
